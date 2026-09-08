@@ -5,7 +5,7 @@ is 3,693 ft with 91% of both kerbs traced - the survey is four times ahead of wh
 and a corridor drawing made from leg paint shows a protected bikeway appearing and vanishing
 three times along a street it is supposed to run the length of.
 
-WHY NOT JUST CARRY THE LEGS FURTHER. At HOPEWELL_FRAME_SCALE=2.5 the legs reach 325-425 ft and
+WHY NOT JUST CARRY THE LEGS FURTHER. At ROAD_SKETCHES_FRAME_SCALE=2.5 the legs reach 325-425 ft and
 the junction still builds; at 4 and 5 it DOES NOT BUILD AT ALL. Four legs each carrying their
 own full-width envelope out of one node have envelopes that cross once they are long enough and
 the street bends. The corner-fillet model is the ceiling, at roughly a tenth of the corridor.

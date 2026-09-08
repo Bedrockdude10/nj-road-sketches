@@ -38,7 +38,7 @@ It writes the same files the phase scripts do, runs sites in parallel (`--jobs`)
                          OSM cache: 1 layer(s), oldest 3 days old (--refresh-osm to re-pull)
 ```
 
-`--refresh-osm` re-pulls the whole borough in **one** request before the worker pool starts, rather than 20-24 fanned out across four workers against shared volunteer infrastructure. It is ignored under `HOPEWELL_OFFLINE`, so it can never make the test suite reach the network.
+`--refresh-osm` re-pulls the whole borough in **one** request before the worker pool starts, rather than 20-24 fanned out across four workers against shared volunteer infrastructure. It is ignored under `ROAD_SKETCHES_OFFLINE`, so it can never make the test suite reach the network.
 
 Two more scripts read a whole corridor rather than one junction: `scripts/corridor_report.py` answers the corridor questions with the coverage of each answer beside it, and `scripts/corridor_render.py` draws a straightened strip plan of a whole street on stacked panels - of that street's OWN route decision, looked up by name, so Broad St gets its bikeway and Princeton Ave gets its calming.
 
@@ -55,7 +55,7 @@ The test tooling (`ruff`, `pytest-regressions`, `hypothesis`) is in `requirement
 Facts worth knowing before a failure surprises you:
 
 - **Order is shuffled every run** (pytest-randomly), which is how you find out whether the session-scoped `site_models` fixture is as read-only as it claims. The header prints `Using --randomly-seed=N` and `./scripts/test.sh --randomly-seed=N` replays it. (`pytest.ini` sets `-q`, which hides that header — CI runs without it for this reason.)
-- **No network.** The suite runs against a committed snapshot of the OSM responses in `tests/fixtures/osm_cache/`, and `HOPEWELL_OFFLINE=1` makes any un-snapshotted fetch fail loudly. That snapshot is **separate from the build cache and does not update itself**: after editing OSM, `cp output/.cache/borough_*.json tests/fixtures/osm_cache/` as well as `--refresh-osm`.
+- **No network.** The suite runs against a committed snapshot of the OSM responses in `tests/fixtures/osm_cache/`, and `ROAD_SKETCHES_OFFLINE=1` makes any un-snapshotted fetch fail loudly. That snapshot is **separate from the build cache and does not update itself**: after editing OSM, `cp output/.cache/borough_*.json tests/fixtures/osm_cache/` as well as `--refresh-osm`.
 - **CI has no `data/`**, so every test that builds a real junction skips there — *including the golden geometry comparison*. A green tick means the code is sound, not that the renders are. The goldens are a local guard.
 - **`tests/test_lint.py`** runs `ruff` (per `ruff.toml`) over every `.py` file, reporting undefined names separately because they are a guaranteed crash, and `import-linter` (`.importlinter`) over the import *graph* for three rules no single file can show you: `scripts/blender/*` must not import this project or its venv; reading a `config.yaml` must not drag in shapely; and geometry must not import the output stages. Every `ignore` and every contract carries the argument for it.
 - **`tests/test_geometry_regression.py`** is a golden-file test over every site's scenarios. **A failure is not automatically a bug** — read the diff, confirm every moved number is one you meant to move, then `./scripts/test.sh tests/test_geometry_regression.py --force-regen` and commit the regenerated goldens *in the same commit as the change that moved them*.
@@ -217,9 +217,12 @@ scripts/
 Everything specific to one intersection lives under `sites/<name>/`; `src/` has no hardcoded site data. To add one:
 
 1. `python scripts/phase1_audit.py --street1 "Main St" --street2 "Oak Ave" --anchor "Main St, Sometown, NJ"` — resolves the intersection point via OSM and prints what the road network records there.
-2. Create `sites/<name>/config.yaml` (copy `sites/broad_st_greenwood/config.yaml`) — `center_wgs84` from step 1, `data_sources`, and one `legs` entry per approach with a `bearing_deg` (compass, 0=N/90=E/clockwise, from the intersection outward). That bearing is the **only** thing that has to be geometrically accurate for `src/geometry/intersection/` to tell the legs apart; nothing assumes 4 legs or perpendicular roads, so 3-way/5-way/skewed junctions all work the same way. `sites/README.md` documents every key.
-3. Create `sites/<name>/scenarios.py` exposing `build_demo_scenario(baseline) -> DesignState`.
-4. Run the Quick start commands with `--site <name>`.
+2. If the site is in a town this project has no OSM snapshot of, add one line to `sites/osm_areas.yaml` — a bbox with margin for the context radius. One download, and nothing already cached moves. (`SiteOutsideSnapshotError` names this file if you skip it.)
+3. Create `sites/<name>/config.yaml` (copy `sites/broad_st_greenwood/config.yaml`) — `center_wgs84` from step 1, `data_sources`, and one `legs` entry per approach with a `bearing_deg` (compass, 0=N/90=E/clockwise, from the intersection outward). That bearing is the **only** thing that has to be geometrically accurate for `src/geometry/intersection/` to tell the legs apart; nothing assumes 4 legs or perpendicular roads, so 3-way/5-way/skewed junctions all work the same way. `sites/README.md` documents every key.
+4. Create `sites/<name>/scenarios.py` exposing `build_demo_scenario(baseline) -> DesignState`.
+5. Run the Quick start commands with `--site <name>`.
+
+A site in another **county** needs no code either: `data_sources:` names that county's parcels and MOD-IV tax list (statewide NJDOT roads are already shared), and `scripts/make_data_fixture.py` clips whatever files the configured sites name, so a two-county fixture is the normal case. A site in another **town** needs `intersection.municipality`, which is half the key a route-level proposal is looked up by — `route_decision_for(street, town)`. A street with no decision for that town gets none, rather than borrowing the neighbouring town's.
 
 Editing a `config.yaml` means rerunning from Phase 2 onward; Phase 1 does not depend on it. Phase 4 shells out to Blender (its own bundled Python, no network, none of this project's packages) — needs Blender on `PATH`, or set `BLENDER_BIN`; defaults to `/Applications/Blender.app/Contents/MacOS/Blender` on Mac.
 

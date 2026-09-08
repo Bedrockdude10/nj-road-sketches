@@ -391,7 +391,7 @@ minimum being spent, not a NACTO width** — which leaves 10.09 ft travel lanes,
 
 **WHICH OTHER APPROACHES REACH IT DEPENDS ON HOW MUCH STREET THE SHEET SHOWS — measured
 2026-08-21.** A section is sized on the narrowest half-width anywhere along the leg that is drawn,
-and `HOPEWELL_FRAME_SCALE` decides how far that is, so a longer sheet can reach a pinch the short
+and `ROAD_SKETCHES_FRAME_SCALE` decides how far that is, so a longer sheet can reach a pinch the short
 one never shows. `w_broad_st_southwest` has one 318 ft out:
 
 | sheet | leg drawn | `w_broad_st_northeast` | `w_broad_st_southwest` |

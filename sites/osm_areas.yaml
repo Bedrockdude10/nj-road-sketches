@@ -1,0 +1,21 @@
+# ONE DOWNLOAD PER TOWN. Each area is pulled from the OSM API once and cached separately
+# (src/sources/osm_context.py), and a site is served from whichever area FULLY contains its
+# context window. Adding a town here is the whole OSM half of porting this project to it: a
+# new area costs one download and disturbs nothing already cached, because the cache key is a
+# hash of the bbox and no existing bbox moves.
+#
+# This is a list of PLACES, which is why it lives beside the sites rather than in src/. Nothing
+# in src/ knows the names below; it only knows that a site must fall inside one of them.
+#
+# Each bbox is west, south, east, north in WGS84 degrees, with margin for the context radii of
+# the sites inside it (up to 250 m), and far under the OSM API's 0.25 sq deg per-call limit -
+# both of which src/sources/osm_context.py:_load_snapshot_areas checks on load, so a mistyped
+# bbox is refused here rather than four layers downstream as an empty result.
+#
+# DO NOT EDIT AN EXISTING BBOX to make room for a new site. The cache key is a hash of the exact
+# tuple, so widening one re-keys it: every site in that town re-downloads and the committed
+# fixture in tests/fixtures/osm_cache/ stops matching, which does not fail - it SKIPS, and the
+# suite goes quietly green over nothing. Add a separate area instead.
+
+hopewell_borough: [-74.7760, 40.3830, -74.7500, 40.3970]     # 0.000364 sq deg
+pennington_borough: [-74.8120, 40.3180, -74.7830, 40.3420]   # 0.000696 sq deg

@@ -74,7 +74,7 @@ def blender_job_limit(requested: int | None = None) -> int:
 # Name of the environment variable blender_scene.py reads its resolution multiplier from.
 # Defined here as well so callers (scripts/build_all.py) do not have to spell the string, and
 # so grep finds both ends of it. See blender_scene.render_scale for the meaning and the cap.
-RENDER_SCALE_ENV = "HOPEWELL_RENDER_SCALE"
+RENDER_SCALE_ENV = "ROAD_SKETCHES_RENDER_SCALE"
 
 
 def render_all(blender_bin: str, jobs: list[tuple[Path, Path]]):

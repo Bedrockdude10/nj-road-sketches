@@ -65,6 +65,13 @@ class DataSources(Strict):
 
 class Intersection(Strict):
     name: str
+    #: WHICH TOWN THIS JUNCTION IS IN, spelled the way the corridor decisions spell it
+    #: (src/geometry/treatments/corridor.py:ROUTE_DECISIONS). Required, and not parsed out of
+    #: `name`, because it is a JOIN KEY rather than a caption: a route decision is looked up by
+    #: (street, municipality), and street names repeat between towns - almost every New Jersey
+    #: borough has a Broad Street. Derived from prose it would be derived wrongly exactly once,
+    #: and the symptom would be one town's bikeway drawn down another town's street.
+    municipality: Sourced
     center_wgs84: tuple[float, float]
     street1: str
     street2: str

@@ -18,6 +18,9 @@ data_sources:
 
 intersection:
   name: "Columbia Ave & Princeton Ave (CR 569), Hopewell Borough, NJ 08525"
+  # The town this junction is in, and the key a corridor decision is looked up by
+  # (src/geometry/treatments/corridor.py) - street names repeat between towns.
+  municipality: "Hopewell Borough"
   center_wgs84: [-74.7577601, 40.3891689]
   street1: "Columbia Avenue"
   street2: "Princeton Avenue"

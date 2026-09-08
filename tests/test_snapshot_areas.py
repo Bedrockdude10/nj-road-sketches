@@ -15,7 +15,8 @@ import pytest
 from shapely.geometry import Point
 
 from src.sources.osm_context import (SNAPSHOT_AREAS, SiteOutsideSnapshotError,
-                                      _area_for, _snapshot_path, assert_within_snapshot)
+                                      _area_for, _load_snapshot_areas, _snapshot_path,
+                                      assert_within_snapshot)
 
 HOPEWELL_BBOX = (-74.7760, 40.3830, -74.7500, 40.3970)
 BROAD_AND_GREENWOOD = Point(-74.7614, 40.3893)
@@ -61,3 +62,55 @@ def test_a_window_straddling_an_edge_is_refused_not_half_served():
 def test_a_site_well_inside_an_area_passes():
     assert_within_snapshot(BROAD_AND_GREENWOOD, 130)
     assert_within_snapshot(NJ31_AND_W_DELAWARE, 250)
+
+
+# --- the areas are declared in sites/osm_areas.yaml, so the file is a boundary too ---------
+
+def _areas_file(tmp_path, body: str):
+    path = tmp_path / "osm_areas.yaml"
+    path.write_text(body)
+    return path
+
+
+def test_the_declared_areas_are_the_ones_in_the_yaml():
+    """The list of towns is data beside the sites, not a literal in src/ - porting this project
+    to another municipality is one entry here and one download."""
+    import yaml
+
+    from src.sources.osm_context import SNAPSHOT_AREAS_FILE
+
+    declared = yaml.safe_load(SNAPSHOT_AREAS_FILE.read_text())
+    assert {name: tuple(bbox) for name, bbox in declared.items()} == SNAPSHOT_AREAS
+
+
+def test_a_reversed_bbox_is_refused_at_load(tmp_path):
+    """A bbox typed south-north or east-west the wrong way round CONTAINS NOTHING, so every site
+    in that town is refused with a message about the site - which sends the reader to look at a
+    junction that is fine. Caught where the tuple is read instead."""
+    path = _areas_file(tmp_path, "lavallette: [-74.0600, 39.9800, -74.0700, 39.9700]\n")
+    with pytest.raises(ValueError) as raised:
+        _load_snapshot_areas(path)
+    assert "lavallette" in str(raised.value)
+
+
+def test_an_area_over_the_apis_limit_is_refused_at_load(tmp_path):
+    """The other way a bbox goes wrong: a digit dropped makes it enormous, and the OSM API
+    refuses a /map call over 0.25 sq deg - at download time, which is the far end of the
+    afternoon someone spent tracing kerbs."""
+    path = _areas_file(tmp_path, "whole_state: [-75.6, 38.9, -73.9, 41.4]\n")
+    with pytest.raises(ValueError) as raised:
+        _load_snapshot_areas(path)
+    assert "sq deg" in str(raised.value)
+
+
+def test_every_site_this_project_models_falls_inside_an_area():
+    """The porting check: a new site whose town has no snapshot area is refused at build time
+    with a message about the area, and this says the same thing for the whole set at once."""
+    from shapely.geometry import Point as _Point
+
+    from src.site import list_sites, load_site_config
+
+    for site in list_sites():
+        config = load_site_config(site)
+        lon, lat = config["intersection"]["center_wgs84"]
+        assert_within_snapshot(_Point(lon, lat), config["intersection"]["clip_radius_m"])

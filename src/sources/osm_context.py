@@ -18,12 +18,12 @@ from src.geometry.model import buffer_point_wgs84
 DEFAULT_BUILDING_HEIGHT_M = 7.0  # ~2 stories, typical for small-borough Main St buildings
 METERS_PER_LEVEL = 3.0
 # Where fetched OSM responses are cached. Overridable so the test suite can point at a
-# committed fixture set and run hermetically - see tests/conftest.py and HOPEWELL_OFFLINE.
+# committed fixture set and run hermetically - see tests/conftest.py and ROAD_SKETCHES_OFFLINE.
 CACHE_DIR = Path(os.environ.get(
-    "HOPEWELL_OSM_CACHE",
+    "ROAD_SKETCHES_OSM_CACHE",
     Path(__file__).resolve().parent.parent.parent / "output" / ".cache"))
 
-REFRESH_ENV = "HOPEWELL_REFRESH_OSM"
+REFRESH_ENV = "ROAD_SKETCHES_REFRESH_OSM"
 
 # Second-level cache: the raw borough snapshot and its parsed form. A batch build asks for
 # the same junction's kerbs ~27 times over; re-parsing the same JSON each time is pure waste.
@@ -44,14 +44,14 @@ _warned: set[str] = set()
 def refresh_requested() -> bool:
     """True when this process was told to ignore the cache and re-pull from Overpass.
 
-    Refusing while HOPEWELL_OFFLINE is set is not politeness: the test suite runs against
+    Refusing while ROAD_SKETCHES_OFFLINE is set is not politeness: the test suite runs against
     the committed fixture cache, and honouring a stray refresh there would turn every fetch
     into an OfflineCacheMiss.
     """
     if not os.environ.get(REFRESH_ENV):
         return False
-    if os.environ.get("HOPEWELL_OFFLINE"):
-        _warn_once(f"{REFRESH_ENV} ignored: HOPEWELL_OFFLINE is set, so the cached responses "
+    if os.environ.get("ROAD_SKETCHES_OFFLINE"):
+        _warn_once(f"{REFRESH_ENV} ignored: ROAD_SKETCHES_OFFLINE is set, so the cached responses "
                    f"in {CACHE_DIR} are all this process is allowed to see.")
         return False
     return True
@@ -141,16 +141,50 @@ OSM_API_MAP = "https://api.openstreetmap.org/api/0.6/map.json"
 # and disturbs nothing already cached (the cache key is a hash of the bbox, so re-keying
 # would re-download every existing site and orphan committed fixtures).
 #
-# Each bbox has margin for the context radii (up to 250 m) at the sites inside it, and each is
-# far under the API's 0.25 sq deg limit. Sites in NO area are refused loudly rather than
-# silently returning nothing - see assert_within_snapshot.
-SNAPSHOT_AREAS: dict[str, tuple[float, float, float, float]] = {
-    # west, south, east, north
-    "hopewell_borough": (-74.7760, 40.3830, -74.7500, 40.3970),    # 0.000364 sq deg
-    "pennington_borough": (-74.8120, 40.3180, -74.7830, 40.3420),  # 0.000696 sq deg
-}
+# THE AREAS THEMSELVES ARE NOT DECLARED HERE. They are a list of towns - the same kind of fact
+# as which junctions this project studies - so they live in sites/osm_areas.yaml and porting to
+# a new municipality touches no module. Sites in NO area are refused loudly rather than
+# silently returning nothing; see assert_within_snapshot.
+SNAPSHOT_AREAS_FILE = Path(__file__).resolve().parents[2] / "sites" / "osm_areas.yaml"
 
-# The Hopewell bbox under its old name. Kept because the cache key is a hash of this exact
+# The OSM API refuses a /map call bigger than this, and a bbox typed with a sign or a digit
+# wrong is usually enormous - so the check that catches the typo is the API's own limit.
+MAX_SNAPSHOT_SQ_DEG = 0.25
+
+
+def _load_snapshot_areas(path: Path = SNAPSHOT_AREAS_FILE) -> dict:
+    """{town: (west, south, east, north)} from sites/osm_areas.yaml, validated on load.
+
+    Validated because every way a bbox can be wrong reads downstream as "nothing mapped here":
+    an inverted or degenerate rectangle contains no site (so every site is refused with a
+    message about the site), and one over the API's size limit fails at download time, hours of
+    tracing later. Both are cheap to catch at the only moment the tuple is read.
+    """
+    import yaml
+
+    raw = yaml.safe_load(path.read_text()) or {}
+    areas = {}
+    for name, bbox in raw.items():
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            raise ValueError(f"{path.name}: {name} must be [west, south, east, north], got {bbox!r}")
+        west, south, east, north = (float(v) for v in bbox)
+        if not (east > west and north > south):
+            raise ValueError(
+                f"{path.name}: {name} is not a rectangle running west->east and south->north "
+                f"({west}, {south}, {east}, {north}). A reversed bbox contains no site, so every "
+                f"site in this town would be refused as though it were somewhere else.")
+        if (east - west) * (north - south) > MAX_SNAPSHOT_SQ_DEG:
+            raise ValueError(
+                f"{path.name}: {name} is {(east - west) * (north - south):.3f} sq deg, over the "
+                f"OSM API's {MAX_SNAPSHOT_SQ_DEG} sq deg limit for one /map call - it would be "
+                f"refused at download. Split the town into smaller areas.")
+        areas[name] = (west, south, east, north)
+    return areas
+
+
+SNAPSHOT_AREAS: dict[str, tuple[float, float, float, float]] = _load_snapshot_areas()
+
+# The Hopewell bbox, still reachable by name. Kept because the cache key is a hash of this exact
 # tuple and the committed fixture is named after it - see test_hopewells_cache_key_is_unchanged.
 BOROUGH_BBOX = SNAPSHOT_AREAS["hopewell_borough"]
 
@@ -183,16 +217,17 @@ def _area_for(center_wgs84: Point, radius_m: float) -> tuple[float, float, float
     raise SiteOutsideSnapshotError(
         f"this site's {radius_m:.0f} m context window ({west:.5f},{south:.5f},{east:.5f},"
         f"{north:.5f}) is not fully inside any downloaded snapshot area. Areas: {areas}. "
-        f"Add one for this site to SNAPSHOT_AREAS in src/sources/osm_context.py - a new area "
-        f"is a separate download and leaves every existing cache and fixture untouched.")
+        f"Add one for this site to {SNAPSHOT_AREAS_FILE.parent.name}/{SNAPSHOT_AREAS_FILE.name} "
+        f"(SNAPSHOT_AREAS) - a new area is a separate download and leaves every existing "
+        f"cache and fixture untouched.")
 
 
 def _download_snapshot(bbox: tuple | None = None) -> list[dict]:
     """One whole snapshot area from the OSM API, falling back to Overpass."""
-    if os.environ.get("HOPEWELL_OFFLINE"):
+    if os.environ.get("ROAD_SKETCHES_OFFLINE"):
         from src.sources.data_loader import OfflineCacheMiss
         raise OfflineCacheMiss(
-            "HOPEWELL_OFFLINE is set and the snapshot for this area is not in the fixture "
+            "ROAD_SKETCHES_OFFLINE is set and the snapshot for this area is not in the fixture "
             "cache. Refresh it with: cp output/.cache/borough_*.json tests/fixtures/osm_cache/")
 
     west, south, east, north = BOROUGH_BBOX if bbox is None else bbox

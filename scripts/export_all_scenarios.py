@@ -14,7 +14,7 @@ here.
 
 Offline and against the committed OSM fixture, so it is reproducible:
 
-    HOPEWELL_OFFLINE=1 HOPEWELL_OSM_CACHE=tests/fixtures/osm_cache PYTHONPATH=. \\
+    ROAD_SKETCHES_OFFLINE=1 ROAD_SKETCHES_OSM_CACHE=tests/fixtures/osm_cache PYTHONPATH=. \\
         .venv/bin/python scripts/export_all_scenarios.py /tmp/before
 
 A site or scenario that will not export is reported by name at the end and the run carries

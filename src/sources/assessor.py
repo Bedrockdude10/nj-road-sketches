@@ -80,7 +80,7 @@ def storeys_by_pin(tax_list_path: str | Path) -> dict[str, float]:
     """{PIN: storeys} for every parcel the assessor describes as having a storeyed building."""
     from src.sources.data_loader import resolve_data_path   # local, like parcels_near_buildings below
 
-    # Through the same re-rooting as every other layer, so HOPEWELL_DATA_DIR does not leave the
+    # Through the same re-rooting as every other layer, so ROAD_SKETCHES_DATA_DIR does not leave the
     # heights reading the county file while the geometry reads the clip.
     path = resolve_data_path(tax_list_path)
     if not path.exists():

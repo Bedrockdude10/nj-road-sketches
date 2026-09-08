@@ -1,7 +1,7 @@
 """A crossing the surveyor traced inside the frame is drawn, and drawn from its own geometry.
 
 Every test here is one half of the defect docs/network-renderer-plan.md measures at Broad &
-Greenwood with HOPEWELL_FRAME_SCALE=2.5 - 10 traced crossings inside a 431.2 ft frame, 4 of them
+Greenwood with ROAD_SKETCHES_FRAME_SCALE=2.5 - 10 traced crossings inside a 431.2 ft frame, 4 of them
 drawn, the 4 that happen to match this junction's modelled legs:
 
   * WHAT IS COLLECTED. The frame decides, not the legs. At 1x Greenwood's frame contains exactly

@@ -710,7 +710,7 @@ def test_the_facility_covers_the_street_it_is_drawn_on(scale):
     """A bikeway runs the whole kerb it is placed on, at whatever width the sheet is.
 
     THIS IS THE PROPERTY THE FRAME-INVARIANT RUNG WAS TRADED FOR, and it is worth more. Sections
-    used to be sized over a configured span while being drawn over HOPEWELL_FRAME_SCALE times it,
+    used to be sized over a configured span while being drawn over ROAD_SKETCHES_FRAME_SCALE times it,
     so which rung a leg took could not move with the sheet - and the 195 ft nobody had measured
     had its paint trimmed off at the first station the section stopped fitting. broad_st_east
     carried green over 180 ft of a 425 ft leg, under 42 flex posts and a centre stripe that both
@@ -766,7 +766,7 @@ def test_the_design_span_is_the_surveyed_one_not_the_sheets(site_models, wide_si
 
     This is the bug class in one assertion. A facility's rung is chosen over a span
     (corridor_paint._collect takes the governing cross-section of each run), so if the span moves
-    with HOPEWELL_FRAME_SCALE then the render viewport is voting on the design - which is how W
+    with ROAD_SKETCHES_FRAME_SCALE then the render viewport is voting on the design - which is how W
     Broad's southwest approach carried a protected lane at 2.5x and nothing at all at 3x.
 
     The leak was that a corridor's EXTENSIONS were measured from the end of a junction piece, and a
@@ -943,7 +943,8 @@ def test_a_station_that_refuses_the_section_costs_the_tail_and_not_the_approach(
 
     # The full rung with no fallback under it, so where the street pinches there is nowhere to go.
     one_rung = CorridorFacility(
-        road=BROAD_ST_TWO_WAY_BIKEWAY.road, side=BROAD_ST_TWO_WAY_BIKEWAY.side,
+        road=BROAD_ST_TWO_WAY_BIKEWAY.road, municipality=BROAD_ST_TWO_WAY_BIKEWAY.municipality,
+        side=BROAD_ST_TWO_WAY_BIKEWAY.side,
         sections=(Section(MIN_TWO_WAY_BIKE_LANE_FT, TWO_WAY_BIKE_LANE_BUFFER_FT),))
     state = DesignState.from_model(model)
     with contextlib.redirect_stdout(io.StringIO()):
@@ -1247,7 +1248,8 @@ def test_every_route_decision_is_found_by_the_street_it_names(corridors):
     """
     from src.geometry.treatments import ROUTE_DECISIONS, route_decision_for
 
-    by_name = {corridor.name: route_decision_for(corridor.name) for corridor in corridors}
+    by_name = {corridor.name: route_decision_for(corridor.name, corridor.municipalities[0])
+               for corridor in corridors}
     for decision in ROUTE_DECISIONS:
         matched = [name for name, found in by_name.items() if found is decision]
         assert len(matched) == 1, (
@@ -1256,4 +1258,39 @@ def test_every_route_decision_is_found_by_the_street_it_names(corridors):
             f"exactly one: {sorted(by_name)}")
     # And a street nobody has decided about answers None rather than borrowing a neighbour's
     # design - the caller prints "no route decision declared" off exactly this.
-    assert route_decision_for("Elm Ridge Road") is None
+    assert route_decision_for("Elm Ridge Road", "Hopewell Borough") is None
+    # AND THE SAME STREET NAME IN ANOTHER TOWN IS ANOTHER STREET. Broad Street is the commonest
+    # street name in New Jersey; a name-only lookup would hand the next borough modelled this
+    # borough's two-way bikeway, drawn correctly and about the wrong road.
+    assert route_decision_for("Broad Street", "Lavallette Borough") is None
+
+
+def test_a_route_decision_stops_at_the_town_line():
+    """A ROUTE IS (STREET, TOWN), NOT A STREET NAME.
+
+    Broad Street is the commonest street name in New Jersey. Matched on name alone, the day a
+    second municipality is modelled its Broad Street approaches take this borough's two-way
+    bikeway - a real section, correctly drawn, placed on a street nobody proposed it for, and
+    with nothing in the output to say which town's decision it came from. The gate is in
+    legs_on rather than only in the lookup because a site's scenarios apply a decision object
+    directly, without going through route_decision_for at all.
+    """
+    from types import SimpleNamespace
+
+    from src.geometry.treatments.corridor import BROAD_ST_TWO_WAY_BIKEWAY
+
+    def junction(town):
+        return SimpleNamespace(
+            legs={"broad_st_east": object(), "broad_st_west": object()},
+            config={"intersection": {"municipality": town},
+                    "legs": {"broad_st_east": {"street_name": "East Broad Street"},
+                             "broad_st_west": {"street_name": "West Broad Street"}}})
+
+    assert BROAD_ST_TWO_WAY_BIKEWAY.legs_on(junction("Hopewell Borough")) == [
+        "broad_st_east", "broad_st_west"]
+    assert BROAD_ST_TWO_WAY_BIKEWAY.legs_on(junction("Lavallette Borough")) == []
+    # Spelling, not identity: the same town written with different case or padding is one town.
+    assert BROAD_ST_TWO_WAY_BIKEWAY.legs_on(junction(" hopewell borough ")) != []
+    # A township is NOT its borough - the names differ by the word that says which government
+    # this is, and _street_name (which strips a trailing type off a STREET) would equate them.
+    assert BROAD_ST_TWO_WAY_BIKEWAY.legs_on(junction("Hopewell Township")) == []

@@ -317,7 +317,7 @@ def build_scene(data: dict):
                            (b["vertices_m"] if b["mesh"] else b["coords"])]
     context_radius = max(max(all_x) - min(all_x), max(all_y) - min(all_y)) / 2
     # AND AT LEAST FOUR TIMES THE FRAME, because the camera can be asked to pull back further than
-    # the context reaches (src/render/frame.py's HOPEWELL_FRAME_SCALE, for a picture whose subject
+    # the context reaches (src/render/frame.py's ROAD_SKETCHES_FRAME_SCALE, for a picture whose subject
     # is longer than one junction). On a wide frame the ground ran out inside the shot and the
     # horizon showed the plane's own edge with sky under it - the buildings and pavement had all
     # been drawn correctly on a groundsheet too small for the view.
@@ -624,11 +624,18 @@ def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_siz
 # The render's own resolution, which --dpi does NOT control: that knob is matplotlib's and
 # reaches only the 2D plan views. Setting --dpi 300 and expecting sharper renders is the
 # obvious mistake and somebody made it, so there is now a knob for this too - a whole-number
-# multiple of the base size, from HOPEWELL_RENDER_SCALE (scripts/build_all.py --render-scale).
+# multiple of the base size, from ROAD_SKETCHES_RENDER_SCALE (scripts/build_all.py --render-scale).
 # A multiplier rather than a width/height pair keeps the camera framing and the 4:3 aspect
 # fixed, so scale 2 is the same picture with four times the pixels, not a different crop.
 BASE_RESOLUTION = (1920, 1440)
-RENDER_SCALE_ENV = "HOPEWELL_RENDER_SCALE"
+RENDER_SCALE_ENV = "ROAD_SKETCHES_RENDER_SCALE"
+# Its pre-rename name, refused rather than ignored - a stale HOPEWELL_RENDER_SCALE=2 would
+# render at 1 and say nothing, and an hour of Blender is a slow way to find that out. This
+# module runs under Blender's own Python and cannot import src, so the check is duplicated
+# here deliberately; src/sources/data_loader.py:RENAMED_ENV covers everything that can.
+if "HOPEWELL_RENDER_SCALE" in os.environ:
+    raise SystemExit("HOPEWELL_RENDER_SCALE was renamed to ROAD_SKETCHES_RENDER_SCALE and is "
+                     "no longer read - this render would silently come out at scale 1.")
 
 
 def render_scale() -> int:

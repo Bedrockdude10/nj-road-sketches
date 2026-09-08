@@ -1,6 +1,6 @@
 {
   "generated_by": "scripts/make_data_fixture.py",
-  "why": "data/ is a large third-party download kept out of git; these are the features the configured sites actually read. Read through HOPEWELL_DATA_DIR.",
+  "why": "data/ is a large third-party download kept out of git; these are the features the configured sites actually read. Read through ROAD_SKETCHES_DATA_DIR.",
   "pad_ft": 1320.0,
   "sites": [
     "broad_st_greenwood",

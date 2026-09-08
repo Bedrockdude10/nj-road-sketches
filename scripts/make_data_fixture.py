@@ -10,7 +10,7 @@ feet: the union of all six sites, padded a quarter-mile, is under a megabyte. te
 osm_cache already established the pattern for Overpass; this is the same trick for the two
 GIS layers and the tax list.
 
-THE CLIP IS READ THROUGH THE PRODUCTION LOADERS. HOPEWELL_DATA_DIR re-roots `data/...` paths
+THE CLIP IS READ THROUGH THE PRODUCTION LOADERS. ROAD_SKETCHES_DATA_DIR re-roots `data/...` paths
 (src/sources/data_loader.resolve_data_path) and nothing else changes: same pandera schemas, same
 CRS checks, same indexed-sibling swap. A separate "test data" code path would be a second datum
 for the same fact, which is the most expensive defect class this repo has.
@@ -23,7 +23,7 @@ features - a wrong measurement that looks right:
     convert_road_network.py). A clip that is not a byte-faithful subset is deleted, not kept.
   * FIXTURE.json records how far the clip reaches, and load_road_network/load_parcels raise
     FixtureExtentExceeded on a read that runs off the edge of it (or on an unbounded read).
-    Note the read bbox comes from each site's `clip_radius_m`, NOT from HOPEWELL_FRAME_SCALE -
+    Note the read bbox comes from each site's `clip_radius_m`, NOT from ROAD_SKETCHES_FRAME_SCALE -
     the frame scales leg lengths and the OSM context radius, not these two GIS reads - so
     editing clip_radius_m or adding a site is what makes the guard fire.
 
@@ -165,16 +165,39 @@ def _as_geoseries(bbox: tuple):
         f"{bbox[0]} {bbox[3]}, {bbox[0]} {bbox[1]}))"]).iloc[0]], crs=NJ_STATE_PLANE_FT)
 
 
-def clip_roads(out: Path, bbox: tuple) -> tuple[Path, Path, int]:
+def layer_sources(sites: list[str]) -> dict[str, list[Path]]:
+    """{"road_network"/"parcels"/"tax_list": [distinct files these sites read]}.
+
+    FROM THE CONFIGS, NOT FROM THREE FILENAMES WRITTEN HERE. Every site names its own layers
+    (sites/README.md, `data_sources:`), and a site in another county names another county's
+    parcels and MOD-IV rows - so a fixture built from hardcoded Mercer filenames would clip the
+    wrong file for it and, worse, clip it SUCCESSFULLY: the sites it does cover keep passing
+    while the new one silently reads a county it is not in. A list per layer, because two
+    counties in one fixture is the normal case the moment a second one is added.
+    """
+    found: dict[str, list[Path]] = {"road_network": [], "parcels": [], "tax_list": []}
+    for site in sites:
+        sources = load_site_config(site).get("data_sources") or {}
+        for layer, paths in found.items():
+            configured = sources.get(layer)
+            if not configured:
+                continue                       # tax_list is optional - see src/site_schema.py
+            path = ROOT_DIR / configured
+            if path not in paths:
+                paths.append(path)
+    return found
+
+
+def clip_roads(out: Path, bbox: tuple, source: Path) -> tuple[Path, Path, int]:
     """The roadway network, as FlatGeobuf - the format the loaders already prefer."""
-    source = _resolve_indexed_path(DATA_DIR / "NJ_Roadway_Network.geojson")
-    target = out / "NJ_Roadway_Network.fgb"
+    source = _resolve_indexed_path(source)
+    target = out / (source.stem + ".fgb")
     roads = gpd.read_file(source, bbox=bbox)
     roads.to_file(target, driver="FlatGeobuf")
     return source, target, len(roads)
 
 
-def clip_parcels(out: Path, bbox: tuple) -> tuple[Path, Path, int]:
+def clip_parcels(out: Path, bbox: tuple, source: Path) -> tuple[Path, Path, int]:
     """The parcels, as a shapefile with the source .prj copied over byte for byte.
 
     MercerCountyParcels.shp is a COMPOUND CRS whose WKT matches no EPSG code (see
@@ -182,23 +205,21 @@ def clip_parcels(out: Path, bbox: tuple) -> tuple[Path, Path, int]:
     ground. Copying it keeps the fixture's CRS textually identical to the county's, so the
     boundary check tests the same thing here as it does against the download.
     """
-    source = DATA_DIR / "MercerCountyParcels.shp"
-    target = out / "MercerCountyParcels.shp"
+    target = out / source.name
     parcels = gpd.read_file(source, bbox=_as_geoseries(bbox), columns=list(PARCEL_COLUMNS))
     parcels.to_file(target, driver="ESRI Shapefile")
     shutil.copyfile(source.with_suffix(".prj"), target.with_suffix(".prj"))
     return source, target, len(parcels)
 
 
-def clip_tax_list(out: Path, pins: set[str]) -> tuple[Path, Path, int]:
+def clip_tax_list(out: Path, pins: set[str], source: Path) -> tuple[Path, Path, int]:
     """The MOD-IV rows for the clipped parcels, as a standalone .dbf.
 
     Only GIS_PIN and BLDG_DESC: those are the two columns assessor.py reads and TaxListSchema
     declares, and the other 100-odd carry owner names and sale prices that have no business in
     a public fixture. The schemas are strict=False on the column SET by design.
     """
-    source = DATA_DIR / "MercerTaxList.dbf"
-    target = out / "MercerTaxList.dbf"
+    target = out / source.name
     rows = gpd.read_file(source, columns=list(TAX_COLUMNS))
     kept = pd.DataFrame(rows.drop(columns="geometry", errors="ignore"))
     kept = kept[kept["GIS_PIN"].astype("string").str.strip().isin(pins)]
@@ -232,42 +253,49 @@ def main() -> int:
 
     started = time.perf_counter()
     written: dict[str, dict] = {}
-    road_source, road_target, n_roads = clip_roads(out, roads_bbox)
-    print(f"  roads:   {n_roads} features")
-    parcel_source, parcel_target, n_parcels = clip_parcels(out, parcels_bbox)
-    print(f"  parcels: {n_parcels} polygons")
-    pins = {str(p).strip() for p in gpd.read_file(parcel_target)["PAMS_PIN"].dropna()}
-    tax_source, tax_target, n_tax = clip_tax_list(out, pins)
-    print(f"  tax:     {n_tax} rows for {len(pins)} parcels")
+    sources = layer_sources(sites)
+    # ONE PASS PER DISTINCT FILE, and the tax rows are filtered by the PINs of the parcels
+    # actually clipped - so a two-county fixture keeps each county's rows against its own
+    # parcels rather than crossing them.
+    clipped: list[tuple[str, Path, object, Path, list[str] | None]] = []
+    pins: set[str] = set()
+    for source in sources["road_network"]:
+        road_source, road_target, n_roads = clip_roads(out, roads_bbox, source)
+        print(f"  roads:   {n_roads} features from {road_source.name}")
+        clipped.append(("roads", road_source, roads_bbox, road_target, None))
+    for source in sources["parcels"]:
+        parcel_source, parcel_target, n_parcels = clip_parcels(out, parcels_bbox, source)
+        print(f"  parcels: {n_parcels} polygons from {parcel_source.name}")
+        clipped.append(("parcels", parcel_source, _as_geoseries(parcels_bbox), parcel_target,
+                        list(PARCEL_COLUMNS)))
+        pins |= {str(pin).strip() for pin in gpd.read_file(parcel_target)["PAMS_PIN"].dropna()}
+    for source in sources["tax_list"]:
+        tax_source, tax_target, n_tax = clip_tax_list(out, pins, source)
+        print(f"  tax:     {n_tax} rows for {len(pins)} parcels from {tax_source.name}")
+        clipped.append(("tax", tax_source, None, tax_target, list(TAX_COLUMNS)))
 
     print("Verifying each clip is a faithful subset of the source...")
-    checks = [
-        ("roads", road_source, roads_bbox, road_target, None),
-        ("parcels", parcel_source, _as_geoseries(parcels_bbox), parcel_target, list(PARCEL_COLUMNS)),
-        ("tax", tax_source, None, tax_target, list(TAX_COLUMNS)),
-    ]
-    for name, source, bbox, target, columns in checks:
+    for name, source, bbox, target, columns in clipped:
         if name == "tax":
             continue      # a PIN filter, not a bbox clip - checked by the join test instead
         if not verify_identical(source, bbox, target, columns):
             for stem in target.parent.glob(target.stem + ".*"):
                 stem.unlink()
-            print(f"Verification FAILED for {name} - deleted {target.name}. data/ is untouched.",
+            print(f"Verification FAILED for {target.name} - deleted it. data/ is untouched.",
                   file=sys.stderr)
             return 1
-        print(f"  {name}: identical (attributes equal, geometry WKB equal).")
+        print(f"  {target.name}: identical (attributes equal, geometry WKB equal).")
 
-    for name, source, target in (("roads", road_source, road_target),
-                                 ("parcels", parcel_source, parcel_target),
-                                 ("tax", tax_source, tax_target)):
-        written[name] = {"file": target.name, "clipped_from": source.name,
-                         "source_sha256": _sha256(source),
-                         "columns": {"parcels": list(PARCEL_COLUMNS),
-                                     "tax": list(TAX_COLUMNS)}.get(name, "all")}
+    for name, source, _bbox, target, _columns in clipped:
+        written[target.name] = {"layer": name, "file": target.name,
+                                "clipped_from": source.name,
+                                "source_sha256": _sha256(source),
+                                "columns": {"parcels": list(PARCEL_COLUMNS),
+                                            "tax": list(TAX_COLUMNS)}.get(name, "all")}
     manifest = {
         "generated_by": "scripts/make_data_fixture.py",
         "why": "data/ is a large third-party download kept out of git; these are the features "
-               "the configured sites actually read. Read through HOPEWELL_DATA_DIR.",
+               "the configured sites actually read. Read through ROAD_SKETCHES_DATA_DIR.",
         "pad_ft": args.pad_ft,
         "sites": sites,
         "extents": {"roads": list(roads_bbox), "parcels": list(parcels_bbox)},
@@ -280,7 +308,7 @@ def main() -> int:
     total = sum(f.stat().st_size for f in out.iterdir() if f.is_file())
     print(f"Wrote {total / 1e6:.2f} MB in {time.perf_counter() - started:.1f}s "
           f"(data/ is {sum(f.stat().st_size for f in DATA_DIR.iterdir() if f.is_file()) / 1e6:.0f} MB)")
-    print(f"Use it with: HOPEWELL_DATA_DIR={out} .venv/bin/python -m pytest")
+    print(f"Use it with: ROAD_SKETCHES_DATA_DIR={out} .venv/bin/python -m pytest")
     return 0
 
 

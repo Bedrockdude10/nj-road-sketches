@@ -22,7 +22,7 @@ expires, so a kerb, crossing or tactile-paving pad traced in OSM this morning is
 to the build until the cache is re-pulled. That is the project's worst failure mode -
 ground truth present, but never reaching the render - so every site prints how old the
 layers it read are, and `--refresh-osm` re-pulls them from Overpass (one round trip per
-layer per site, not per scenario). Refresh is ignored under HOPEWELL_OFFLINE, which is how
+layer per site, not per scenario). Refresh is ignored under ROAD_SKETCHES_OFFLINE, which is how
 the test suite stays hermetic.
 
 Scene invariants (src/checks.py) run on every scenario. A failure is reported per scenario

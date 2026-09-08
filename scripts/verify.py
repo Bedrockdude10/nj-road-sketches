@@ -34,11 +34,11 @@ answer, which is that this run says nothing about them.
 
 WHY THE INPUTS ARE WIRED IN TWO WAYS. The before side runs in a git worktree at --base, and
 README's loop warns you to symlink the gitignored data/ into it or every run dies in 0.6 s and
-you read that as a result. This does both: HOPEWELL_DATA_DIR and HOPEWELL_OSM_CACHE are passed
+you read that as a result. This does both: ROAD_SKETCHES_DATA_DIR and ROAD_SKETCHES_OSM_CACHE are passed
 as absolute paths out of THIS checkout, AND data/ is symlinked into the worktree - pointing at
 the committed clip, not at the 391 MB download. Belt and braces because the env var is only
 honoured by revisions that know about it: run this against a base that predates
-src/sources/data_loader.py's HOPEWELL_DATA_DIR and it reads plain data/, finds nothing, and
+src/sources/data_loader.py's ROAD_SKETCHES_DATA_DIR and it reads plain data/, finds nothing, and
 reports a crash where you were looking for a geometry diff. Either route lands on the same
 bytes, which is the only way the diff means "my code moved this" and not "the inputs moved".
 
@@ -84,14 +84,14 @@ def run(cmd: list[str], cwd: Path, env: dict | None = None) -> subprocess.Comple
 def hermetic_env() -> dict:
     """The inputs held constant across both sides of the comparison.
 
-    Absolute, and out of THIS checkout - see the module docstring. HOPEWELL_OFFLINE matters as
+    Absolute, and out of THIS checkout - see the module docstring. ROAD_SKETCHES_OFFLINE matters as
     much as the rest: an Overpass fetch on one side and a cache hit on the other is a diff that
     is about the internet.
     """
     return {
-        "HOPEWELL_OFFLINE": "1",
-        "HOPEWELL_OSM_CACHE": str(REPO_ROOT / "tests" / "fixtures" / "osm_cache"),
-        "HOPEWELL_DATA_DIR": str(REPO_ROOT / "tests" / "fixtures" / "data"),
+        "ROAD_SKETCHES_OFFLINE": "1",
+        "ROAD_SKETCHES_OSM_CACHE": str(REPO_ROOT / "tests" / "fixtures" / "osm_cache"),
+        "ROAD_SKETCHES_DATA_DIR": str(REPO_ROOT / "tests" / "fixtures" / "data"),
     }
 
 
@@ -126,7 +126,7 @@ def link_inputs(tree: Path) -> None:
     """Point the worktree's gitignored inputs at this checkout's.
 
     data/ is aimed at the COMMITTED CLIP where there is one, so an old revision reading plain
-    data/ and a new one reading HOPEWELL_DATA_DIR see the same bytes; the clip mirrors data/'s
+    data/ and a new one reading ROAD_SKETCHES_DATA_DIR see the same bytes; the clip mirrors data/'s
     layout exactly, which is what makes that substitution invisible. Without a clip it falls
     back to the real download. Symlinks, not copies: 391 MB, and they are read-only here.
     """

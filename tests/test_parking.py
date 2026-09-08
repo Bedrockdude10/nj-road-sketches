@@ -11,7 +11,7 @@ from tests.conftest import needs_source_data
 def test_a_kerb_that_narrows_only_at_its_tail_still_keeps_the_lane_over_the_reach():
     """A whole-leg minimum let one narrow tail veto a kerb that has room almost everywhere.
 
-    w_broad_st_southwest's left kerb, at HOPEWELL_FRAME_SCALE=3.0 - the scale the corridor's own
+    w_broad_st_southwest's left kerb, at ROAD_SKETCHES_FRAME_SCALE=3.0 - the scale the corridor's own
     checked-in renders actually use, confirmed by matching output/wbroad_louellen's committed
     frame.radius_m against every candidate scale rather than assuming it (tests/conftest.py's
     WIDE_FRAME_SCALE=2.5 is the suite's own invariant-sweep convention and is a DIFFERENT number)

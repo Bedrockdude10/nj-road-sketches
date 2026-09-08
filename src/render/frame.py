@@ -44,9 +44,9 @@ FRAME_MARGIN = 1.2
 # treatment down a street). It scales the RADIUS only, so the frame stays centred on the same
 # ground and both views widen together - a knob that moved only one of them would undo the reason
 # this module exists. An environment variable because it must reach two call sites several layers
-# down (plot_design_state and export_scenario); same problem and answer as HOPEWELL_RENDER_SCALE,
+# down (plot_design_state and export_scenario); same problem and answer as ROAD_SKETCHES_RENDER_SCALE,
 # and scripts/phase4_render_3d.py sets both from flags.
-FRAME_SCALE_ENV = "HOPEWELL_FRAME_SCALE"
+FRAME_SCALE_ENV = "ROAD_SKETCHES_FRAME_SCALE"
 
 
 def frame_scale() -> float:

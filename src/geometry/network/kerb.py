@@ -135,7 +135,7 @@ def _traced_end_ft(align: LineString, node_ft: float, forward: bool, kerb_ways,
 
     ANCHORED ON THE NODE, NOT ON THE SEAM, AND THAT IS THE WHOLE POINT. This used to take the end
     of the junction piece and return a reach measured FROM it. Both the search window and the cap
-    were then relative to a point that moves with HOPEWELL_FRAME_SCALE, because the piece is a
+    were then relative to a point that moves with ROAD_SKETCHES_FRAME_SCALE, because the piece is a
     frame-cut leg - so a wider sheet slid the window outward and the corridor discovered street
     that a narrower sheet had not looked for. Greenwood Ave came out 1,695 ft at 1x and 1,891 ft at
     2.5x, and a facility's governing cross-section is taken over the span, so the sheet was voting

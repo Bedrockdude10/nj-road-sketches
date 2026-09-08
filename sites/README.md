@@ -1,7 +1,10 @@
 # Sites
 
 Each subdirectory is one intersection/corridor study: a `config.yaml` and a
-`scenarios.py`. Nothing in `src/` or `scripts/` hardcodes anything about a
+`scenarios.py`. `osm_areas.yaml` beside them is the list of TOWNS this project has an OSM
+snapshot of - one download each, and a site is served from whichever area fully contains its
+context window (`src/sources/osm_context.py`). A site in no area is refused rather than served
+half its ground truth, so adding a municipality starts there. Nothing in `src/` or `scripts/` hardcodes anything about a
 specific intersection - see the main README's "Adding a new site" section for
 the step-by-step process. This file documents the `config.yaml` schema.
 
@@ -24,6 +27,13 @@ data_sources:
 
 intersection:
   name: "..."                         # human-readable, used in plot titles
+  municipality: "..."                 # REQUIRED - the town this junction is in, spelled the way the
+                                       # route decisions spell it (src/geometry/treatments/corridor.py).
+                                       # A JOIN KEY, not a caption: what this project proposes along a
+                                       # street is looked up by (street, town), because street names
+                                       # repeat between towns - nearly every NJ borough has a Broad St.
+                                       # Not parsed out of `name`, which would derive it wrongly once
+                                       # and draw one town's bikeway down another town's street.
   center_wgs84: [lon, lat]            # resolved once via `phase1_audit.py --street1/--street2/--anchor`
   street1: "..."                      # what phase1_audit.py used to resolve center_wgs84 -
   street2: "..."                      # kept so re-resolving later (e.g. after OSM edits) is one command

@@ -106,7 +106,7 @@ def test_a_site_outside_the_snapshot_is_refused():
 
 
 def test_the_test_suite_cannot_reach_the_network():
-    """conftest sets HOPEWELL_OFFLINE. A cache miss must fail loudly, not fetch.
+    """conftest sets ROAD_SKETCHES_OFFLINE. A cache miss must fail loudly, not fetch.
 
     A test that silently depends on Overpass depends on its uptime AND its current
     replication state - two consecutive live fetches of one junction returned 4 tactile
@@ -122,3 +122,20 @@ def test_the_fixture_cache_is_present_and_readable():
     assert files, f"no OSM fixtures in {osm_context.CACHE_DIR}"
     for path in files:
         json.loads(path.read_text())
+
+
+def test_a_pre_rename_environment_variable_is_refused(monkeypatch):
+    """The switches this project reads were HOPEWELL_-prefixed while it was one town's study.
+
+    An unread environment variable is not an error - it is a run that does the OTHER thing and
+    looks fine: HOPEWELL_OFFLINE ignored is a run that goes to the network, HOPEWELL_DATA_DIR
+    ignored is a run against the full county download instead of the clip. So a stale name
+    raises and names its replacement.
+    """
+    from src.sources.data_loader import RENAMED_ENV, refuse_renamed_env
+
+    for old, new in RENAMED_ENV.items():
+        with pytest.raises(RuntimeError) as raised:
+            refuse_renamed_env({old: "1"})
+        assert new in str(raised.value), f"{old} must say what to use instead"
+    refuse_renamed_env({"ROAD_SKETCHES_OFFLINE": "1"})      # the new names are fine
