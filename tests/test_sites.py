@@ -861,7 +861,7 @@ def test_the_stall_count_matches_the_ticks_that_divide_it(site, wide_site_models
             entrances = spans.get((leg_name, side), [])
             stations.sort()
             for lo, hi in itertools.pairwise(stations):
-                if abs((hi - lo) - parking.stall_length_ft) > 0.05:
+                if abs((hi - lo) - parking.pitch_ft) > 0.05:
                     continue
                 if any(lo < end and start < hi for start, end in entrances):
                     continue        # two ticks a stall apart across an entrance: not a stall

@@ -167,16 +167,39 @@ def traced_corner_join(curb_a: LineString, curb_b: LineString) -> tuple[LineStri
     return substring(curb_a, blend_a, curb_a.length), _chaikin(seam), substring(curb_b, blend_b, curb_b.length)
 
 
+def _turns_enough_to_be_a_return(line: LineString) -> bool:
+    """Whether a traced kerb bends like a corner return rather than running past one."""
+    fit = fit_circle_ft(line)
+    return fit is not None and fit["sweep_deg"] >= MIN_KERB_ARC_SWEEP_DEG
+
+
 def traced_corner_arc(kerb_lines: list, curb_a: LineString, curb_b: LineString) -> LineString | None:
     """One traced kerb, oriented to run from curb_a's side to curb_b's side.
 
     build_corner_fillets' contract is (trimmed_a, arc, trimmed_b) with the arc running
     from its tangent point on curb_a to the one on curb_b, and build_pavement_polygon's
     ring walk depends on that order. A traced kerb has whatever direction the mapper drew
-    it in, so it is reversed if needed. Where several kerbs share a corner the longest is
-    used - the others are usually short ramp segments rather than the return itself.
+    it in, so it is reversed if needed.
+
+    A CANDIDATE HAS TO TURN, and "longest wins" is only applied among the ones that do.
+    assign_kerbs_to_corners groups traces by which two legs their midpoint is nearest, and
+    OSM traces the block rather than the corner - so every corner at Lavallette & Reese was
+    handed the ~200 ft two-point straight running past it alongside the real ~8 ft return,
+    and the longest-wins rule picked the straight at all four. Nothing downstream can survive
+    that: the "arc" ran 208.74 ft up the leg, the substring trimming the kerb back to its far
+    end collapsed to a single point, leg_clearance_ft read 193.00 ft on a 190 ft leg, and
+    parking_runs found nowhere on the whole leg a stall could legally be marked. Sweep is the
+    discriminator because a block kerb does not bend - fit_circle_ft returns None outright for
+    a two-point line - and the same MIN_KERB_ARC_SWEEP_DEG the radius fit uses.
+
+    NOT kerb_radius_is_usable, which additionally demands the fitted radius fall in
+    PLAUSIBLE_CORNER_RADIUS_FT. That band guards a radius that gets reused AS A NUMBER; an
+    arc is drawn along the traced path itself, so a return tighter than the band still draws
+    where the mapper put it. Requiring it here rejected Lavallette's four real returns (R=3.4
+    to 4.7 ft) and fell through to a fitted fillet that bridged the corner with a straight.
     """
-    usable = [line for line in kerb_lines if line.length > 1.0]
+    usable = [line for line in kerb_lines
+              if line.length > 1.0 and _turns_enough_to_be_a_return(line)]
     if not usable:
         return None
     line = max(usable, key=lambda l: l.length)

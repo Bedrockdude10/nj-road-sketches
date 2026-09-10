@@ -6,7 +6,7 @@ is the single source for where the buffer is.
 """
 from dataclasses import dataclass
 from typing import ClassVar
-from src.geometry.treatments.base import BOLLARD_DEFAULT_SPACING_FT, TARGET_LANE_WIDTH_FT, Treatment
+from src.geometry.treatments.base import BOLLARD_DEFAULT_SPACING_FT, Treatment
 from src.geometry.treatments.state import DesignState
 from src.geometry.treatments.bikeways.place import AddBikeLane
 from typing import TYPE_CHECKING
@@ -64,9 +64,19 @@ class AddBikeLaneBollards(Treatment):
                 f"{self.target}'s bike lane has no buffer, so there is nowhere to stand a "
                 f"delineator that is not in a travel lane or in the bike lane itself. A protected "
                 f"lane needs a buffer; give it one, or leave the lane conventional and say so.")
+        # WHAT THE BUFFER IS BETWEEN depends on the ordering, so the note says which rather than
+        # asserting the usual one. With the parking outboard of the lane this strip is the DOOR
+        # ZONE and the posts separate the rider from the PARKED cars - still the side the rider
+        # needs protecting from, because on that ordering the parked cars are what shields them
+        # from moving traffic. The ordinary wording is left exactly as it was so that adding this
+        # branch moves nothing on a site that was already drawing the ordinary ordering.
+        if lane.parking_is_outermost:
+            return (f"flex-post delineators at {self.spacing_ft:.0f} ft in the "
+                    f"{lane.buffer_ft:.0f} ft buffer between the travel lane and the bike lane - "
+                    f"the traffic side, which is the side that needs protecting.")
         return (f"flex-post delineators at {self.spacing_ft:.0f} ft in the {lane.buffer_ft:.0f} ft "
-                f"buffer between the travel lane and the bike lane - the traffic side, which is "
-                f"the side that needs protecting.")
+                f"door-zone buffer between the parked cars and the bike lane - the side the rider "
+                f"needs protecting from once the parked cars are what shields them from traffic.")
 
 
     def paint(self, ctx) -> None:
@@ -112,9 +122,8 @@ class AddBikeLaneBollards(Treatment):
         # posts standing along 245 ft of asphalt that got no green.
         bikeway = ctx.state.treatment_for(AddBikeLane, self.target)
         lane = bikeway.section(ctx.state)
-        bounds = lane.offsets_from_centerline_ft()
         at = ctx.anchors(leg_name, side, inner_offset_ft=(
-            leg.curb_to_curb_ft / 2 - lane.total_ft + TARGET_LANE_WIDTH_FT))
+            lane.kerbside_inner_offset_ft(leg.curb_to_curb_ft / 2)))
         if (leg_name, side) in ctx.straight_through:
             start_ft = clear_ft = 0.0
         elif leg_name in ctx.marked:
@@ -122,7 +131,11 @@ class AddBikeLaneBollards(Treatment):
             clear_ft = at.target_ft
         else:
             start_ft = clear_ft = at.target_ft + CROSSWALK_CLEARANCE_FT
-        centre_ft = (bounds["travel_lane_edge_ft"] + bounds["bike_inner_ft"]) / 2
+        # ASKED OF THE SECTION. The pair of offsets that brackets the buffer is not the same
+        # pair on every ordering - see BikeLane.buffer_band_from_centerline_ft, which this used to
+        # open-code and which stood the whole row inside the parking stalls on the swapped one.
+        inner_ft, outer_ft = lane.buffer_band_from_centerline_ft()
+        centre_ft = (inner_ft + outer_ft) / 2
         for point in points_at_offset_ft(leg, side, centre_ft, max(start_ft, clear_ft),
                                           bikeway.to_ft, spacing_ft=self.spacing_ft):
             ctx.emit(PaintPiece(BOLLARD, _dot(point), leg_name, side))

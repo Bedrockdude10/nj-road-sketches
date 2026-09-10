@@ -1016,10 +1016,24 @@ class TravelLanesHoldTheTarget(SceneCheck):
                     return narrowing.stripe_width_ft
                 return 0.0
 
-            restriped = any(painted_ft(side) > 0
-                            or state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None
-                            for side in sides)
-            if not restriped:
+            def a_decision_was_made(side: str, narrowing=narrowing, leg_name=leg_name):
+                """Has THIS DESIGN restriped this kerb - as against recorded what is there?
+
+                painted_ft alone is not that question, and reading it as though it were is what
+                made this check fail an existing-conditions drawing. apply_observed_parking marks
+                the 60-degree bays that Grand Central Ave already has; the drawing narrows
+                nothing, so the 14.89 ft it leaves beside them is a MEASUREMENT of the street and
+                not an omission. See MarkedParking.observed, and this class's own docstring,
+                which rules out exactly this reading two paragraphs up.
+                """
+                if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:
+                    return True
+                parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
+                if parking is not None:
+                    return not parking.observed
+                return narrowing is not None and side in narrowing.sides
+
+            if not any(a_decision_was_made(side) for side in sides):
                 continue        # untouched leg - the street as it is, not a design
             for side in sides:
                 if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:

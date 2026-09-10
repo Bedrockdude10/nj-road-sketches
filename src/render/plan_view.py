@@ -502,8 +502,12 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     # are asked for, but the panel captions are drawn either way and still stand on ground.
     labels = LabelPlacer()
 
-    model.parcels.boundary.plot(ax=ax, color="tan", linewidth=0.6, zorder=1)
-    model.corner_parcels.boundary.plot(ax=ax, color="saddlebrown", linewidth=1.5, zorder=1)
+    # Empty when the site declares no parcels layer. geopandas warns rather than raising on an
+    # empty plot, so this is about keeping a parcel-less site's render quiet, not about crashing.
+    if not model.parcels.empty:
+        model.parcels.boundary.plot(ax=ax, color="tan", linewidth=0.6, zorder=1)
+    if not model.corner_parcels.empty:
+        model.corner_parcels.boundary.plot(ax=ax, color="saddlebrown", linewidth=1.5, zorder=1)
 
     _draw(ax, [pavement], color="#d9d9d9", zorder=2)
 

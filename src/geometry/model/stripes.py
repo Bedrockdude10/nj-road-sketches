@@ -5,6 +5,8 @@ feet. It decides SHAPE, never whether a marking is warranted - that is a treatme
 (src/geometry/treatments/) - which is what lets the same taper serve a parking buffer, a bike-lane
 buffer and a daylight zone."""
 
+from math import cos, radians, sin, tan
+
 import numpy as np
 from shapely.geometry import LineString, MultiLineString, Polygon
 from src.geometry.model.leg_frame import (Leg,STRIP_SAMPLE_FT, place_in_measured_frame,
@@ -422,6 +424,129 @@ def stall_leftover_runs_ft(runs: list[tuple[float, float]], stall_length_ft: flo
     return leftovers
 
 
+# ---------------------------------------------------------------------------
+# ANGLED parking, as three measurements rather than one
+# ---------------------------------------------------------------------------
+#
+# A parallel stall needs one number along the kerb (stall_length_ft) and one across it
+# (depth_ft), and the divider between two stalls is a cross-section of the lane. An angled stall
+# needs THREE, they are all functions of the angle, and confusing any two of them is the mistake
+# this block exists to stop:
+#
+#   DEPTH   across the street, kerb face to the travel lane's edge
+#   PITCH   along the kerb, per stall - what a run of kerb divides by to count stalls
+#   SKEW    along the leg, between the two ENDS of one divider - zero only at 90 degrees
+#
+# Theta is measured FROM THE KERB throughout, so 90 is head-in perpendicular parking and a
+# smaller angle is shallower across the street and longer along it. Theta -> 0 is not parallel
+# parking arrived at as a limit (pitch and skew both diverge); a parallel stall is a different
+# measurement, which is why these functions reject it rather than returning something.
+
+
+def _stall_theta(angle_deg: float) -> float:
+    """The stall angle in radians, refusing the two values that are not angled parking.
+
+    A shared guard rather than three copies, because each of the three formulas below divides or
+    multiplies by a different trig function and each degenerates at a different end - pitch and
+    skew blow up at 0, nothing blows up at 90 but the caller almost certainly meant parallel.
+    """
+    if not 0 < angle_deg <= 90:
+        raise ValueError(
+            f"An angled stall's angle is measured from the kerb and must be in (0, 90]; got "
+            f"{angle_deg}. 90 is head-in perpendicular parking. 0 is not parallel parking - a "
+            f"parallel stall is stall_length_ft along the kerb by depth_ft across it, which is a "
+            f"different pair of measurements, not this one at a limit.")
+    return radians(angle_deg)
+
+
+def angled_stall_depth_ft(stall_length_ft: float, stall_width_ft: float,
+                           angle_deg: float) -> float:
+    """How deep an angled bay is: `length*sin(theta) + width*cos(theta)`.
+
+    THE SECOND TERM IS THE ONE THAT GETS DROPPED. The stall is a rectangle rotated off the kerb,
+    so its depth is its length projected across the street PLUS the part of its own width that
+    the same rotation throws that way. Taking only `length*sin` understates a 9x18 ft bay at
+    60 degrees by 4.50 ft - the whole width of a bike lane, on a street where whether a bike lane
+    fits is the question being asked.
+    """
+    theta = _stall_theta(angle_deg)
+    return stall_length_ft * sin(theta) + stall_width_ft * cos(theta)
+
+
+def angled_stall_line_depth_ft(stall_length_ft: float, angle_deg: float) -> float:
+    """How deep off the kerb the PAINTED divider reaches: `length * sin(theta)`.
+
+    NOT angled_stall_depth_ft, and the difference between them is the whole point. A bay is
+    `L*sin + W*cos` deep because that is where the far corner of a parked CAR ends up. The
+    painted line is the stall's own side, so it is `stall_length_ft` of paint laid at the stall
+    angle, and it therefore reaches only `L*sin` - leaving `W*cos` of bare asphalt between the
+    line's inboard end and the edge of the travel way.
+
+    THAT REMAINDER IS NOT A ROUNDING ERROR, IT IS THE STALL'S MOUTH. A driver turning into a
+    front-in stall crosses exactly there, and a line drawn across it is a line drawn over the
+    way in. Run to the full bay depth instead, the divider comes out 23.20 ft long against an
+    18 ft stall and meets the bike lane's own edge line, so the two read as one continuous
+    boundary painted straight across every opening. See angled_stall_mouth_ft for the gap.
+
+    Published tables give the bay depth and the kerb pitch, not a line length (checked: MUTCD
+    Section 3B.19 and Figure 3B-21 cover parking space markings but illustrate only
+    perpendicular stalls, and give no angled dimension at all). The line length is therefore
+    taken as the stall's own length, which is the one figure the standard does fix.
+    """
+    return stall_length_ft * sin(_stall_theta(angle_deg))
+
+
+def angled_stall_mouth_ft(stall_width_ft: float, angle_deg: float) -> float:
+    """The unmarked gap at the travel-lane end of an angled stall: `width * cos(theta)`.
+
+    Bay depth minus painted line depth - and the algebra cancels the stall's LENGTH out
+    entirely, leaving the second term of angled_stall_depth_ft. So the amount a bay is deeper
+    than a naive `L*sin(theta)` IS the amount of it that has to be left unpainted, which is why
+    both figures are here and neither is subtracted at a call site. 4.50 ft on a 9 ft stall at
+    60 degrees, whatever the stall's length.
+
+    Not a function of the length is the useful part: a caller holding a DECLARED bay depth (a
+    bikeway section carries one) gets the line's depth as `bay - mouth` without having to
+    restate the stall length the bay was built from, and the two cannot drift apart.
+    """
+    return stall_width_ft * cos(_stall_theta(angle_deg))
+
+
+def angled_stall_pitch_ft(stall_width_ft: float, angle_deg: float) -> float:
+    """How much KERB one angled stall consumes: `width / sin(theta)`.
+
+    THIS, NOT THE STALL LENGTH, IS WHAT A RUN OF KERB DIVIDES BY - it is the angled counterpart
+    of parallel parking's stall_length_ft and belongs everywhere that figure does
+    (whole_stalls_ft, stall_lane_runs_ft, metrics). It is also why angling pays: a 9 ft stall at
+    60 degrees takes 10.39 ft of kerb against the 22 ft a parallel stall takes, so the same
+    134 ft run holds 12 cars instead of 6.
+    """
+    return stall_width_ft / sin(_stall_theta(angle_deg))
+
+
+def angled_stall_skew_ft(depth_ft: float, angle_deg: float) -> float:
+    """How far along the leg a divider's KERB end sits from its travel-lane end: `depth/tan`.
+
+    FED THE PAINTED LINE'S DEPTH, NOT THE BAY'S - angled_stall_line_depth_ft. The two differ by
+    the stall's mouth, and passing the bay depth here draws a divider 2.60 ft longer along the
+    leg than the stall it divides (11.60 against 9.00 ft at 60 degrees). Handed the line depth
+    this reduces to `L*cos(theta)`, which is the stall's own length projected along the kerb -
+    the figure that has to match, since the line IS the stall's side.
+
+    A parallel divider is a cross-section of the parking lane and both ends share one station -
+    see parking_stall_lines_ft, which says so and enforced it for every stall it had ever drawn.
+    An angled divider is the angle made visible and deliberately does not: it lies along the
+    stall's own side, so its two ends are this far apart along the leg. 90 degrees gives 0 and
+    the divider is perpendicular again, which is the continuity worth having.
+
+    UNSIGNED. Which WAY the stalls lean is not a property of the stall - it is which direction
+    traffic runs, since a driver pulls into a front-in stall by turning across their own path.
+    The caller signs it (see AddBikeLane.runs_outward, MarkedParking.runs_outward); getting the
+    sign wrong draws a bay nobody can enter without reversing into the travel lane.
+    """
+    return depth_ft / tan(_stall_theta(angle_deg))
+
+
 def parking_lane_edge_line_ft(leg: "Leg", side: str, depth_ft: float, start_ft: float,
                                end_ft: float | None = None, curb_offset_ft: float = 0.0) -> LineString | None:
     """The line marking the inner edge of a curbside marked-parking lane - depth_ft in from
@@ -440,7 +565,8 @@ def parking_lane_edge_line_ft(leg: "Leg", side: str, depth_ft: float, start_ft: 
 
 
 def parking_stall_lines_ft(leg: "Leg", side: str, depth_ft: float, stall_length_ft: float, start_ft: float,
-                            end_ft: float | None = None, curb_offset_ft: float = 0.0) -> list[LineString]:
+                            end_ft: float | None = None, curb_offset_ft: float = 0.0,
+                            skew_ft: float = 0.0) -> list[LineString]:
     """Perpendicular divider lines bounding each marked parallel-parking stall along one side
     of a leg - the standard MUTCD curbside-parking marking: a short tie line at each stall
     boundary, not a hatched zone (a driver parks a real vehicle inside each one). One extra
@@ -454,7 +580,18 @@ def parking_stall_lines_ft(leg: "Leg", side: str, depth_ft: float, stall_length_
     start_ft..end_ft is a WHOLE NUMBER OF STALLS - stall_lane_runs_ft's job - so the closing
     tick lands on end_ft and the lane the edge line draws is exactly as long as the stalls in
     it. Handed a fractional span it still lays whole stalls and the remainder goes unmarked,
-    which is the honest reading of a span that cannot hold another car."""
+    which is the honest reading of a span that cannot hold another car.
+
+    skew_ft MAKES THE STALL ANGLED, and it is the one thing here that is not perpendicular.
+    Signed: positive puts each divider's KERB end that far DOWNSTREAM (higher station) of its
+    travel-lane end, which is the lean a front-in driver needs where traffic runs with
+    increasing station. `stall_length_ft` must then be the PITCH along the kerb rather than the
+    stall's own length - angled_stall_pitch_ft - because that is what a run of kerb divides by.
+    The three figures and how they relate are angled_stall_depth_ft / _pitch_ft / _skew_ft.
+
+    The skew is taken out of the run's own length before the stalls are counted, so the last
+    divider's leading end still lands inside start_ft..end_ft rather than reaching past the
+    ground the caller cut this run against."""
     half = leg.curb_to_curb_ft / 2
     sign = 1 if side == "left" else -1
     outer_off = max(half - curb_offset_ft, 0.5)
@@ -463,16 +600,30 @@ def parking_stall_lines_ft(leg: "Leg", side: str, depth_ft: float, stall_length_
     if span is None:
         return []
     end_ft = min(span[1], leg.centerline.length if end_ft is None else end_ft)
-    n_stalls = whole_stalls_ft(end_ft - start_ft, stall_length_ft)
-    # Station, not distance along an offset curve - see inset_line_ft. A divider is a
-    # cross-section of the parking lane, so both ends must be at the same station.
-    stations = start_ft + np.arange(n_stalls + 1) * stall_length_ft
-    curb_off = np.abs(curb_offsets_at_stations(leg, side, stations))
+    n_stalls = whole_stalls_ft(end_ft - start_ft - abs(skew_ft), stall_length_ft)
+    # Station, not distance along an offset curve - see inset_line_ft. A PERPENDICULAR divider
+    # is a cross-section of the parking lane, so both of its ends are at the same station; an
+    # angled one is skew_ft apart along the leg, and that difference IS the angle. The whole
+    # grid shifts downstream by the skew when it leans the other way, so the leading end of the
+    # first divider - the kerb end at negative skew - starts at start_ft rather than behind it.
+    inner_stations = start_ft + np.arange(n_stalls + 1) * stall_length_ft
+    if skew_ft < 0:
+        inner_stations = inner_stations - skew_ft
+    # Clipped to the TRACED span, because the kerb offset at a station outside it is an
+    # extrapolation and this end of the divider is drawn against the real kerb.
+    outer_stations = np.clip(inner_stations + skew_ft, *span)
+    # Each end clamped to the kerb at ITS OWN station. Identical to one shared sample while
+    # skew_ft is 0, which is every parallel stall this function had ever drawn.
+    inner_curb = np.abs(curb_offsets_at_stations(leg, side, inner_stations))
+    outer_curb = np.abs(curb_offsets_at_stations(leg, side, outer_stations))
     return [LineString([
-                point_at(leg.centerline, float(station), sign * min(outer_off, float(off))),
-                point_at(leg.centerline, float(station), sign * min(inner_off, float(off))),
+                point_at(leg.centerline, float(outer_station),
+                          sign * min(outer_off, float(outer_at))),
+                point_at(leg.centerline, float(inner_station),
+                          sign * min(inner_off, float(inner_at))),
             ])
-            for station, off in zip(stations, curb_off)]
+            for inner_station, outer_station, inner_at, outer_at
+            in zip(inner_stations, outer_stations, inner_curb, outer_curb)]
 
 
 # ---------------------------------------------------------------------------

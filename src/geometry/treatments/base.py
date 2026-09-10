@@ -238,6 +238,18 @@ VALID_CROSSWALK_STYLES = ("lines", "continental", "ladder")
 
 PARKING_STALL_DEPTH_DEFAULT_FT = 8.0  # AASHTO/NACTO typical parallel-parking lane depth (curb to travel-lane edge)
 PARKING_STALL_LENGTH_DEFAULT_FT = 22.0  # AASHTO/NACTO typical parallel-parking stall length
+# THE ANGLED STALL, which is a different pair of figures from the parallel one above and not a
+# rearrangement of it: 9 ft is measured ACROSS the stall (kerb to kerb between its dividers,
+# perpendicular to the car) and 18 ft ALONG it (bumper to bumper), so neither maps onto
+# PARKING_STALL_DEPTH_DEFAULT_FT or PARKING_STALL_LENGTH_DEFAULT_FT. What the bay costs across
+# the street and what it costs along the kerb are both functions of the angle - see
+# model/stripes.py:angled_stall_depth_ft and angled_stall_pitch_ft, which are the one home for
+# those three formulas.
+#
+# NJ Residential Site Improvement Standards, N.J.A.C. 5:21-4.14/4.15 (9 x 18 ft). Cited, not
+# opened - STANDARDS.md carries the row and the tier.
+ANGLED_STALL_WIDTH_FT = 9.0
+ANGLED_STALL_LENGTH_FT = 18.0
 # NJSA 39:4-138: no stopping/standing/parking within 25 ft of a marked crosswalk at an
 # intersection. A legal minimum, not a rendering choice - marked parking starts at whichever of
 # this and leg_clearance_ft's past-the-corner-curve point is farther from the intersection.

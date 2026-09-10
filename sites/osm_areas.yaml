@@ -19,3 +19,8 @@
 
 hopewell_borough: [-74.7760, 40.3830, -74.7500, 40.3970]     # 0.000364 sq deg
 pennington_borough: [-74.8120, 40.3180, -74.7830, 40.3420]   # 0.000696 sq deg
+
+# Sized to the WHOLE borough, not to the one junction: NJ 35 runs through Lavallette as a
+# one-way pair 465 ft apart, so the SB carriageway's junctions are the obvious next sites and
+# an area that already contains them needs no edit - which this file forbids.
+lavallette_borough: [-74.0780, 39.9640, -74.0640, 39.9840]   # 0.000280 sq deg

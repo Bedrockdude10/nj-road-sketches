@@ -21,6 +21,7 @@ EVERY NAME IS RE-EXPORTED HERE, including the underscored ones, because an impor
 have to know which file a function landed in.
 """
 from src.geometry.treatments.bikeways.sections import (
+                                            KerbsideBikeLane,
                                             AASHTO_MIN_BIKE_LANE_FT,
                                             BIKE_LANE_BUFFER_FT,
                                             BIKE_LANE_DEFAULT_SHY_FT,
@@ -29,7 +30,7 @@ from src.geometry.treatments.bikeways.sections import (
                                             CONSTRAINED_TWO_WAY_BIKE_LANE_FT,
                                             CORRIDOR_SIDE,
                                             MIN_BIKE_LANE_FT,
-                                            MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT,
+                                            MIN_SHIFTED_TRAVEL_LANE_FT,
                                             MIN_TWO_WAY_BIKE_LANE_FT,
                                             NJDOT_TWO_WAY_OBJECTION,
                                             TWO_WAY_BIKE_LANE_BUFFER_FT,
@@ -61,6 +62,7 @@ from src.geometry.treatments.bikeways.symbols import (
 )
 from src.geometry.treatments.bikeways.place import (
                                             AddBikeLane,
+                                            AddKerbsideBikeLane,
                                             AddTwoWayBikeLane,
                                             THROUGH_JUNCTION_OVERLAP_FT,
 )
@@ -96,7 +98,7 @@ __all__ = [
                                             "MIN_EXTENSION_GAP_FT",
                                             "MIN_FACILITY_RUN_FT",
                                             "MIN_MARK_FRACTION",
-                                            "MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT",
+                                            "MIN_SHIFTED_TRAVEL_LANE_FT",
                                             "MIN_TWO_WAY_BIKE_LANE_FT",
                                             "NJDOT_TWO_WAY_OBJECTION",
                                             "SYMBOL_CLEAR_OF_OPENING_FT",
@@ -108,9 +110,11 @@ __all__ = [
                                             "TWO_WAY_BIKE_LANE_WIDTH_FT",
                                             "AddBikeLane",
                                             "AddBikeLaneBollards",
+                                            "AddKerbsideBikeLane",
                                             "AddTwoWayBikeLane",
                                             "BikeLane",
                                             "ExtendBikeLaneThroughJunction",
+                                            "KerbsideBikeLane",
                                             "TwoWayBikeLane",
                                             "_feet",
                                             "_lane_line_ft",

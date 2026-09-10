@@ -76,14 +76,27 @@ def storeys_from_description(description) -> float | None:
     return float(match.group(1)) if match else None
 
 
-def storeys_by_pin(tax_list_path: str | Path) -> dict[str, float]:
-    """{PIN: storeys} for every parcel the assessor describes as having a storeyed building."""
+def storeys_by_pin(tax_list_path: str | Path | None) -> dict[str, float]:
+    """{PIN: storeys} for every parcel the assessor describes as having a storeyed building.
+
+    None means the site declares no tax list, and the answer is {} - every building then keeps
+    DEFAULT_BUILDING_HEIGHT_M and is exported as `assumed`, which describe_building_heights says
+    out loud. Same shape as parcels_near_buildings: a county whose records are not downloaded
+    draws without them rather than not building.
+    """
     from src.sources.data_loader import resolve_data_path   # local, like parcels_near_buildings below
 
+    if tax_list_path is None:
+        return {}
     # Through the same re-rooting as every other layer, so ROAD_SKETCHES_DATA_DIR does not leave the
     # heights reading the county file while the geometry reads the clip.
     path = resolve_data_path(tax_list_path)
-    if not path.exists():
+    # is_file, NOT exists: assessor_path used to answer "no tax list" with Path(""), which is
+    # Path('.') - a directory that very much exists, so the guard passed and gpd.read_file was
+    # handed the repo root. The site built in 2D and died in the 3D export with "'.' not
+    # recognized as being in a supported file format". It answers None now, and this stays
+    # is_file so that no other empty or directory-shaped path can do the same again.
+    if not path.is_file():
         return {}
     rows = gpd.read_file(path, columns=["GIS_PIN", "BLDG_DESC"])
     # Validated here rather than trusted, because the failure is invisible in a render: if either
@@ -127,8 +140,8 @@ def height_of(footprint, parcels, storeys: dict[str, float], osm_height=None) ->
     return BuildingHeight(DEFAULT_BUILDING_HEIGHT_M, SOURCE_ASSUMED)
 
 
-def assessor_path(model: "IntersectionModel") -> Path:
-    """Where this site's MOD-IV tax list is, from its own config.
+def assessor_path(model: "IntersectionModel") -> Path | None:
+    """Where this site's MOD-IV tax list is, or None if it declares none.
 
     A path per site like the road network and the parcels, because a site in another county
     points at another county's records - and one with none at all gets {} and says so, rather
@@ -137,7 +150,7 @@ def assessor_path(model: "IntersectionModel") -> Path:
     from src.geometry.intersection import ROOT_DIR
 
     configured = (model.config.get("data_sources") or {}).get("tax_list")
-    return ROOT_DIR / configured if configured else Path("")
+    return ROOT_DIR / configured if configured else None
 
 
 def parcels_near_buildings(model: "IntersectionModel", radius_ft: float = BUILDING_JOIN_RADIUS_FT):

@@ -17,7 +17,7 @@ from src.geometry.treatments.state import DesignState
 from src.geometry.treatments.bikeways.sections import (BIKE_LANE_BUFFER_FT, BIKE_LANE_WIDTH_FT, BikeLane,
                                                        MIN_BIKE_LANE_FT, TwoWayBikeLane)
 
-def travel_lane_divider_shift_ft(section: TwoWayBikeLane) -> float:
+def travel_lane_divider_shift_ft(section: BikeLane) -> float:
     """How far the painted divider between the travel lanes sits off the alignment.
 
     Positive TOWARD THE FAR KERB - away from the side carrying the lane, which is the direction
@@ -45,7 +45,7 @@ def travel_lane_divider_shift_ft(section: TwoWayBikeLane) -> float:
     return divided_lane_width_ft(section) - (section.near_half_ft - section.section_ft)
 
 
-def divided_lane_width_ft(section: TwoWayBikeLane) -> float:
+def divided_lane_width_ft(section: BikeLane) -> float:
     """How wide EACH travel lane is built beside this section, whichever kerb it is against.
 
     TARGET_LANE_WIDTH_FT where the leg can hold two of them and half the travel way where it
@@ -60,7 +60,7 @@ def divided_lane_width_ft(section: TwoWayBikeLane) -> float:
     return min(TARGET_LANE_WIDTH_FT, travel_way_ft / 2)
 
 
-def far_kerb_surplus_ft(section: TwoWayBikeLane) -> float:
+def far_kerb_surplus_ft(section: BikeLane) -> float:
     """Width left against the FAR kerb once the section and two target-width lanes are placed.
 
     What a two-way lane on one side frees up on the other, and the reason the pair belongs in one
@@ -158,7 +158,7 @@ def section_at(facility, near_half_ft: float, far_half_ft: float):
     if not candidates:
         return None, refusal
 
-    def stall_depth_ft(section: TwoWayBikeLane) -> float:
+    def stall_depth_ft(section: BikeLane) -> float:
         surplus_ft = far_kerb_surplus_ft(section)
         return min(surplus_ft, PARKING_STALL_DEPTH_DEFAULT_FT) if surplus_ft >= MIN_USABLE_STALL_FT else 0.0
 

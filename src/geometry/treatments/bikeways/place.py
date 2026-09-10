@@ -8,16 +8,16 @@ smaller file and a lazy import, which is a worse trade than reading 500 lines.
 THE PAINT COMES OUT THROUGH `PaintContext.emit`, never appended directly, so every piece is
 clipped against the crossings and held inside the traced kerb by one code path.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import ClassVar
 import numpy as np
 import shapely.ops
 from src.geometry.targets import Side
 from src.geometry.model import narrowest_half_width_ft
-from src.geometry.treatments.base import (LANE_WIDTH_SLACK_FT, PARKING_STALL_LENGTH_DEFAULT_FT,
+from src.geometry.treatments.base import (ANGLED_STALL_WIDTH_FT, LANE_WIDTH_SLACK_FT,
                                           TARGET_LANE_WIDTH_FT, Treatment)
 from src.geometry.treatments.state import DesignState
-from src.geometry.treatments.bikeways.sections import (BikeLane, CONSTRAINED_TWO_WAY_BIKE_LANE_FT,
+from src.geometry.treatments.bikeways.sections import (KerbsideBikeLane,BikeLane, CONSTRAINED_TWO_WAY_BIKE_LANE_FT,
                                                        MIN_TWO_WAY_BIKE_LANE_FT, NJDOT_TWO_WAY_OBJECTION,
                                                        TWO_WAY_BIKE_LANE_WIDTH_FT, TwoWayBikeLane, _feet)
 from src.geometry.treatments.bikeways.fit import (far_kerb_surplus_ft,
@@ -90,13 +90,48 @@ class AddBikeLane(Treatment):
     #: junction is not a shorter lane, it is a corridor that breaks there - see
     #: CorridorFacility._place_on, which refuses that case by name instead of moving the start.
     to_ft: float | None = None
+    #: Whether the rider travels OUTWARD along the leg, away from the junction.
+    #:
+    #: True for every ordinary case and that is why it is the default: a with-traffic lane sits
+    #: on the leg's right, and a leg's right side is the one traffic leaves the junction on. It
+    #: is False on the far leg of a ONE-WAY street, where the whole carriageway runs one compass
+    #: way, so the approach that points the other way carries its riders INWARD. Nothing in a
+    #: leg's own frame can tell: both legs' bearings point outward by construction. Ask
+    #: leg_heads_toward(leg, <the direction the street runs>) and pass the answer.
+    #:
+    #: It only turns the stencil round, which is precisely why it is worth carrying - the arrow
+    #: is the one marking whose whole job is to tell a driver at the mouth which way the rider
+    #: bearing down on them is coming from, so an arrow that is merely decorative is worse than
+    #: none. NJ 35 NB drew its southern approach pointing at the oncoming rider.
+    runs_outward: bool = True
+    #: The angle this lane's marked parking leans off the kerb, or None for parallel parking.
+    #: Passed to the cross-section, which is where it belongs - see BikeLane.parking_angle_deg.
+    #: `parking_ft` remains the bay's DEPTH and at an angle that is not 8 ft any more:
+    #: angled_stall_depth_ft computes it, and a bay measured in the field is declared as measured.
+    parking_angle_deg: float | None = None
+    #: The angled stall's width across the car - what the pitch along the kerb divides. Read only
+    #: when `parking_angle_deg` is set.
+    parking_stall_width_ft: float = ANGLED_STALL_WIDTH_FT
+    #: Whether to pin this section to ITS OWN kerb and let the travel way take the remainder,
+    #: rather than starting it a target lane width from the alignment.
+    #:
+    #: OPT-IN, and it has to be, because it is a real design decision about the STREET and not an
+    #: accommodation this treatment may quietly make: it moves the traffic. Off, a section too
+    #: wide for its half of the road is refused - which is correct wherever the other kerb is
+    #: also spoken for, and wrong wherever the other kerb has surplus that only this side can
+    #: use. NJ 35 NB is the second: 60-degree angled parking on both kerbs leaves 29.37 ft for
+    #: two lanes, so the bike lane comes out of two 14.7 ft travel lanes and all of that surplus
+    #: is on one side of the alignment. See BikeLane.near_half_ft, which is what this sets.
+    pin_to_kerb: bool = False
 
     @property
     def lane(self) -> BikeLane:
         """The cross-section this treatment marks - validated on construction, and askable
         without a design, which is how every width in it is tested."""
         return BikeLane(width_ft=self.width_ft, buffer_ft=self.buffer_ft,
-                         parking_ft=self.parking_ft, shy_ft=self.shy_ft)
+                         parking_ft=self.parking_ft, shy_ft=self.shy_ft,
+                         parking_angle_deg=self.parking_angle_deg,
+                         parking_stall_width_ft=self.parking_stall_width_ft)
 
     def section(self, state: "DesignState") -> BikeLane:
         """The cross-section to paint, given the design.
@@ -105,8 +140,16 @@ class AddBikeLane(Treatment):
         cannot be known without the state, while a one-way lane's is fixed at construction. Both
         views and every check read the section through here, so a subclass cannot end up
         validated against one cross-section and drawn at another.
+
+        `pin_to_kerb` needs the same two half-widths a two-way lane does, and measures them
+        through the same one home (governing_half_widths_ft) over the same span - dataclasses.
+        replace rather than a constructor call, so a SUBCLASS's section stays its own class.
         """
-        return self.lane
+        if not self.pin_to_kerb:
+            return self.lane
+        leg = state.legs[self.target.leg]
+        near_ft, far_ft = governing_half_widths_ft(leg, str(self.target.side), to_ft=self.to_ft)
+        return replace(self.lane, near_half_ft=near_ft, far_half_ft=far_ft)
 
     def __post_init__(self):
         self.lane   # noqa: B018 - evaluated for its exception: raises for a lane under AASHTO's minimum
@@ -139,6 +182,24 @@ class AddBikeLane(Treatment):
         leg = state.legs[self.target.leg]
         if leg.curb_to_curb_ft is None:
             raise ValueError(f"Leg {self.target.leg!r} has no width - nothing to fit a bike lane into.")
+        if self.pin_to_kerb:
+            # PINNED, so "does this fit its own kerb" is not the question - it fits by
+            # construction, since the section IS measured from that kerb. What can still fail is
+            # what is left for traffic, and BikeLane raises on exactly that when the section is
+            # built, carrying its own measurement. Reraised untouched.
+            lane = self.section(state)
+            travel_way_ft = lane.near_half_ft + lane.far_half_ft - lane.section_ft
+            other = Side(str(self.target.side)).other
+            # "TO THE FAR KERB", not "for traffic". What is left over here is everything
+            # between this section and the opposite kerb, and on a street with parking over
+            # there too that is not the travel way - it was reported as 42.02 ft of traffic
+            # lane on a street whose two lanes measure 11 ft each, because the far kerb's own
+            # 20.09 ft bay is a separate treatment this section cannot see.
+            return (f". Pinned to the {self.target.side} kerb, spending {lane.section_ft:.2f} ft "
+                    f"of this leg's {lane.near_half_ft + lane.far_half_ft:.2f} ft between kerbs "
+                    f"at its narrowest, leaving {travel_way_ft:.2f} ft to the {other} kerb for "
+                    f"the travel lanes and whatever that kerb is given, with the travel way "
+                    f"shifted {lane.divider_shift_ft():.2f} ft toward it.")
         lane = self.lane
         available_ft = narrowest_half_width_ft(leg, str(self.target.side), to_ft=self.to_ft)
         if lane.total_ft > available_ft + LANE_WIDTH_SLACK_FT:
@@ -160,12 +221,14 @@ class AddBikeLane(Treatment):
         hatched and ticked with the machinery already here."""
         from src.geometry.markings import (BIKE_BUFFER_FILL, BIKE_LANE_EDGE_LINE,
                                            BIKE_LANE_SURFACE, BIKE_LANE_SYMBOL, BUFFER_EDGE_LINE,
-                                           BUFFER_FILL, STALL_DIVIDER)
+                                           BUFFER_FILL, DAYLIGHT_EDGE_LINE, DAYLIGHT_FILL,
+                                           STALL_DIVIDER)
         from src.geometry.model import (band_from_offsets, curbside_strip_polygon, inset_line_ft,
                                         kerb_inset_offsets, kerb_parallel_line_ft,
                                         kerb_referenced_band_polygon, lane_narrowing_polygons_ft,
                                         offset_band_polygon, paint_stations,
                                         parking_stall_lines_ft, stall_lane_runs_ft)
+        from src.geometry.daylighting import merged_no_parking_spans_ft, no_parking_zones_ft
         from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, MIN_LINE_LENGTH_FT, _one,
                                         end_against_crossing, parking_runs)
 
@@ -173,7 +236,7 @@ class AddBikeLane(Treatment):
         leg = ctx.state.legs[leg_name]
         lane = self.section(ctx.state)
         at = ctx.anchors(leg_name, side, inner_offset_ft=(
-            leg.curb_to_curb_ft / 2 - lane.total_ft + TARGET_LANE_WIDTH_FT))
+            lane.kerbside_inner_offset_ft(leg.curb_to_curb_ft / 2)))
         # A bike lane RUNS INTO its crossing and is cut by it, like every other kerbside zone
         # here - a real one carries on to the crossing and often across it. Stopping it at the
         # corner clearance instead left the buffer 5.5 ft short of the crossing, which
@@ -260,7 +323,11 @@ class AddBikeLane(Treatment):
                  inset_line_ft(leg, side, bounds["inner_line_ft"], start_ft, self.to_ft,
                                 keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2),
                  leg_name, side, beyond_ft, shares_a_kerb=through)
-        for key in ("buffer_outer_line_ft", "outer_line_ft"):
+        # buffer_inner_line_ft is None on BikeLane, whose buffer is against the travel lane and
+        # so is already bounded by inner_line_ft above; KerbsideBikeLane's buffer sits out beside
+        # the parking and needs its own stripe on that side. lane_edge_line returns None for a
+        # None offset, so the loop is the same loop.
+        for key in ("buffer_inner_line_ft", "buffer_outer_line_ft", "outer_line_ft"):
             ctx.add(BIKE_LANE_EDGE_LINE, lane_edge_line(key, start_ft, self.to_ft), leg_name,
                      side, beyond_ft,
                      shares_a_kerb=through)
@@ -340,7 +407,8 @@ class AddBikeLane(Treatment):
             # A two-way lane's two halves face opposite ways, so each gets its own symbol: that is
             # what tells a driver at a mouth which direction the rider bearing down on them is
             # coming from, and it is the reason the symbol is worth drawing rather than decorative.
-            faces = (True, False) if isinstance(self, AddTwoWayBikeLane) else (True,)
+            faces = ((True, False) if isinstance(self, AddTwoWayBikeLane)
+                     else (self.runs_outward,))
             for index, forward in enumerate(faces):
                 # Half a symbol plus the divider's own clearance either side of centre. Bounded
                 # by the lane's own sixth so a narrow lane does not push them into the edge
@@ -425,9 +493,40 @@ class AddBikeLane(Treatment):
             # NOT beyond_the_tracing: a stall proposes paint on the physical kerb, so it may
             # reach no further than the kerb is actually surveyed - see the note in
             # MarkedParking.paint for the disagreement asking past that bound produces.
+            # ASKED OF THE SECTION, not recomputed from the kerb. The two orderings put the
+            # stalls at opposite ends of the section - outermost for BikeLane, inboard of the
+            # lane for KerbsideBikeLane - and a caller that derives one of them here is the
+            # second derivation of a placed offset that SKILLS 0a is a list of. BikeLane's
+            # method returns exactly the arithmetic that used to be on these three lines.
             half = leg.curb_to_curb_ft / 2
-            outer_off = max(half - lane.shy_ft, 0.5)
-            inner_off = max(half - lane.shy_ft - lane.parking_ft, 0.5)
+            inner_off, outer_off = lane.parking_band_from_centerline_ft(half)
+            # THE CORNER END OF THAT SAME BAND, hatched, because parking is forbidden there.
+            # parking_runs below starts at the first station a stall may legally go, so without
+            # this the band from the corner to that station is bare asphalt - and on the swapped
+            # ordering that bare strip sits between the travel lane and a bike lane which does
+            # carry on to the junction, so it reads as somewhere to pull in rather than as the
+            # setback it is. This is the paint half of the paint-and-posts curb extension;
+            # ProtectDaylightZone stands the posts in the same span.
+            #
+            # Same channels as MarkedParking.paint's own daylighting, since it is the same
+            # statute (R.S. 39:4-138) drawn on a different cross-section, and the plan view and
+            # the 3D both already know how to draw them.
+            #
+            # NOT beyond_the_tracing, which MarkedParking needs and this does not: that zone runs
+            # the full depth to the kerb, so past the tracing it has no outer edge, while this
+            # band is bounded by two offsets from the alignment and is the same width whether the
+            # kerb is traced there or not.
+            for zone_start_ft, zone_end_ft in merged_no_parking_spans_ft(
+                    no_parking_zones_ft(ctx.state, leg_name, side,
+                                        ctx.crosswalk_offsets, ctx.props)):
+                zone_start_ft = max(zone_start_ft, start_ft)
+                if self.to_ft is not None:
+                    zone_end_ft = min(zone_end_ft, self.to_ft)
+                if zone_end_ft - zone_start_ft < MIN_LINE_LENGTH_FT:
+                    continue
+                zone = offset_band_polygon(leg, side, inner_off, outer_off,
+                                           zone_start_ft, zone_end_ft)
+                ctx.rim(ctx.add(DAYLIGHT_FILL, zone, leg_name, side), DAYLIGHT_EDGE_LINE)
             for run_start_ft, run_end_ft in parking_runs(ctx.state, leg_name, side,
                                                           ctx.crosswalk_offsets, ctx.props):
                 band = offset_band_polygon(leg, side, inner_off, outer_off,
@@ -435,13 +534,29 @@ class AddBikeLane(Treatment):
                                            run_end_ft if self.to_ft is None
                                            else min(run_end_ft, self.to_ft))
                 open_runs = ctx.open_runs(leg_name, side, STALL_DIVIDER, band) if band else []
-                for lo, hi in stall_lane_runs_ft(open_runs, PARKING_STALL_LENGTH_DEFAULT_FT,
+                # THE PITCH, NOT THE STALL LENGTH, and asked of the section. They are the same
+                # number while the parking is parallel and they are not once it is angled: a 9 ft
+                # stall at 60 degrees occupies 10.39 ft of kerb, so dividing the run by 22 lays
+                # half as many stalls as the bay holds and puts every tick in the wrong place.
+                pitch_ft = lane.parking_pitch_ft()
+                for lo, hi in stall_lane_runs_ft(open_runs, pitch_ft,
                                                   keep_inside_ft=MIN_LINE_LENGTH_FT):
+                    # THE LINE'S DEPTH, NOT THE BAY'S - see parking_line_depth_ft. Drawn to
+                    # the full bay depth the divider meets this section's own outer edge line
+                    # and the two read as one boundary painted across every stall opening.
                     for divider in parking_stall_lines_ft(
-                            leg, side, lane.parking_ft, PARKING_STALL_LENGTH_DEFAULT_FT, lo, hi,
-                            curb_offset_ft=lane.shy_ft):
+                            leg, side, lane.parking_line_depth_ft(), pitch_ft, lo, hi,
+                            curb_offset_ft=lane.parking_curb_offset_ft(half),
+                            # SIGNED BY WHICH WAY TRAFFIC RUNS - the same runs_outward the bike
+                            # symbol's heading comes off, because a bay leans the way a driver
+                            # turns into it and that is the direction of travel, not of the leg.
+                            skew_ft=lane.parking_skew_ft(self.runs_outward)):
                         ctx.add(STALL_DIVIDER, divider, leg_name, side)
-        else:
+        # NOT `else`. The question is whether anything is LEFT OVER against the kerb, and that is
+        # not the same as whether the section carried parking - KerbsideBikeLane carries parking
+        # AND leaves the kerbside strip over, because its parking is inboard of the lane. Asked as
+        # `else` the swapped section drew stalls and then left its kerbside spare as bare asphalt.
+        if not (lane.parking_ft and lane.parking_is_outermost):
             # The leftover between the lane's outer stripe and the kerb, hatched. A bike lane is
             # a standard width and the street's spare asphalt is not part of it - the same
             # accounting an 8 ft parking stall gets, where the remainder becomes the kerb buffer
@@ -479,13 +594,44 @@ class AddBikeLane(Treatment):
             from src.geometry.treatments.parking import MarkedParking
 
             kerbside_is_the_bikeway_s = (
-                not lane.parking_ft
+                not (lane.parking_ft and lane.parking_is_outermost)
                 and ctx.state.treatment_for(MarkedParking, LegSide(leg_name, side)) is None)
             kind, edge = ((BIKE_BUFFER_FILL, BIKE_LANE_EDGE_LINE) if kerbside_is_the_bikeway_s
                           else (BUFFER_FILL, BUFFER_EDGE_LINE))
             ctx.rim(ctx.add(kind, hatch, leg_name, side, beyond_ft,
                              shares_a_kerb=through), edge)
 
+
+
+@dataclass(frozen=True)
+class AddKerbsideBikeLane(AddBikeLane):
+    """Mark a parking-protected bike lane: the lane against the kerb, the parking outboard of it.
+
+    Everything AddBikeLane does, on KerbsideBikeLane's ordering instead of BikeLane's - the fit
+    test, the refusal rather than the quiet narrowing, the stall ticks over the runs where
+    parking is legal, and the hatched leftover. Only the cross-section differs, which is why this
+    overrides `lane` and nothing else: `section()` reads `self.lane`, and every view and check
+    reads the section.
+
+    WHAT TO PAIR IT WITH. AddBikeLaneBollards stands its posts in the buffer, which on this
+    ordering is the door zone between the parked cars and the rider - the side that needs them
+    here. There is no need for a separate MarkedParking on the same kerb: the stalls are part of
+    this section and drawn by it, and adding one would put a second parking lane on ground this
+    treatment has already spent (DesignState.apply has no duplicate guard).
+    """
+
+    @property
+    def lane(self) -> KerbsideBikeLane:
+        return KerbsideBikeLane(width_ft=self.width_ft, buffer_ft=self.buffer_ft,
+                                 parking_ft=self.parking_ft, shy_ft=self.shy_ft)
+
+    def describe(self) -> str:
+        return (f"AddKerbsideBikeLane({self.target.leg}, {self.target.side}): "
+                f"{_feet(self.width_ft)} ft lane against the kerb"
+                + (f", {_feet(self.buffer_ft)} ft door-zone buffer" if self.buffer_ft else "")
+                + (f", protected by {self.parking_ft:.0f} ft of marked parking outboard"
+                   if self.parking_ft else "")
+                + (f", {self.shy_ft:.1f} ft shy of the kerb" if self.shy_ft else ""))
 
 @dataclass(frozen=True)
 class AddTwoWayBikeLane(AddBikeLane):

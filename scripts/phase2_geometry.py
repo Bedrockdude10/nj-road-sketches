@@ -93,7 +93,10 @@ def main():
     print_leg_summary(model, sidewalks)
 
     print("\n=== Nearest parcel per quadrant (corner / ROW reference) ===")
-    print(model.corner_parcels[["quadrant", "PAMS_PIN", "BLOCK", "LOT", "dist_ft"]].to_string(index=False))
+    if model.corner_parcels.empty:
+        print("  none - this site declares no parcels layer (data_sources.parcels).")
+    else:
+        print(model.corner_parcels[["quadrant", "PAMS_PIN", "BLOCK", "LOT", "dist_ft"]].to_string(index=False))
 
     print(f"\n=== Corner fillets built: {len(model.corner_fillets)} ===")
     for (a, b), pieces in model.corner_fillets.items():

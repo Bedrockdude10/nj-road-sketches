@@ -9,8 +9,12 @@ from typing import ClassVar
 import numpy as np
 
 from src.geometry.targets import LegSide, LegTarget, Side
-from src.geometry.model import half_width_profile, narrowest_half_width_ft
-from src.geometry.treatments.base import (BOLLARD_DEFAULT_SPACING_FT,
+from src.geometry.model import (angled_stall_depth_ft, angled_stall_line_depth_ft,
+                                angled_stall_mouth_ft, angled_stall_pitch_ft,
+                                angled_stall_skew_ft, half_width_profile,
+                                narrowest_half_width_ft)
+from src.geometry.treatments.base import (ANGLED_STALL_LENGTH_FT, ANGLED_STALL_WIDTH_FT,
+                                          BOLLARD_DEFAULT_SPACING_FT,
                                           LANE_NARROWING_DEFAULT_STRIPE_FT,
                                           LANE_WIDTH_SLACK_FT, MIN_MARKED_PARKING_DEPTH_FT,
                                           PARKING_STALL_DEPTH_DEFAULT_FT,
@@ -60,6 +64,37 @@ class MarkedParking(Treatment):
     depth_ft: float = PARKING_STALL_DEPTH_DEFAULT_FT
     stall_length_ft: float = PARKING_STALL_LENGTH_DEFAULT_FT
     curb_offset_ft: float = 0.0
+    #: The angle the stalls lean off the kerb, or None for the parallel parking this class was
+    #: written for. Set, and THREE of the numbers above change meaning:
+    #:
+    #:   * `depth_ft` is the bay's depth, which is no longer a lane width a designer picks but a
+    #:     consequence of the angle - angled_stall_depth_ft. 20.09 ft at 60 degrees on a 9x18 ft
+    #:     stall, against the 8 ft a parallel lane takes. Still passed in, so a bay measured in
+    #:     the field is declared as measured rather than recomputed from an assumed stall.
+    #:   * `stall_length_ft` stops being the footprint along the kerb. `pitch_ft` is, and it is
+    #:     what everything counting or spacing stalls must divide by.
+    #:   * a divider stops being a cross-section of the lane - see skew_ft.
+    angle_deg: float | None = None
+    #: The stall's width across the car, which the pitch divides. Read only when `angle_deg` is
+    #: set; a parallel stall's footprint along the kerb is its LENGTH, which is a different
+    #: measurement of a different side of the same rectangle.
+    stall_width_ft: float = ANGLED_STALL_WIDTH_FT
+    #: Whether traffic on this side travels OUTWARD along the leg. Only read for angled parking,
+    #: and then it decides which way the bay leans: a driver enters a front-in stall by turning
+    #: across their own path, so the stall points downstream, and only the compass knows which
+    #: way that is on a one-way street. See AddBikeLane.runs_outward, whose default and whose
+    #: reasoning are the same.
+    runs_outward: bool = True
+    #: WHETHER THIS BAY IS A RECORD OR A DECISION, and nothing about the geometry changes
+    #: either way - a drawn stall is a drawn stall. What it changes is what the drawing CLAIMS.
+    #: Every MarkedParking in this repo used to be a proposal, so `has marked parking` was a
+    #: safe reading of `this design restriped this leg`, and TravelLaneHoldsItsTarget is built
+    #: on that reading: it fires when a design narrowed one kerb and left the other over-wide.
+    #: An existing-conditions drawing narrows nothing. Grand Central Ave really does carry
+    #: 14.89 ft between its centre and its observed 60-degree bay, and reported as a defect
+    #: that is the check "reporting reality as a defect" - the thing its own docstring rules
+    #: out. See apply_observed_parking, which is the only caller that sets this.
+    observed: bool = False
     # Where the room this depth was sized on runs out - see LaneNarrowing.end_ft, the same idea
     # for the other kerbside treatment. None draws every run/zone to wherever it would otherwise
     # end (a crossing, the leg's own end); a station caps every run AND every daylight zone at
@@ -76,12 +111,72 @@ class MarkedParking(Treatment):
             raise ValueError(f"A stall needs a length; got stall_length_ft={self.stall_length_ft}.")
         if self.curb_offset_ft < 0:
             raise ValueError(f"A kerb buffer cannot be negative; got {self.curb_offset_ft}.")
+        if self.angle_deg is not None:
+            # Through the geometry's own guard, which is the one place that knows 0 is not
+            # parallel parking arrived at as a limit. Evaluated for its exception.
+            self.pitch_ft   # noqa: B018
+
+    @property
+    def pitch_ft(self) -> float:
+        """How much kerb ONE stall occupies - the figure a run of kerb divides by.
+
+        The stall's own length while the parking is parallel, and `width / sin(theta)` once it is
+        angled. ONE HOME, asked by the ticks, the leftover hatching and metrics alike: dividing a
+        run by 22 ft where the bay holds a stall every 10.39 ft does not draw a wider stall, it
+        draws half as many in the wrong places and then reports that number as capacity.
+        """
+        if self.angle_deg is None:
+            return self.stall_length_ft
+        return angled_stall_pitch_ft(self.stall_width_ft, self.angle_deg)
+
+    @property
+    def stall_line_depth_ft(self) -> float:
+        """How deep off the kerb a DIVIDER is painted, which is not how deep the bay is.
+
+        The same number for parallel parking, where the divider is a cross-section of the lane
+        and spans all of it. For an angled bay it is the stall's own side laid at the stall
+        angle - `L*sin(theta)`, 15.59 ft of a 20.09 ft bay - and the 4.50 ft remainder is the
+        stall's MOUTH, which must stay unpainted because it is where a driver turns in. See
+        angled_stall_line_depth_ft and angled_stall_mouth_ft.
+        """
+        if self.angle_deg is None:
+            return self.depth_ft
+        return angled_stall_line_depth_ft(self.stall_length_ft, self.angle_deg)
+
+    @property
+    def stall_mouth_ft(self) -> float:
+        """The bare gap between the divider's inboard end and the edge of the travel way."""
+        if self.angle_deg is None:
+            return 0.0
+        return angled_stall_mouth_ft(self.stall_width_ft, self.angle_deg)
+
+    @property
+    def skew_ft(self) -> float:
+        """How far along the leg a divider's KERB end sits from its travel-lane end, SIGNED.
+
+        Zero for parallel parking, where a divider is a cross-section of the lane and both of its
+        ends share one station. Otherwise `depth / tan(theta)`, signed by `runs_outward` - see
+        angled_stall_skew_ft, which explains why the sign is the caller's and not the stall's.
+        """
+        if self.angle_deg is None:
+            return 0.0
+        skew = angled_stall_skew_ft(self.stall_line_depth_ft, self.angle_deg)
+        return skew if self.runs_outward else -skew
 
     def describe(self) -> str:
         end = f", end_ft={self.end_ft:.1f}" if self.end_ft is not None else ""
+        # THE ANGLE ONLY WHERE THERE IS ONE, so that a parallel lane's note is the line it always
+        # was and no existing site's provenance moves for a field it does not use.
+        angled = ("" if self.angle_deg is None else
+                  f", angle_deg={self.angle_deg:g}, stall_width_ft={self.stall_width_ft:g}")
+        # AND ONLY WHERE IT IS A RECORD, for the same reason as the angle: a proposal's note is
+        # the line it always was. Said out loud because the two drawings are otherwise identical
+        # here - nothing else in the export separates "this bay is on the ground today" from
+        # "this bay is what we propose", and that is the distinction a reader most needs.
+        recorded = ", observed=True" if self.observed else ""
         return (f"MarkedParking({self.target.leg}, side={str(self.target.side)!r}, "
                 f"depth_ft={self.depth_ft}, stall_length_ft={self.stall_length_ft}, "
-                f"curb_offset_ft={self.curb_offset_ft}{end})")
+                f"curb_offset_ft={self.curb_offset_ft}{angled}{recorded}{end})")
 
     def paint(self, ctx) -> None:
         """The stalls, the hatched buffer between them and the kerb, and the daylight zones
@@ -101,7 +196,10 @@ class MarkedParking(Treatment):
         leg_name, side = self.target.leg, str(self.target.side)
         state = ctx.state
         leg = state.legs[leg_name]
-        depth_ft, stall_length_ft = self.depth_ft, self.stall_length_ft
+        # THE PITCH, not the stall's own length: the two are the same number only while the
+        # parking is parallel (see pitch_ft). Named stall_length_ft still because that is the
+        # parameter every stripes.py helper takes it as - the footprint along the kerb.
+        depth_ft, stall_length_ft = self.depth_ft, self.pitch_ft
         curb_offset_ft = self.curb_offset_ft
         at = ctx.anchors(leg_name, side,
                           inner_offset_ft=leg.curb_to_curb_ft / 2 - depth_ft - curb_offset_ft)
@@ -238,9 +336,12 @@ class MarkedParking(Treatment):
             open_runs = ctx.open_runs(leg_name, side, STALL_DIVIDER, band) if band else []
             for lo, hi in stall_lane_runs_ft(open_runs, stall_length_ft,
                                               keep_inside_ft=MIN_LINE_LENGTH_FT):
+                # THE LINE'S DEPTH, NOT THE BAY'S - stall_line_depth_ft. Identical for
+                # parallel parking, and on an angled bay it holds the divider back from the
+                # travel way by the stall's mouth so the paint does not run across the way in.
                 for divider in parking_stall_lines_ft(
-                        leg, side, depth_ft, stall_length_ft, lo, hi,
-                        curb_offset_ft=stall_curb_offset_ft):
+                        leg, side, self.stall_line_depth_ft, stall_length_ft, lo, hi,
+                        curb_offset_ft=stall_curb_offset_ft, skew_ft=self.skew_ft):
                     ctx.add(STALL_DIVIDER, divider, leg_name, side)
 
             # THE TAIL stall_lane_runs_ft FLOORS AWAY - shorter than a stall, most often the
@@ -335,6 +436,64 @@ def _kerb_already_treated(state: DesignState, leg_name: str, side: str) -> bool:
         return True
     narrowing = state.treatment_for(LaneNarrowing, LegTarget(leg_name))
     return narrowing is not None and Side(side) in narrowing.sides
+
+
+def apply_observed_parking(state: DesignState, model: "IntersectionModel",
+                            runs_outward=None) -> DesignState:
+    """Mark the parking a surveyor RECORDED on each leg - config `legs.<leg>.existing_parking`.
+
+    THIS DRAWS WHAT IS THERE, not a proposal, and it is the counterpart of apply_osm_parking for
+    the case OSM has nothing to say about. Grand Central Ave carries 60-degree angled parking on
+    both kerbs and not one `parking:*` tag anywhere along it, so without this the drawings of
+    that junction showed 20 ft of bare asphalt against each kerb - a false statement about the
+    street of exactly the kind src/geometry/surveyed.py's invariant forbids, and the first thing
+    Danny said about the renders.
+
+    Beside apply_osm_parking rather than in a site's scenarios.py because it is the same job from
+    a second source: turn an observation into treatments. A site file holding it would have made
+    one junction's ground truth private to one proposal, while every scenario of that junction
+    has to draw the same street.
+
+    "Unless otherwise specified", like apply_osm_parking: a leg-side the caller has ALREADY
+    treated is left alone, so a proposal that puts a bike lane on one kerb keeps the observed
+    parking on the other without having to say which side that is.
+
+    `runs_outward(leg, side) -> bool` decides which way an angled bay LEANS, and it is asked
+    rather than assumed because only the caller knows: on a two-way street the traffic beside a
+    kerb runs outward on the leg's right and inward on its left, which is the default here, and on
+    a ONE-WAY street both kerbs run the same compass direction and neither leg's frame knows it
+    (see leg_heads_toward). A bay leaning the wrong way can only be entered by reversing into the
+    travel lane.
+    """
+    if runs_outward is None:
+        def runs_outward(leg, side):
+            return side == "right"
+    for leg_name, leg_cfg in model.config["legs"].items():
+        observed = leg_cfg.get("existing_parking")
+        if not observed:
+            continue        # UNRECORDED, not "no parking" - see site_schema.ExistingParking
+        leg = state.legs.get(leg_name)
+        if leg is None:
+            continue
+        angle_deg = observed.get("angle_deg")
+        width_ft = observed.get("stall_width_ft") or ANGLED_STALL_WIDTH_FT
+        length_ft = observed.get("stall_length_ft") or (
+            ANGLED_STALL_LENGTH_FT if angle_deg else PARKING_STALL_LENGTH_DEFAULT_FT)
+        # THE BAY'S DEPTH IS THE ANGLE'S CONSEQUENCE, not a lane width anybody chose: 20.09 ft
+        # at 60 degrees against the 8 ft a parallel lane takes. Parallel parking keeps the
+        # project's parallel depth, which IS a design figure.
+        depth_ft = (angled_stall_depth_ft(length_ft, width_ft, angle_deg) if angle_deg
+                    else PARKING_STALL_DEPTH_DEFAULT_FT)
+        for side in observed["sides"]:
+            if state.treatment_for(MarkedParking, LegSide(leg_name, side)) is not None:
+                continue
+            if any(t.target == LegSide(leg_name, side) for t in state.treatments_of(AddBikeLane)):
+                continue    # a bikeway on this kerb carries the parking in its own section
+            state = state.apply(MarkedParking(
+                LegSide(leg_name, side), depth_ft=depth_ft, stall_length_ft=length_ft,
+                angle_deg=angle_deg, stall_width_ft=width_ft,
+                runs_outward=runs_outward(leg, side), observed=True))
+    return state
 
 
 def apply_osm_parking(state: DesignState, model: "IntersectionModel", depth_ft: float = PARKING_STALL_DEPTH_DEFAULT_FT,

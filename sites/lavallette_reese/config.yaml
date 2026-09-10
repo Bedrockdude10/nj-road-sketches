@@ -1,0 +1,159 @@
+# Authoritative geometry inputs for NJ 35 northbound (Grand Central Ave) & Reese Ave,
+# Lavallette Borough, NJ 08735.
+#
+# THIS IS THE NORTHBOUND CARRIAGEWAY ONLY, AND THAT IS THE WHOLE POINT OF THE NAME.
+# NJ 35 runs through Lavallette as a ONE-WAY PAIR: NB is Grand Central Ave (SRI
+# 00000035__, NJDOT "South to North", posted 35 mph) and SB is Anna O Hankins Blvd
+# (SRI 00000035Z_, "North to South", posted 45 mph), and at Reese Ave they are
+# 464.6 ft apart. "NJ 35 & Reese Ave" therefore names TWO junctions, not one; this
+# site is the eastern (ocean-side) of the two. The SB junction is a separate site
+# and sites/osm_areas.yaml is already sized to contain it.
+
+data_sources:
+  road_network: data/NJ_Roadway_Network.geojson
+  # NO PARCELS AND NO TAX LIST. Lavallette is in Ocean County and this project has only
+  # downloaded Mercer's, so both keys are omitted rather than pointed at Mercer's files -
+  # an Ocean County bbox against the Mercer shapefile returns ZERO ROWS, which reads
+  # downstream as "nothing mapped here" rather than as the wrong county (see
+  # .claude/SKILLS.md section 6). Nothing geometric reads either layer: the plan sheet
+  # draws no parcel boundaries, the 3D export carries no corner outlines, and every
+  # building takes DEFAULT_BUILDING_HEIGHT_M flagged SOURCE_ASSUMED - which is what
+  # would happen here anyway, because 0 of the 43 OSM buildings around this junction
+  # carry `height` or `building:levels`.
+
+intersection:
+  name: "NJ 35 NB (Grand Central Ave) & Reese Ave, Lavallette Borough, NJ 08735"
+  municipality: "Lavallette Borough"
+  center_wgs84: [-74.0684420, 39.9733400]
+  street1: "Grand Central Ave"
+  street2: "Reese Ave"
+  anchor_query: "Grand Central Avenue, Lavallette, NJ 08735"
+  resolution_method: >
+    OSM/Overpass way-endpoint match - Grand Central Avenue (way 876102077) and Reese
+    Avenue (way 11733285) share one node exactly (0.00000000 deg apart). Cross-checked
+    against the NJDOT Roadway Network: the centrelines of SRI 00000035__ and SRI
+    15151042__ intersect at (-74.0684452, 39.9733493), 3.5 ft from the OSM node - two
+    independent sources agreeing to well under a lane width.
+  # 130 m, NOT the 150 m the Mercer sites use, and the difference is deliberate: the
+  # SOUTHBOUND carriageway of the same route is 141.6 m away, so a 150 m clip pulls Anna
+  # O Hankins Blvd into this junction's road network as a stub of a street that is a
+  # different SRI and a different junction. 130 m still exceeds the longest leg drawn
+  # here even on a 2.5x sheet (190 ft = 58 m, 475 ft = 145 m... see below).
+  clip_radius_m: 130
+  leg_working_length_ft: 130
+  # All four approaches carry an OSM-mapped `footway=crossing` (ways 1557764180/81/82/83,
+  # one per leg, 26-48 ft out) traced by Danny 2026-09-10 along with the kerbs.
+  # CAVEAT WORTH READING: none of those four carries a `crossing:markings` tag, so what is
+  # attested is that a crossing EXISTS on each leg, not that it is painted. The one marked
+  # crossing nearby with `crossing:markings=yes` is 761 ft away and not at this junction.
+  # Listing all four assumes a beach-town state-highway junction marks its crossings;
+  # correct this list if a street-view check says otherwise.
+  existing_marked_crosswalks: ["grand_central_ave_north", "grand_central_ave_south",
+                               "reese_ave_east", "reese_ave_west"]
+
+corridor:
+  jurisdiction: "State"
+  functional_class: "Urban Principal Arterial"
+  # OSM `maxspeed=35 mph` on Grand Central Ave. Note the SB carriageway is posted 45 -
+  # the pair is not symmetric, which matters for any turn-speed argument.
+  speed_limit_mph: 35
+  lanes: 2
+  one_way: true          # OSM `oneway=yes` on the whole NB carriageway
+  median_type: "None"
+  median_width_ft: 0
+
+# EVERY WIDTH BELOW IS MEASURED OFF DANNY'S OWN TRACED KERB, not estimated and not read
+# off a parcel gap. Method: project the traced `barrier=kerb` ways to EPSG:3424, cut a
+# perpendicular through the leg centreline every 5-10 ft, and take the sum of the left
+# and right distances to the nearest kerb at each cut. Both figures per leg are quoted so
+# the spread is visible - a tight spread is what says the two kerbs are parallel and real.
+legs:
+  grand_central_ave_north:
+    sri: "00000035__"
+    bearing_deg: 6.6
+    street_name: "Grand Central Avenue (NJ 35 NB, north of Reese Ave)"
+    working_length_ft: 190
+    # 190 and not the site default of 130 because that is where the tracing stops: the kerb
+    # is traced to 195 ft on BOTH sides of this leg, and past the shorter of the two
+    # curb_line_from_points would be extrapolating from a bearing. The extra 60 ft is what
+    # puts a full run of kerbside parking and the bike lane behind it in frame rather than
+    # one stall and a taper.
+    curb_to_curb_ft: 70.05
+    width_provenance: osm_derived
+    centerline_style: none   # a ONE-WAY carriageway has no centre stripe - OSM `oneway=yes`
+    source: >
+      Traced kerb (OSM barrier=kerb, Danny, 2026-09-10), 17 perpendicular cuts from
+      station 20 to 190: median 70.05 ft, range 69.69-70.33 ft. Split about the NJDOT
+      centreline is 39.39 ft left / 30.66 ft right, i.e. the alignment sits ~4.4 ft off
+      the middle - normal, and the reason the traced kerb rather than the nominal
+      half-width is the datum for whether there is room.
+    # WHAT IS ON THE GROUND TODAY, and the reason this key exists (see src/site_schema.py:
+    # ExistingParking). OSM has NO parking:* tag anywhere on Grand Central Ave, so nothing in
+    # the pipeline can infer this and a render without it draws 20 ft of bare asphalt against
+    # each kerb - which is what the first drawings of this junction did, wrongly.
+    existing_parking:
+      sides: ["left", "right"]
+      angle_deg: 60
+      source: >
+        FIELD OBSERVATION, Danny, 2026-09-10: 60-degree angled parking against BOTH kerbs, and
+        expected to stay that way - the borough wants as much parking as the street can hold.
+        The ANGLE is observed; the 9 x 18 ft stall behind it is not, and is the project's
+        standard (N.J.A.C. 5:21, see ANGLED_STALL_WIDTH_FT). At 60 degrees that is a 20.09 ft
+        bay taking 10.39 ft of kerb per stall, so the two bays spend 40.18 ft of the 69.55 ft
+        between the traced kerbs and leave 14.69 ft per travel lane - which is what makes a bike
+        lane fit here at all, out of the lanes' surplus rather than out of the parking.
+
+  grand_central_ave_south:
+    sri: "00000035__"
+    bearing_deg: 186.7
+    street_name: "Grand Central Avenue (NJ 35 NB, south of Reese Ave)"
+    working_length_ft: 190
+    curb_to_curb_ft: 70.35
+    width_provenance: osm_derived
+    centerline_style: none
+    source: >
+      Same method and same trace as grand_central_ave_north: 18 cuts from station 20 to
+      190, median 70.35 ft, range 70.13-71.01 ft; 29.50 ft left / 40.83 ft right.
+    existing_parking:
+      sides: ["left", "right"]
+      angle_deg: 60
+      source: >
+        Same observation as grand_central_ave_north - it is one street through the junction, and
+        the bays run continuously past Reese Ave on both kerbs.
+
+  reese_ave_east:
+    sri: "15151042__"
+    bearing_deg: 96.6
+    street_name: "Reese Avenue (east of Grand Central Ave)"
+    curb_to_curb_ft: 40.4
+    width_provenance: osm_derived
+    centerline_style: none   # NOT CONFIRMED - see below
+    source: >
+      Traced kerb, but from a SHORT SPAN and that is the caveat: the tracing here wraps the
+      corner returns and stops, so only stations 35 and 40 have kerb on both sides at once
+      (40.42 and 40.32 ft; 22.7 ft left / 17.6 ft right). Inside station 35 the probe is in
+      the junction mouth where the kerb flares, and past 40 there is no trace. The number is
+      ground truth, not an estimate, but it rests on two cuts - extend the trace along Reese
+      to firm it up. `centerline_style: none` is INFERRED from a 40 ft residential street in
+      a small borough, NOT confirmed by photo review the way the Hopewell sites' styles are.
+
+  reese_ave_west:
+    sri: "15151042__"
+    bearing_deg: 277.1
+    street_name: "Reese Avenue (west of Grand Central Ave)"
+    curb_to_curb_ft: 40.9
+    width_provenance: osm_derived
+    centerline_style: none   # NOT CONFIRMED - same as reese_ave_east
+    source: >
+      Same method and caveat as reese_ave_east: stations 45 and 50 only (40.90 and 40.89 ft;
+      17.5 ft left / 23.4 ft right).
+
+treatments:
+  # A fallback only: load_intersection_model prefers a radius fitted to the traced kerb
+  # (_corner_radii_from_osm), and the corners here ARE traced, so this number is what gets
+  # used only if that fit fails on a corner.
+  existing_corner_radius_ft: 25
+  existing_corner_radius_source: >
+    ESTIMATE, and expected to be superseded by the traced kerb at every corner. 25 ft is
+    typical of a state-highway corner carrying turning buses, and larger than the 20 ft the
+    Hopewell borough sites use for a local-street corner.

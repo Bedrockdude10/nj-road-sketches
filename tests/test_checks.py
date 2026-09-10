@@ -22,7 +22,8 @@ from src.checks import (
     assert_scene_valid,
 )
 from src.geometry.model import Leg
-from src.geometry.treatments import DesignState
+from src.geometry.targets import LegSide
+from src.geometry.treatments import DesignState, MarkedParking
 
 
 def run(check, **fields):
@@ -557,3 +558,73 @@ def test_a_refusal_nowhere_near_the_facilitys_end_excuses_nothing():
     assert "120.0" in violations[0].detail, (
         f"nothing adjacent to the paint's end was refused, so the whole kerb is what it fell "
         f"short of: {violations[0].detail}")
+
+
+# --------------------------------------------------------------------------
+# TravelLanesHoldTheTarget: a RESTRIPED leg, which is not the same as a marked one
+# --------------------------------------------------------------------------
+
+def a_wide_leg(name="east", width_ft=70.0):
+    """Grand Central Ave's width, near enough: 35 ft a side, so a 20 ft bay leaves 15 ft."""
+    return Leg(name=name, centerline=LineString([(0, 0), (190, 0)]), curb_to_curb_ft=width_ft)
+
+
+def test_a_proposal_that_marks_one_kerb_and_leaves_the_other_over_wide_is_caught():
+    """The case the check exists for, pinned FIRST so the exemption below cannot hollow it out.
+
+    A design that decided to restripe this leg left 15 ft of lane against the other kerb. That
+    is spare width the design chose not to assign, which is the omission the check names.
+    """
+    from src.checks import TravelLanesHoldTheTarget
+
+    leg = a_wide_leg()
+    # 24 ft, so the LEFT lane comes out at the 11 ft target exactly and the only thing this
+    # test reports is the kerb the design forgot. A 20 ft bay leaves 15 ft on BOTH sides and
+    # the assertion below would pass on a check that had simply flagged everything.
+    state = a_state({"east": leg}).apply(
+        MarkedParking(LegSide("east", "left"), depth_ft=24.0, stall_length_ft=22.0))
+    found = run(TravelLanesHoldTheTarget(), state=state)
+    assert [v.check for v in found] == ["travel_lane_over_target"]
+    assert "east right" in found[0].detail
+
+
+def test_a_bay_that_is_ALREADY_THERE_is_not_a_design_leaving_a_lane_over_wide():
+    """observed=True, and nothing else about the treatment changes - see MarkedParking.observed.
+
+    An existing-conditions drawing of Grand Central Ave marks the 60-degree bays the street
+    already has against both kerbs and leaves 14.89 ft between each bay and the centre. Reported
+    as a defect that is the check reporting REALITY as a defect - which its own docstring rules
+    out in the paragraph beginning "ONLY LEGS THAT CARRY PAINT". The frame was wrong, not the
+    property: `carries marked parking` was a safe reading of `this design restriped this leg`
+    only while every MarkedParking in the repo was a proposal.
+    """
+    from src.checks import TravelLanesHoldTheTarget
+
+    leg = a_wide_leg()
+    state = a_state({"east": leg})
+    for side in ("left", "right"):
+        state = state.apply(MarkedParking(LegSide("east", side), depth_ft=20.0,
+                                          stall_length_ft=22.0, observed=True))
+    assert run(TravelLanesHoldTheTarget(), state=state) == []
+
+
+def test_a_proposal_BESIDE_an_observed_bay_is_still_held_to_the_target():
+    """The exemption is per KERB and the trigger is per LEG, which is the combination that
+    would quietly disable the check on every site that records its existing parking.
+
+    Here the design really did restripe - it proposed a bay on the left - so the leg is in
+    scope, and an over-wide lane against an observed bay on the right is still an omission the
+    design could fix. Read the other way round (any observed bay anywhere exempts the leg) a
+    proposal drawn over recorded conditions could leave any width it liked.
+    """
+    from src.checks import TravelLanesHoldTheTarget
+
+    leg = a_wide_leg()
+    state = (a_state({"east": leg})
+             .apply(MarkedParking(LegSide("east", "left"), depth_ft=24.0, stall_length_ft=22.0))
+             .apply(MarkedParking(LegSide("east", "right"), depth_ft=20.0, stall_length_ft=22.0,
+                                  observed=True)))
+    found = run(TravelLanesHoldTheTarget(), state=state)
+    assert [v.check for v in found] == ["travel_lane_over_target"]
+    assert "east right" in found[0].detail
+

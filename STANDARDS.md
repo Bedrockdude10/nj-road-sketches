@@ -128,6 +128,72 @@ stalls this change appears to cost were never drawn. See
 
 ---
 
+## 1a. New Jersey administrative code — parking stall dimensions — *as cited*
+
+**N.J.A.C. 5:21-4.14 / 4.15** (Residential Site Improvement Standards, off-street parking) —
+*as cited*, meaning the 9 ft and 18 ft below are the ones this repo's comments carry and the rule
+text has not been opened here. The relations derived from them are checked against a published
+table — see below.
+
+| figure | value | constant | file |
+|---|---|---|---|
+| Parking stall width, measured ACROSS the stall | 9 ft | `ANGLED_STALL_WIDTH_FT` | `src/geometry/treatments/` |
+| Parking stall length, measured ALONG the stall | 18 ft | `ANGLED_STALL_LENGTH_FT` | `src/geometry/treatments/` |
+
+**Neither figure maps onto the parallel pair in section 3** (8 ft deep, 22 ft long), and reusing
+either across the two is the trap this row exists to close. A parallel stall's 22 ft is measured
+along the kerb and its 8 ft across; an angled stall's 9 and 18 are measured in the stall's own
+frame, at the stall's angle to the kerb, so **every figure that matters to a drawing is derived
+rather than declared** — see `angled_stall_depth_ft`, `angled_stall_pitch_ft`,
+`angled_stall_line_depth_ft`, `angled_stall_mouth_ft` and `angled_stall_skew_ft` in
+`src/geometry/model/stripes.py`:
+
+| what the drawing needs | relation | 9×18 at 60° | at 90° |
+|---|---|---|---|
+| how deep the bay is off the kerb | `L·sinθ + W·cosθ` | **20.09 ft** | 18.00 ft |
+| how much kerb one stall consumes | `W/sinθ` | **10.39 ft** | 9.00 ft |
+| how deep the PAINTED divider reaches | `L·sinθ` | **15.59 ft** | 18.00 ft |
+| the stall's unpainted MOUTH | `W·cosθ` | **4.50 ft** | 0.00 ft |
+| how far a divider's outer end leads its inner end | `L·cosθ`, i.e. `line depth/tanθ` | **9.00 ft** | 0.00 ft |
+
+θ is measured **from the kerb**, so 90° is head-in and the depth relation degenerates to the
+stall length exactly there. **Dropping the `W·cosθ` term is the plausible-looking mistake**: it
+is the near corner of the stall body reaching past the kerb-side end of the centre axis, and
+without it a 9×18 bay at 60° is understated by **4.50 ft** — a quarter of the bay, and enough
+to report a cross-section as fitting a street it overruns.
+
+The pitch is also **what a stall is counted on**, not the 18 ft: `src/metrics.py`
+`marked_stall_runs` divides a run's length by `parking.pitch_ft`, and `ParkingRun` carries the
+figure as `pitch_ft` for that reason. Counting on the length reports 6 stalls on a bay drawn
+with 12.
+
+**TWO OF THESE ARE CHECKED, AND CHECKING THEM CORRECTED A THIRD.** Kerrville TX's *Parking Lot
+Minimum Design Standards* (Figures 15–17) publish a dimension table by angle, and its `Skew Width
+(D)` — measured along the aisle in the figure — is this project's **pitch**: 10′-5″ at 60° against
+`W/sinθ = 10.39`, and 12′-9″ at 45° against 12.73. Its `Stall Depth (B)` matches `L·sinθ + W·cosθ`
+at **45° (19′-1″ against 19.09)** and at **90° (18′-0″ against 18.00)**. Its 60° depth row reads
+17′-0″, which is the same figure as that row's aisle width and contradicts the formula its own
+other two rows confirm — read as a transcription error, not as a competing standard, and *not*
+adopted. Two rows agreeing to the inch on two independent angles is a mechanism; one row
+disagreeing with its own table is a typo.
+
+**The painted line's length is NOT a published figure and this is the assumption to challenge
+first.** MUTCD §3B.19 and Figure 3B-21 cover parking space markings but illustrate only
+perpendicular stalls and give no angled dimension at all (checked). So the divider is drawn at the
+one length the standard does fix — **the stall's own 18 ft**, laid at the stall angle — which makes
+its reach `L·sinθ` and leaves `W·cosθ` bare. Drawn to the full bay depth instead it comes out
+**23.20 ft**, longer than the stall it divides, and paints across the opening a driver turns
+through; that is what it did until 2026-09-10. See `angled_stall_line_depth_ft` and
+`angled_stall_mouth_ft`.
+
+**Where it is used:** the 60° bays against both kerbs of Grand Central Ave at
+`sites/lavallette_reese`. The **angle there is a field observation** (Danny, 2026-09-10) and not
+a standard — OSM carries no `parking:*` tag anywhere on that street — while the 9×18 stall
+behind it is this row. See `existing_parking` in that site's config and `ExistingParking` in
+`src/site_schema.py`.
+
+---
+
 ## 2. MUTCD
 
 ### A DRIVEWAY IS NOT AN INTERSECTION, and which one a gap is decides the markings — **Verified 2026-08-17**
@@ -343,6 +409,11 @@ Two of these carry project decisions worth knowing:
 - **4 ft is a real floor and the buffer outranks the lane.** Where a kerb is a few inches short,
   the lane narrows toward 4 ft rather than the buffer being spent — a 4.5 ft lane with a post
   beside it beats a 5 ft lane with a truck beside it. See `widest_protected_lane_ft`.
+
+**And the two parking rows are PARALLEL parking only.** 8 ft is a depth off the kerb and 22 ft is
+a length along it, which is the geometry of a stall lying parallel to the street and nothing else.
+An angled bay's figures are in section 1a and are derived from a 9×18 stall at the bay's angle;
+neither pair converts into the other.
 - **Turn speed is labelled *modelled, not measured* wherever it is shown.** It is a comfort model
   of a vehicle tracking the curb face, not a design speed.
 

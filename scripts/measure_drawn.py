@@ -238,7 +238,12 @@ def report_section(built: Built, leg_filter: str | None) -> None:
             continue
         # A dict, keyed by which boundary each offset IS - the ordering across the road is the
         # design, so the names are the half of this worth reading.
-        offsets = {k: float(v) for k, v in offsets_of().items()}
+        # None-VALUED KEYS ARE SKIPPED, NOT FLOATED. offsets_from_centerline_ft carries every
+        # boundary name on every ordering and sets the ones this section does not have to None -
+        # deliberately, so a renderer looking one up gets None rather than a KeyError (see the
+        # note on buffer_inner_line_ft). float(None) raises, which took this whole report down on
+        # any section with an unbuffered or inboard-parking ordering.
+        offsets = {k: float(v) for k, v in offsets_of().items() if v is not None}
         demand = max((abs(v) for v in offsets.values()), default=float("nan"))
         written = f"{', '.join(f'{k}={v:.2f}' for k, v in offsets.items())}"
         for leg_name, side in target_leg_sides(getattr(treatment, "target", None)) or [(None, None)]:
@@ -549,6 +554,22 @@ def report_lanes(built: Built, leg_filter: str | None, bin_ft: float) -> None:
                 why = ("no traced kerb and no paint running along this side" if drawn is None
                        else "nothing drawn in any bin along this side")
                 print(f"{leg_name:22s} {side.value:6s} {style:>7s}  ({why})")
+                continue
+            # A HALF-ROAD IS NOT A LANE, SO IT DOES NOT GET A LANE'S VERDICT. Where nothing
+            # divides the carriageway the figure above is the alignment to the bounding paint,
+            # which the docstring is explicit about - and comparing THAT against an 11 ft lane
+            # target says nothing. It says something WRONG on a design that shifts the travel
+            # way: build_bike_lane_inboard on lavallette_reese puts a 27.55 ft section against
+            # the east kerb of a one-way carriageway, so the two lanes sit between -7.30 and
+            # +14.89 - 11.10 ft each - and this column reported "16 of 16 bins, worst 7.30 ft"
+            # on both halves of a street whose lanes are at target. The width itself is still
+            # printed, because half a road is a real measurement; what is withheld is the
+            # verdict, which is the part that was false.
+            if style == "none":
+                print(f"{leg_name:22s} {side.value:6s} {style:>7s} {np.nanmin(width):7.2f} "
+                      f"{np.nanmedian(width):7.2f} {np.nanmax(width):7.2f} "
+                      f"{int(np.isfinite(width).sum()):5d}  half-road (alignment to paint) - "
+                      f"undivided, so there is no lane here to hold to a target")
                 continue
             under = np.isfinite(width) & (width < TARGET_LANE_WIDTH_FT - 0.01)
             if not under.any():

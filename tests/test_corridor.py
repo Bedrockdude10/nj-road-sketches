@@ -845,7 +845,7 @@ def test_a_narrower_rung_never_costs_an_approach_its_protection():
     The 3x failure is worth keeping as a number, because nothing about it looked like a rounding
     problem from the outside: 168 of that leg's 169 sampled stations held the section, station
     363.6 measured 31.813 ft between kerbs against the 31.820 the rung wanted, and the 0.0036 ft
-    that left each travel lane short of MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT denied a protected
+    that left each travel lane short of MIN_SHIFTED_TRAVEL_LANE_FT denied a protected
     bikeway over all 335 traced feet. That is a fortieth of an inch deciding a corridor.
     """
     from src.geometry.intersection import load_intersection_model

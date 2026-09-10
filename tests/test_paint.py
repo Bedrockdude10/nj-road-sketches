@@ -176,6 +176,234 @@ def test_a_stall_divider_does_not_reach_past_the_kerb():
         assert offsets.max() <= 9.0 + 1e-6
 
 
+# --------------------------------------------------------------------------
+# Angled stalls: three figures, all functions of the angle
+# --------------------------------------------------------------------------
+
+def test_an_angled_bay_is_deeper_than_the_stall_is_long_projected():
+    """The `W*cos(theta)` term, which is the one an eyeballed derivation drops.
+
+    A stall's centre axis reaches `L*sin(theta)` off the kerb, and the STALL BODY reaches
+    further, because its near corner sits half a width to the side of that axis. Dropping the
+    term understates a 9x18 bay at 60 degrees by 4.50 ft - a quarter of the bay, and enough to
+    report a cross-section as fitting a street it overruns.
+    """
+    from math import radians, sin
+    from src.geometry.model.stripes import angled_stall_depth_ft
+
+    depth_ft = angled_stall_depth_ft(18.0, 9.0, 60.0)
+    assert depth_ft == pytest.approx(20.0885, abs=5e-4)
+    axis_only_ft = 18.0 * sin(radians(60.0))
+    assert depth_ft - axis_only_ft == pytest.approx(4.5, abs=5e-4)
+
+
+def test_head_in_stalls_degenerate_to_the_stall_itself():
+    """At 90 degrees the three relations have to collapse to the stall's own dimensions.
+
+    This is the only angle where the answer is known without the trigonometry, so it is the
+    only one that can catch a swapped width and length or an angle measured from the WRONG
+    datum. Every figure here is measured from the KERB, so 90 degrees is head-in - measured
+    from the direction of travel instead, 90 and 0 trade places and each relation below comes
+    out as the other's answer.
+    """
+    from src.geometry.model.stripes import (angled_stall_depth_ft, angled_stall_pitch_ft,
+                                            angled_stall_skew_ft)
+
+    assert angled_stall_depth_ft(18.0, 9.0, 90.0) == pytest.approx(18.0)
+    assert angled_stall_pitch_ft(9.0, 90.0) == pytest.approx(9.0)
+    assert angled_stall_skew_ft(18.0, 90.0) == pytest.approx(0.0)
+    # ...and a shallower bay is deeper, takes more kerb per car, and leans further. All three
+    # move together, which is why they are one module and not three call sites.
+    assert angled_stall_depth_ft(18.0, 9.0, 45.0) > angled_stall_depth_ft(18.0, 9.0, 90.0)
+    assert angled_stall_pitch_ft(9.0, 45.0) > angled_stall_pitch_ft(9.0, 90.0)
+    assert angled_stall_skew_ft(20.0, 45.0) > angled_stall_skew_ft(20.0, 90.0)
+
+
+def test_a_zero_angle_is_refused_rather_than_read_as_parallel():
+    """0 is not parallel parking arrived at as a limit - the relations diverge there.
+
+    A stall lying flat on the kerb has a pitch of `W/sin(0)`, and the honest answer to "how much
+    kerb does it take" is 22 ft from PARKING_STALL_LENGTH_DEFAULT_FT, not an infinity. Silently
+    accepting 0 would draw one divider at the start of the bay and nothing after it.
+    """
+    from src.geometry.model.stripes import angled_stall_depth_ft, angled_stall_pitch_ft
+
+    for angle_deg in (0.0, -30.0, 91.0, 120.0):
+        with pytest.raises(ValueError):
+            angled_stall_depth_ft(18.0, 9.0, angle_deg)
+        with pytest.raises(ValueError):
+            angled_stall_pitch_ft(9.0, angle_deg)
+
+
+def test_a_skewed_divider_leans_down_the_leg_by_its_skew():
+    """The drawn coordinates, not the arithmetic that was supposed to produce them.
+
+    A divider between two angled stalls is NOT one cross-section - that assertion holds for
+    every parallel stall this repo draws (see test_stall_dividers_land_on_their_stations, which
+    says so) and it is exactly what an angled bay breaks. The outer end leads the inner one by
+    `depth/tan(theta)`, and the pitch between dividers is `W/sin(theta)`, which is neither the
+    stall's width nor its length.
+    """
+    from src.geometry.model.stripes import (angled_stall_line_depth_ft, angled_stall_pitch_ft,
+                                            angled_stall_skew_ft)
+
+    # THE LINE'S DEPTH, NOT THE BAY'S - the divider is the stall's SIDE, so the skew that goes
+    # with it is the side's own run along the kerb. Paired with the bay depth instead the skew
+    # comes out 11.60 against a line that spans 9.00, and the stall stops being a rectangle.
+    depth_ft = angled_stall_line_depth_ft(18.0, 60.0)
+    pitch_ft = angled_stall_pitch_ft(9.0, 60.0)
+    skew_ft = angled_stall_skew_ft(depth_ft, 60.0)
+    assert (depth_ft, pitch_ft, skew_ft) == (pytest.approx(15.5885, abs=5e-4),
+                                             pytest.approx(10.3923, abs=5e-4),
+                                             pytest.approx(9.0, abs=5e-4))
+
+    # A kerb far enough out that nothing here is clipped by it - the clip is its own test.
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left", [(0, 30.0), (260, 30.0)])
+    dividers = parking_stall_lines_ft(leg, "left", depth_ft=depth_ft, stall_length_ft=pitch_ft,
+                                      start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                      skew_ft=skew_ft)
+    assert dividers
+    for i, divider in enumerate(dividers):
+        stations, offsets = stations_of(divider, leg)
+        inner_at = stations[np.argmin(offsets)]
+        outer_at = stations[np.argmax(offsets)]
+        assert inner_at == pytest.approx(40.0 + i * pitch_ft, abs=0.05), (
+            "the INNER end is what sits on the pitch - it is the end the next stall's kerb "
+            "frontage is measured from")
+        assert outer_at - inner_at == pytest.approx(skew_ft, abs=0.05)
+        assert offsets.max() - offsets.min() == pytest.approx(depth_ft, abs=0.05)
+
+
+def test_the_painted_divider_is_the_stall_s_own_length_and_leaves_its_mouth_bare():
+    """A divider drawn to the full bay depth paints straight over the way into the stall.
+
+    A bay is `L*sin + W*cos` deep because that is where the far corner of a parked CAR lands.
+    The painted line is the stall's SIDE, so it is `stall_length_ft` of paint at the stall
+    angle and reaches only `L*sin` - and the `W*cos` remainder is the stall's MOUTH, the ground
+    a driver turns across on the way in. Run to the bay depth instead, the line comes out
+    23.20 ft against an 18 ft stall and meets whatever bounds the travel way, so the divider
+    and that boundary read as one line painted across every opening.
+
+    Three things have to agree here or the stall is not a rectangle: the painted LENGTH is the
+    stall's length, the depth it spans is `L*sin`, and the skew is `L*cos`.
+    """
+    from math import cos, radians, sin
+
+    from src.geometry.model.stripes import (angled_stall_depth_ft, angled_stall_line_depth_ft,
+                                            angled_stall_mouth_ft, angled_stall_pitch_ft,
+                                            angled_stall_skew_ft)
+
+    bay_ft = angled_stall_depth_ft(18.0, 9.0, 60.0)
+    line_ft = angled_stall_line_depth_ft(18.0, 60.0)
+    mouth_ft = angled_stall_mouth_ft(9.0, 60.0)
+    assert (bay_ft, line_ft, mouth_ft) == (pytest.approx(20.0885, abs=5e-4),
+                                           pytest.approx(15.5885, abs=5e-4),
+                                           pytest.approx(4.5, abs=5e-4))
+    assert line_ft + mouth_ft == pytest.approx(bay_ft), (
+        "the bay is the painted line plus the mouth, and nothing else - if these stop summing, "
+        "one of the three is being derived from a different stall")
+    # THE MOUTH DOES NOT DEPEND ON THE STALL'S LENGTH, which is what lets a caller holding only
+    # a declared bay depth take the line's depth off it without restating the length.
+    for stall_ft in (16.0, 18.0, 22.0):
+        assert (angled_stall_depth_ft(stall_ft, 9.0, 60.0)
+                - angled_stall_line_depth_ft(stall_ft, 60.0)) == pytest.approx(mouth_ft)
+
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left", [(0, 30.0), (260, 30.0)])
+    dividers = parking_stall_lines_ft(
+        leg, "left", line_ft, angled_stall_pitch_ft(9.0, 60.0), start_ft=40.0, end_ft=200.0,
+        curb_offset_ft=0.0, skew_ft=angled_stall_skew_ft(line_ft, 60.0))
+    assert dividers
+    for divider in dividers:
+        stations, offsets = stations_of(divider, leg)
+        assert divider.length == pytest.approx(18.0, abs=0.05), (
+            "the painted line is the stall's own side, so it is the stall's own length")
+        assert offsets.max() - offsets.min() == pytest.approx(18.0 * sin(radians(60)), abs=0.05)
+        assert stations.max() - stations.min() == pytest.approx(18.0 * cos(radians(60)), abs=0.05)
+        # AND IT STOPS SHORT OF THE TRAVEL WAY BY THE MOUTH. 30 ft kerb less a 20.09 ft bay puts
+        # the bay's inner edge at 9.91 ft; the paint must not come within the mouth of it.
+        assert offsets.min() - (30.0 - bay_ft) == pytest.approx(mouth_ft, abs=0.05)
+
+
+def test_both_treatments_hold_the_divider_back_and_parallel_parking_is_untouched():
+    """The two places a bay gets drawn have to agree, and neither may move parallel parking.
+
+    MarkedParking carries a stall LENGTH and multiplies out; a bikeway section carries only the
+    declared bay DEPTH and subtracts the mouth off it. Two derivations of one figure is the
+    defect shape this repo keeps finding (SKILLS 0a), so they are pinned equal here rather than
+    trusted to stay so - and the parallel case must come out byte-identical to what it always
+    was, because a divider that spans the whole lane is right for a stall lying along the kerb.
+    """
+    from src.geometry.model.stripes import angled_stall_depth_ft
+    from src.geometry.treatments.bikeways.sections import BikeLane
+
+    bay_ft = angled_stall_depth_ft(18.0, 9.0, 60.0)
+    marked = MarkedParking(LegSide("east", "left"), depth_ft=bay_ft, stall_length_ft=18.0,
+                           angle_deg=60.0, stall_width_ft=9.0)
+    section = BikeLane(width_ft=5.0, buffer_ft=2.0, parking_ft=bay_ft,
+                       parking_angle_deg=60.0, parking_stall_width_ft=9.0)
+    assert marked.stall_line_depth_ft == pytest.approx(section.parking_line_depth_ft(), abs=1e-9)
+    assert marked.stall_mouth_ft == pytest.approx(section.parking_mouth_ft(), abs=1e-9)
+    assert marked.skew_ft == pytest.approx(section.parking_skew_ft(runs_outward=True), abs=1e-9)
+    assert marked.stall_line_depth_ft == pytest.approx(15.5885, abs=5e-4)
+
+    # PARALLEL: the divider spans the lane, there is no mouth, and both ends share a station.
+    flat = MarkedParking(LegSide("east", "left"), depth_ft=8.0, stall_length_ft=22.0)
+    assert (flat.stall_line_depth_ft, flat.stall_mouth_ft, flat.skew_ft) == (8.0, 0.0, 0.0)
+    plain = BikeLane(width_ft=5.0, buffer_ft=2.0, parking_ft=8.0)
+    assert (plain.parking_line_depth_ft(), plain.parking_mouth_ft(),
+            plain.parking_skew_ft()) == (8.0, 0.0, 0.0)
+
+
+def test_the_skew_runs_the_way_the_traffic_does():
+    """Which end leads is a design decision, and a bay leaning into the traffic is wrong.
+
+    Front-in stalls lean AWAY from the approaching driver, so on the two kerbs of a one-way
+    street the two bays lean the same way in world terms and OPPOSITE ways in each side's own
+    frame. Nothing about the trigonometry knows this - angled_stall_skew_ft is unsigned and the
+    caller signs it - so the sign is what this test pins.
+    """
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left", [(0, 30.0), (260, 30.0)])
+    leans = {}
+    for skew_ft in (11.6, -11.6):
+        divider = parking_stall_lines_ft(leg, "left", depth_ft=20.09, stall_length_ft=10.39,
+                                         start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                         skew_ft=skew_ft)[0]
+        stations, offsets = stations_of(divider, leg)
+        leans[skew_ft] = stations[np.argmax(offsets)] - stations[np.argmin(offsets)]
+    assert leans[11.6] == pytest.approx(11.6, abs=0.05)
+    assert leans[-11.6] == pytest.approx(-11.6, abs=0.05)
+    # AND NEITHER BAY STARTS OUTSIDE ITS OWN SPAN. A negative skew puts the outer end BEHIND
+    # the inner one, so laying the dividers out from start_ft unshifted would hang the first
+    # one's outer end into the crossing the bay was held clear of.
+    for skew_ft in (11.6, -11.6):
+        for divider in parking_stall_lines_ft(leg, "left", depth_ft=20.09, stall_length_ft=10.39,
+                                              start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                              skew_ft=skew_ft):
+            stations, _offsets = stations_of(divider, leg)
+            assert stations.min() >= 40.0 - 1e-6
+            assert stations.max() <= 200.0 + 1e-6
+
+
+def test_a_skewed_divider_is_still_clipped_to_the_kerb():
+    """The clip is per END, because a skewed divider's two ends are at different stations.
+
+    Clipping both ends against the kerb offset read at ONE station is right for a parallel
+    divider and wrong here by however much the kerb wanders over the skew - 11.6 ft of leg on
+    a 60-degree bay, which is more than the 5-10 ft the kerbs in this project are traced at.
+    """
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left",
+                 [(0, 26.0), (100, 26.0), (160, 14.0), (260, 14.0)])
+    for divider in parking_stall_lines_ft(leg, "left", depth_ft=20.09, stall_length_ft=10.39,
+                                          start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                          skew_ft=11.6):
+        stations, offsets = stations_of(divider, leg)
+        for station, offset in zip(stations, offsets):
+            kerb_ft = float(curb_offsets_at_stations(leg, "left", np.array([station]))[0])
+            assert offset <= abs(kerb_ft) + 1e-6, (
+                f"a divider end at station {station:.1f} reaches {offset:.2f} ft where the kerb "
+                f"is {abs(kerb_ft):.2f} ft out")
+
+
 def test_curb_offsets_are_read_at_the_station_asked_for():
     leg = traced(a_leg(), "left", [(20, 15), (70, 20), (130, 15)])
     got = curb_offsets_at_stations(leg, "left", np.array([20.0, 70.0, 130.0]))
