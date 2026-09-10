@@ -1515,3 +1515,161 @@ def test_a_stall_keeps_its_clearance_from_the_driveway_return():
         f"itself, and every zone at this driveway is paying for it")
     assert openings.against(PARKING_EDGE_LINE) is None, (
         "and (09) still carries the edge line straight through, clearance or no clearance")
+
+
+# --------------------------------------------------------------------------
+# The white lane line - a broken line between lanes running the SAME way
+# --------------------------------------------------------------------------
+
+def a_straight_leg(name="north", length_ft=190.0, width_ft=70.0):
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+
+    return Leg(name=name, centerline=LineString([(0, 0), (0, length_ft)]),
+                curb_to_curb_ft=width_ft)
+
+
+def test_a_white_lane_line_is_broken_exactly_where_a_yellow_one_is():
+    """Same geometry, different meaning - so the pattern is shared and only the colour differs.
+
+    MUTCD 11th ed. 3A.04 P6 gives ONE broken-line ratio, and the dash spans are what both views
+    draw from, so a second dash loop for the white style would be a second place for the two
+    renderers to disagree about where a line breaks.
+    """
+    from src.render.crosswalks import centerline_paint_ft
+
+    leg = a_straight_leg()
+    yellow = centerline_paint_ft(leg, 20.0, "single_yellow_dashed")
+    white = centerline_paint_ft(leg, 20.0, "single_white_dashed")
+    assert len(white) == len(yellow) > 0
+    for w, y in zip(white, yellow):
+        assert w.equals(y)
+
+
+def test_a_centerline_style_nobody_declared_is_refused_rather_than_drawn_yellow():
+    """The fallthrough used to BE the dashed branch, which is the expensive kind of wrong.
+
+    A typo in a config's centerline_style validated (the schema catches that one) or a treatment
+    setting a style this function had not heard of both landed in the dash loop and came out as
+    a yellow centre line - a confident, plausible marking asserting oncoming traffic. Nothing
+    downstream could tell it from a real one.
+    """
+    import pytest
+
+    from src.render.crosswalks import centerline_paint_ft
+
+    with pytest.raises(ValueError, match="unknown centerline style"):
+        centerline_paint_ft(a_straight_leg(), 20.0, "single_white_solid")
+
+
+def test_every_valid_style_is_something_both_renderers_can_draw():
+    """A style in the vocabulary that no renderer has a colour for draws nothing, silently.
+
+    `none` is the one that legitimately draws nothing. Every other style has to produce paint
+    AND be classified as yellow or white, because the two views pick their material off exactly
+    that classification.
+    """
+    from src.geometry.treatments import (CENTERLINE_IS_WHITE, VALID_CENTERLINE_STYLES)
+    from src.render.crosswalks import centerline_paint_ft
+
+    leg = a_straight_leg()
+    for style in VALID_CENTERLINE_STYLES:
+        drawn = centerline_paint_ft(leg, 20.0, style)
+        if style == "none":
+            assert drawn == []
+            continue
+        assert drawn, f"{style} draws nothing"
+        assert isinstance(style in CENTERLINE_IS_WHITE, bool)
+    assert set(CENTERLINE_IS_WHITE) <= set(VALID_CENTERLINE_STYLES)
+
+
+def test_blender_centerline_colours_match_the_styles():
+    """blender_scene.py's white-style list and treatments.CENTERLINE_IS_WHITE are one set.
+
+    Blender runs in its own interpreter and cannot import src (see .importlinter), so the two are
+    a copy by necessity - the same pair as the stroke widths above, and the same way of pinning
+    them. Drift here is invisible: the render simply lays the line in the other material, and a
+    lane line that comes out yellow says the next lane runs at you.
+    """
+    import ast
+    from pathlib import Path
+
+    from src.geometry.treatments import CENTERLINE_IS_WHITE
+
+    source = (Path(__file__).resolve().parent.parent
+              / "scripts" / "blender" / "blender_scene.py").read_text()
+    declared = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            try:
+                declared[node.targets[0].id] = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                continue
+    assert "CENTERLINE_STYLES_WHITE" in declared, (
+        "blender_scene.py no longer declares CENTERLINE_STYLES_WHITE - the guard has nothing to "
+        "read, which is not the same as the two agreeing")
+    assert set(declared["CENTERLINE_STYLES_WHITE"]) == set(CENTERLINE_IS_WHITE)
+
+
+def test_the_plan_view_draws_a_lane_line_white_and_a_centre_line_gold():
+    """The colour is read off the style in the 2D view too, not hardcoded at the call site.
+
+    Both views hardcoded gold before, so adding a style was two edits with nothing to catch the
+    second - and the plan view is where a reviewer checks what the render claims.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent
+              / "src" / "render" / "plan_view.py").read_text()
+    tree = ast.parse(source)
+    hardcoded_gold = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "plot"
+        and any(kw.arg == "color" and isinstance(kw.value, ast.Constant)
+                and kw.value.value == "gold" for kw in node.keywords)]
+    assert not hardcoded_gold, (
+        "a plan-view line is still drawn gold unconditionally - the centreline's colour has to "
+        "come from its style, or a white lane line is drawn as a yellow centre line")
+
+
+def test_a_one_way_lane_pinned_to_its_kerb_MOVES_THE_LINE_BETWEEN_THE_TRAVEL_LANES():
+    """DesignState.travel_lane_divider_shift must see every pinned section, not the two-way ones.
+
+    It looked up AddTwoWayBikeLane by name and asked divider_shift_toward_ft only about the legs
+    that lookup found, so a section pinned by a ONE-WAY lane shifted the travel way, the checks
+    measured the shift (they ask the function directly) and the PAINT stayed on the alignment.
+    That is the second-derivation defect .claude/SKILLS.md section 2 is about, and it only became
+    visible when there was a line down the middle to misplace: NJ 35 NB's two northbound lanes
+    would have come out 3.70 ft different in width under a lane line claiming to divide them
+    equally.
+
+    Asserted against divider_shift_toward_ft rather than against a number, because the point is
+    that ONE definition answers for both - a literal here would be a third copy.
+    """
+    from src.geometry.targets import LegSide, Side
+    from src.geometry.treatments import (AddBikeLane, DesignState,
+                                         divider_shift_toward_ft)
+
+    leg = a_straight_leg(name="east", width_ft=70.0)
+    state = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+        # Pinned, one-way, behind an angled bay - the NJ 35 NB section, which is the only
+        # shape of section this used to miss.
+        AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=2.0,
+                     parking_ft=20.09, parking_angle_deg=60, pin_to_kerb=True))
+    shift = state.travel_lane_divider_shift("east")
+    assert shift is not None, (
+        "a pinned one-way lane shifts the travel way, so the line between the travel lanes is "
+        "not on the alignment - see divider_shift_toward_ft, which has known this all along")
+    distance_ft, side = shift
+    assert distance_ft > 0 and side == str(Side.LEFT)   # away from the kerb carrying the lane
+    assert distance_ft == pytest.approx(
+        divider_shift_toward_ft(state, "east", Side.LEFT), abs=1e-9)
+
+    # And the other direction: an UNPINNED lane leaves the lanes straddling the alignment, so
+    # None still means None. Without this the fix could be "always return a shift".
+    unpinned = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+        AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=2.0))
+    assert unpinned.travel_lane_divider_shift("east") is None

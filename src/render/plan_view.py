@@ -13,7 +13,8 @@ from src.geometry.model import inset_point_at_station, trimmed_curb_lines
 from src.geometry.intersection import (IntersectionModel, drawn_kerb_radius_ft,
                                        kerb_lines_with_tags_ft)
 from src.geometry.kerbs import KerbType
-from src.geometry.treatments import DesignState, RaiseCrossing, RefugeIsland
+from src.geometry.treatments import (CENTERLINE_IS_WHITE, DesignState, RaiseCrossing,
+                                     RefugeIsland)
 from src.provenance import PLOT_STYLE, built_width_provenance
 from src.geometry import markings
 from src.geometry.markings import require_every_kind
@@ -681,8 +682,13 @@ def _draw_centerlines(ax, scene: SceneGeometry):
         # divider between them moves with them. None on every leg of every other scenario.
         shift = state.travel_lane_divider_shift(leg_name)
         shift_ft, shift_side = shift if shift is not None else (0.0, None)
+        # WHITE WHERE THE LANES RUN THE SAME WAY, gold where they oppose - off the style, not
+        # hardcoded here, because the 3D render makes the same choice from the same table and
+        # the two used to hardcode it separately (SKILLS.md section 3: the channel decides the
+        # colour, and this line is the one marking that has no channel).
+        colour = "white" if style in CENTERLINE_IS_WHITE else "gold"
         for line in centerline_paint_ft(leg, start_ft, style, shift_ft, shift_side):
-            ax.plot(*line.xy, color="gold", lw=1.2, zorder=4)
+            ax.plot(*line.xy, color=colour, lw=1.6 if colour == "white" else 1.2, zorder=4)
 
 
 # What OSM says about kerbside parking, and what that produced. Colour is the OSM statement
@@ -885,6 +891,8 @@ def legend_handles():
         Line2D([0], [0], color="steelblue", lw=1, ls=(0,(4,2)), label="OSM sidewalk centerline"),
         Line2D([0], [0], color="#3b6ea5", lw=0.9, ls=(0,(7,3,1,3)), label="Leg centerline (widths measured from this)"),
         Line2D([0], [0], color="gold", lw=1.2, label="Centerline paint (double yellow / dashed)"),
+        Line2D([0], [0], color="white", lw=1.6,
+                label="Lane line - broken WHITE, lanes running the same way"),
         Patch(facecolor="white", edgecolor=PARKING_LEGALITY_COLOR["restricted"],
                label="OSM: parking restricted"),
         Patch(facecolor="white", edgecolor=PARKING_LEGALITY_COLOR["allowed"],

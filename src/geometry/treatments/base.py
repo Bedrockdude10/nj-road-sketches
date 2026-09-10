@@ -82,10 +82,24 @@ def kerbside_allowance_ft(leg, side: str) -> float:
     return narrowest_half_width_ft(leg, side) - TARGET_LANE_WIDTH_FT
 
 # What is painted down the middle of a leg TODAY: a dashed yellow line (the ordinary two-way
-# marking), a solid double yellow (no-passing), or none at all. Read from a site's config.yaml
-# per leg (see sites/README.md), street-view confirmed like the `signals` block.
+# marking), a solid double yellow (no-passing), a broken WHITE lane line, or none at all. Read
+# from a site's config.yaml per leg (see sites/README.md), street-view confirmed like the
+# `signals` block.
+#
+# THE COLOUR IS THE MEANING, NOT A DRAWING PREFERENCE, and that is why single_white_dashed is a
+# style here rather than a rendering flag: yellow separates OPPOSING directions and white
+# separates lanes going the SAME way (MUTCD 11th ed. 3B.06 P1 and 3B.01 P1 - see STANDARDS.md).
+# A one-way carriageway with two lanes has a line down its middle and it is not a centre line;
+# drawing it yellow would tell a driver there is oncoming traffic in the next lane, and drawing
+# nothing - which is what this vocabulary forced until now - tells them there is one lane.
 DEFAULT_CENTERLINE_STYLE = "single_yellow_dashed"
-VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "none")
+VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "single_white_dashed", "none")
+
+#: The styles that are painted as a broken line, and the colour each renderer draws them in. One
+#: table rather than a branch per view: the plan view and the 3D render each used to hardcode
+#: yellow at their own call site, so a new style was two edits with nothing to catch the second.
+CENTERLINE_IS_DASHED = ("single_yellow_dashed", "single_white_dashed")
+CENTERLINE_IS_WHITE = ("single_white_dashed",)
 
 # Float slack when comparing a requested width against the room a leg has. The widths
 # themselves are specified to a tenth of a foot; this only absorbs the arithmetic.

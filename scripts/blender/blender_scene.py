@@ -187,6 +187,12 @@ TWO_POINT_CHANNELS = (
     "parking_buffer_hatch_lines", "bike_lane_hatch_lines",
 )
 TWO_POINT_WIDTH_M = 0.15
+# The centerline styles drawn in the WHITE marking material rather than the yellow one - a
+# broken lane line between two lanes running the same way. Blender runs under its own bundled
+# Python and cannot import src, so this mirrors src/geometry/treatments/base.py:
+# CENTERLINE_IS_WHITE the same way SAMPLED_POLYLINE_CHANNELS mirrors the channel widths, and is
+# pinned to it by a test for the same reason.
+CENTERLINE_STYLES_WHITE = ("single_white_dashed",)
 
 
 
@@ -548,13 +554,21 @@ def build_scene(data: dict):
         # boundary: the plan view had it right the whole time and nothing could compare them.
         painted = leg.get("centerline_paint_m")
         if painted is not None:
+            # YELLOW SEPARATES OPPOSING DIRECTIONS, WHITE SEPARATES LANES GOING THE SAME WAY
+            # (MUTCD 11th ed. 3B.01 P1 and 3B.06 P1). The material used to be centerline_mat
+            # unconditionally, which is why a one-way carriageway's lane line could not be drawn
+            # at all: its geometry is this same line down the middle of the road, and coming out
+            # yellow it would have told a driver the next lane runs at them. CENTERLINE_STYLES_
+            # WHITE mirrors treatments.CENTERLINE_IS_WHITE, which Blender cannot import - pinned
+            # by tests/test_paint.py:test_blender_centerline_colours_match_the_styles.
+            line_mat = marking_mat if centerline_style in CENTERLINE_STYLES_WHITE else centerline_mat
             for i, line in enumerate(painted):
                 # The raw [x, y] pairs, as every other add_paint_polyline caller passes: it
                 # reaches add_paint_line, which builds its own 3D vectors with `(*p, 0.0)`.
                 # Handing it mathutils.Vector((x, y, 0)) instead made that `(x, y, 0, 0.0)` and
                 # Blender refused the addition - 13 scenes failed to render at all.
                 add_paint_polyline(f"centerline_{leg['name']}_{i}", line,
-                                    CENTERLINE_WIDTH_M, centerline_mat)
+                                    CENTERLINE_WIDTH_M, line_mat)
         elif centerline_style == "double_yellow":
             add_double_yellow_centerline(f"centerline_{leg['name']}", near, far, centerline_mat,
                                           start_m=centerline_start_m)

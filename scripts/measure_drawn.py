@@ -61,7 +61,7 @@ from src.geometry.paint import junction_mouths_ft
 from src.geometry.targets import BOTH_SIDES
 from src.geometry.treatments.base import TARGET_LANE_WIDTH_FT, kerbside_allowance_ft
 from src.render.crosswalks import crosswalk_reach_on_leg_side_ft
-from src.geometry.treatments import DesignState
+from src.geometry.treatments import DesignState, existing_conditions
 from src.render.export import (BUILDING_CONTEXT_RADIUS_M, KERB_RADIUS_M,
                                TRAFFIC_CONTROL_RADIUS_M)
 from src.render.frame import FRAME_SCALE_ENV
@@ -99,9 +99,18 @@ def build(site: str, scenario: str | None) -> Built:
     quiet = io.StringIO()
     with contextlib.redirect_stdout(quiet):
         model = load_intersection_model(site=site)
-        state = DesignState.from_model(model)
         if scenario:
-            state = run_scenario(getattr(load_site_scenarios(site), scenario), state, model)
+            # ON THE UNTREATED STREET, because that is what a builder is handed: a treatment is
+            # added and never removed, so a scenario that has to take a kerb needs it clear.
+            state = run_scenario(getattr(load_site_scenarios(site), scenario),
+                                  DesignState.from_model(model), model)
+        else:
+            # NO SCENARIO MEANS THE STREET AS IT IS, which is what the renders label "Existing
+            # Conditions" - not from_model, which is the same street with its observed markings
+            # left off. Measuring from_model here reported a 35 ft half-road on a leg whose
+            # existing-conditions drawing has a 20 ft angled bay against each kerb, which is the
+            # measuring tool making the mistake its own report is supposed to catch.
+            state = existing_conditions(model)
         crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
         scene = SceneGeometry.resolve(model, state, crossings)
         props = build_props(model, state, scene.crosswalk_offsets, model.center_ft,
@@ -486,6 +495,7 @@ def report_lanes(built: Built, leg_filter: str | None, bin_ft: float) -> None:
     driver gets is narrower still by half the centre stripe, which is a constant across every
     leg here and so not what any of these rows are about.
     """
+    from src.geometry.treatments import CENTERLINE_IS_DASHED
     from src.render.crosswalks import centerline_paint_ft, centerline_start_ft
 
     state, scene = built.state, built.scene
@@ -518,11 +528,24 @@ def report_lanes(built: Built, leg_filter: str | None, bin_ft: float) -> None:
             # then reads the drawn line through the hole, which is what the dashed case needed
             # anyway - so a bin no stripe reaches, or only half of one does, says nothing rather
             # than saying something wrong.
+            #
+            # AND WHAT COUNTS AS "ONE STRIPE" IS THE STYLE'S, NOT THE LIST'S. A double yellow is
+            # TWO parallel stripes and each is one LineString; a dashed line is ONE stripe cut
+            # into N dashes, each also a LineString. Averaging per-LineString over the dashed
+            # case takes the mean of 23 arrays that are NaN almost everywhere - so every bin came
+            # out NaN, and this whole report said "nothing drawn in any bin along this side" on a
+            # leg with a divider running down it. It never fired before only because every
+            # centreline in the repo was double_yellow or none; single_yellow_dashed is the
+            # project DEFAULT and would have hit it the moment a leg used it.
+            groups = ([stripes] if style in CENTERLINE_IS_DASHED
+                      else [[line] for line in stripes])
             divider = np.mean([
                 _bin_stat(edges, bin_ft,
-                          *station_offset_many(leg.centerline,
-                                               np.asarray(line.coords, dtype=float)), np.mean)
-                for line in stripes], axis=0)
+                          *station_offset_many(
+                              leg.centerline,
+                              np.concatenate([np.asarray(line.coords, dtype=float)
+                                              for line in group])), np.mean)
+                for group in groups], axis=0)
             # A DASHED STRIPE LEAVES EMPTY BINS AND THE LINE STILL RUNS THROUGH THEM. The divider
             # is one continuous line that happens to be painted in dashes, so interpolating
             # between two dashes reads the drawn line rather than inventing it. Outside the
@@ -558,13 +581,18 @@ def report_lanes(built: Built, leg_filter: str | None, bin_ft: float) -> None:
             # A HALF-ROAD IS NOT A LANE, SO IT DOES NOT GET A LANE'S VERDICT. Where nothing
             # divides the carriageway the figure above is the alignment to the bounding paint,
             # which the docstring is explicit about - and comparing THAT against an 11 ft lane
-            # target says nothing. It says something WRONG on a design that shifts the travel
-            # way: build_bike_lane_inboard on lavallette_reese puts a 27.55 ft section against
-            # the east kerb of a one-way carriageway, so the two lanes sit between -7.30 and
-            # +14.89 - 11.10 ft each - and this column reported "16 of 16 bins, worst 7.30 ft"
-            # on both halves of a street whose lanes are at target. The width itself is still
-            # printed, because half a road is a real measurement; what is withheld is the
-            # verdict, which is the part that was false.
+            # target says nothing. It says something WRONG wherever the carriageway is not
+            # symmetric about its alignment: reese_ave_east measures 17.19 ft from alignment to
+            # bounding paint, which read as a lane is 6.19 ft OVER target on a street where
+            # nothing divides the two directions at all. The width itself is still printed,
+            # because half a road is a real measurement; what is withheld is the verdict, which
+            # is the part that was false.
+            #
+            # A ONE-WAY STREET IS NOT THIS CASE, and was read as it. Grand Central Ave has no
+            # CENTRE line - it is one-way, and there is no opposing traffic to separate - but its
+            # two same-direction lanes are divided by a white lane line (single_white_dashed), so
+            # it has a drawn divider and does get a verdict: 11.00 and 11.19 ft under
+            # build_bike_lane_inboard, against 14.89 ft each as the street stands.
             if style == "none":
                 print(f"{leg_name:22s} {side.value:6s} {style:>7s} {np.nanmin(width):7.2f} "
                       f"{np.nanmedian(width):7.2f} {np.nanmax(width):7.2f} "

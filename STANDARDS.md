@@ -370,6 +370,47 @@ the paint only makes it visible; mid-block, the paint is what creates it. That i
 difference between the two, and it is why an unmarked intersection approach still carries a
 setback and an unmarked mid-block stretch does not.
 
+### The line between two lanes going the same way is WHITE — **Verified 2026-09-10**
+
+Opened: **MUTCD 11th Edition (December 2023), Part 3**
+([source](https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/part3.pdf)), §3A.04 and §3B.06.
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 3B.06 | 01 | **Standard** | "When used, lane line pavement markings delineating the separation of traffic lanes that have the same direction of travel **shall be white**." |
+| 3B.06 | 03 A | Guidance | lane line markings **should** be used "On all roadways that are intended to operate with **two or more adjacent traffic lanes in the same direction of travel**, except as otherwise required for reversible lanes." |
+| 3B.06 | 05 | **Standard** | where crossing the line with care is not discouraged or prohibited, "the lane line markings **shall consist of a normal width broken white line**." |
+| 3A.04 | 02 A | **Standard** | "Normal line—**4 to 6 inches** wide." |
+| 3A.04 | 06 | Guidance | "**Broken lines should consist of 10-foot line segments and 30-foot gaps**, or dimensions in a similar ratio of line segments to gaps as appropriate for traffic speeds and the need for delineation." |
+
+**What this project draws.** `single_white_dashed` in `VALID_CENTERLINE_STYLES`
+([`src/geometry/treatments/base.py`](src/geometry/treatments/base.py)), classified white by
+`CENTERLINE_IS_WHITE`, which both renderers read so the 2D view and the 3D render cannot pick
+different materials for one line. The geometry is `centerline_paint_ft`
+([`src/render/crosswalks.py`](src/render/crosswalks.py)) — the same dash loop the yellow dashed
+style uses, because ¶06 gives one ratio for every broken line and two loops would be two places
+for the views to break a line differently.
+
+> **Known divergence — the dash ratio, which is ours and not MUTCD's.** `CENTERLINE_DASH_FT` and
+> `CENTERLINE_GAP_FT` are both `1.0 / FT_TO_M` = **3.28 ft**, a 1:1 ratio, against ¶06's 10 ft
+> mark and 30 ft gap (1:3). At render scale a 40 ft period puts two or three marks on a 130 ft
+> leg and the line reads as debris rather than as a dashed line. This is a **Modelled** drawn-scale
+> choice inherited from the yellow dashed centreline, not a reading of the manual, and it predates
+> this row — recorded here because the row above now cites a ratio the code does not use. See
+> section 7.
+
+> **Why this is a "centerline style" at all.** The four values in `VALID_CENTERLINE_STYLES`
+> answer one question — what is painted down the middle of this leg — and on a one-way
+> carriageway the answer is a lane line rather than a centre line. Modelling it as a separate
+> `PaintKind` with its own channel was the other option and was rejected: the geometry is
+> identical (one line down the leg, shifted by `travel_lane_divider_shift` where a bikeway moves
+> the travel lanes), and a second derivation of one line is the defect
+> [`.claude/SKILLS.md`](.claude/SKILLS.md) §2 is about. The cost is that this line, like the
+> yellow centreline it shares a home with, travels per-leg as `centerline_paint_m` rather than in
+> a `CHANNELS` entry, so it carries no stroke width and `MarkingsDoNotCollide` cannot see it.
+
+---
+
 ### Other MUTCD figures — *as cited*
 
 | figure | value | constant | file |

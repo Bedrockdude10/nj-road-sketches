@@ -33,7 +33,8 @@ from src.provenance import VALID_PROVENANCE, VALID_WIDTH_LOCATIONS
 # Mirrors src.geometry.treatments.VALID_CENTERLINE_STYLES, which cannot be imported here
 # without dragging shapely and the geometry stack into every config read. Kept honest by
 # tests/test_site_schema.py:test_centerline_styles_match_treatments.
-VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "none")
+VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow",
+                           "single_white_dashed", "none")
 
 # Mirrors the keys of src.geometry.model.leg_frame._COMPASS_AXES, and mirrored here for the
 # same reason as the styles above. Kept honest by

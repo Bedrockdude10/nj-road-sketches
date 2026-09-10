@@ -5,8 +5,9 @@ proposal here turns on. Grand Central Ave carries NJ 35 NORTHBOUND ONLY (OSM `on
 `lanes=2`, NJDOT "South to North"); the southbound carriageway is Anna O Hankins Blvd, 464.6 ft
 west, and is a different junction and a different site. Three consequences:
 
-  * its two travel lanes run the SAME way, so there is no centre stripe to hold and every leg
-    here is `centerline_style: none`;
+  * its two travel lanes run the SAME way, so there is no centre stripe to hold - what divides
+    them is a broken WHITE lane line (`centerline_style: single_white_dashed`), and a yellow one
+    would tell a driver the next lane runs at them;
   * "the right-hand side" means the EAST kerb on both legs, because northbound traffic runs
     outward along grand_central_ave_north and INWARD along grand_central_ave_south - which is
     why the side is asked for with side_facing(leg, "east") and never written down per leg;
@@ -162,10 +163,11 @@ def build_demo_scenario(baseline: DesignState, model=None) -> DesignState:
     two-way but its `centerline_style: none` is INFERRED rather than observed (see config.yaml),
     and inventing paint off an inference is worse than drawing what is there.
 
-    WHAT IS MISSING AND CANNOT BE DRAWN YET: the white dashed LANE LINE between Grand Central's
-    two northbound lanes. VALID_CENTERLINE_STYLES offers single_yellow_dashed, double_yellow and
-    none, all of which are centre stripes; a one-way multi-lane carriageway needs a white lane
-    divider, which this project has no marking for. `none` is the honest choice of the three.
+    THE LANE LINE BETWEEN GRAND CENTRAL'S TWO NORTHBOUND LANES IS DRAWN, and it is not a centre
+    stripe: `single_white_dashed`, added to VALID_CENTERLINE_STYLES because the vocabulary held
+    only centre stripes and a one-way multi-lane carriageway has no centre to stripe. It is
+    INFERRED from OSM `lanes=2` rather than observed - see config.yaml, where that is said at
+    length - so it is the one marking on this sheet a street-view check could still remove.
     """
     if model is None:
         return baseline

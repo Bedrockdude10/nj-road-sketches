@@ -80,7 +80,18 @@ legs:
     # one stall and a taper.
     curb_to_curb_ft: 70.05
     width_provenance: osm_derived
-    centerline_style: none   # a ONE-WAY carriageway has no centre stripe - OSM `oneway=yes`
+    # NOT a centre stripe - a one-way carriageway has no opposing traffic to separate, and a
+    # yellow line here would say there is. This is the LANE LINE between its two northbound
+    # lanes: white, because MUTCD 11th ed. 3B.06 P1 makes the line between same-direction lanes
+    # white, and broken because 3B.06 P5 makes it broken where changing lanes is permitted.
+    #
+    # INFERRED FROM OSM `lanes=2`, NOT OBSERVED - the same standing as reese_ave_*'s `none`
+    # below, and it should be confirmed the same way. What is attested is that the carriageway
+    # has two lanes; that they are divided by paint is 3B.06 P3A ("should be used on all
+    # roadways ... two or more adjacent traffic lanes in the same direction"), which is Guidance
+    # about what ought to be there. Correct this to `none` if a street-view check finds bare
+    # asphalt between the lanes.
+    centerline_style: single_white_dashed
     # WHICH WAY that one direction runs, which `corridor.one_way: true` does not say and which
     # both the lean of an angled bay and a with-traffic bike lane's arrow need. NJDOT calls SRI
     # 00000035__ "South to North" and OSM tags the whole carriageway `oneway=yes`. Note that
@@ -118,8 +129,8 @@ legs:
     working_length_ft: 190
     curb_to_curb_ft: 70.35
     width_provenance: osm_derived
-    centerline_style: none
-    traffic_heads_toward: north   # the same one-way carriageway - see the northern approach
+    centerline_style: single_white_dashed   # same lane line, same inference - see the north leg
+    traffic_heads_toward: north             # the same one-way carriageway
     source: >
       Same method and same trace as grand_central_ave_north: 18 cuts from station 20 to
       190, median 70.35 ft, range 70.13-71.01 ft; 29.50 ft left / 40.83 ft right.

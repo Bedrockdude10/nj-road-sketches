@@ -15,7 +15,8 @@ from src.render.coords import FT_TO_M, wgs84_to_state_plane
 from src.geometry.model import (crosswalk_estimate_ft, inset_line_ft, leg_clearance_ft,
                                 station_offset_many)
 from src.geometry.targets import Everywhere, LegSide, LegTarget, Side
-from src.geometry.treatments import (AddBikeLane, DesignState, LaneNarrowing, MarkedParking,
+from src.geometry.treatments import (CENTERLINE_IS_DASHED, VALID_CENTERLINE_STYLES,
+                                     AddBikeLane, DesignState, LaneNarrowing, MarkedParking,
                                      ShiftCrosswalk, UpgradeCrosswalkMarkings,
                                      divider_shift_toward_ft)
 
@@ -596,6 +597,16 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
         return [line for line in
                 (painted.offset_curve(sign * DOUBLE_YELLOW_GAP_FT / 2) for sign in (1, -1))
                 if line.geom_type == "LineString" and not line.is_empty]
+    if style not in CENTERLINE_IS_DASHED:
+        # THE FALLTHROUGH USED TO BE THE DASHED BRANCH, so a style this function had never heard
+        # of was drawn as a yellow dashed centre line - the most confident wrong answer available,
+        # and one nothing downstream could see. Both renderers pick their colour off the same
+        # style, so an unknown one has no colour either.
+        raise ValueError(f"unknown centerline style {style!r} - expected one of "
+                         f"{sorted(VALID_CENTERLINE_STYLES)}")
+    # ONE PATTERN FOR BOTH DASHED STYLES. A broken white lane line and a broken yellow centre line
+    # differ in what they mean and in their colour, not in how they are cut - MUTCD 11th ed.
+    # 3A.04 P6 gives one broken-line ratio for both. See STANDARDS.md for the ratio drawn here.
     period_ft = CENTERLINE_DASH_FT + CENTERLINE_GAP_FT
     dashes = []
     at_ft = 0.0

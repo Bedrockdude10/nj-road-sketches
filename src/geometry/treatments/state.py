@@ -180,24 +180,31 @@ class DesignState:
         lanes are different widths.
         """
         # Same reason as centerline_style above - bikeways is layered above state.
-        from src.geometry.treatments.bikeways import AddTwoWayBikeLane, divider_shift_toward_ft
+        from src.geometry.treatments.bikeways import divider_shift_toward_ft
 
-        for treatment in self.treatments_of(AddTwoWayBikeLane):
-            if treatment.target.leg != leg_name:
-                continue
-            # CANONICAL FORM: a NON-NEGATIVE distance paired with the side it is actually on.
-            # The sign is resolved here, once, rather than travelling alongside a side that can
-            # contradict it - a consumer taking abs() of a signed shift draws the paint on the
-            # wrong side of the alignment.
-            #
-            # The divider is NOT always on the far side. It is wherever a target-width lane from
-            # the section's inner edge lands, and on a wide leg (broad_st_west) that is still
-            # short of the alignment, i.e. the shift is toward the lane's own side.
-            toward_left_ft = divider_shift_toward_ft(self, leg_name, Side.LEFT)
-            if toward_left_ft >= 0:
-                return toward_left_ft, str(Side.LEFT)
-            return -toward_left_ft, str(Side.RIGHT)
-        return None
+        # ASKED OF divider_shift_toward_ft AND OF NOTHING ELSE, which is the whole point: this
+        # used to loop over AddTwoWayBikeLane by name first and consult that function only for
+        # the legs it found, so a section pinned by a ONE-WAY lane shifted the travel way, the
+        # checks measured the shift (they ask the function), and the PAINT stayed on the
+        # alignment. NJ 35 NB is that case - a 5 ft lane behind a 20 ft angled bay, pinned - and
+        # it came out with a lane line 3.70 ft off the middle of its own travel way, which is
+        # two northbound lanes 3.70 ft different in width. The lookup was the second derivation
+        # of one fact; see .claude/SKILLS.md section 2.
+        #
+        # CANONICAL FORM: a NON-NEGATIVE distance paired with the side it is actually on. The
+        # sign is resolved here, once, rather than travelling alongside a side that can
+        # contradict it - a consumer taking abs() of a signed shift draws the paint on the wrong
+        # side of the alignment.
+        #
+        # The divider is NOT always on the far side. It is wherever a target-width lane from the
+        # section's inner edge lands, and on a wide leg (broad_st_west) that is still short of
+        # the alignment, i.e. the shift is toward the lane's own side.
+        toward_left_ft = divider_shift_toward_ft(self, leg_name, Side.LEFT)
+        if not toward_left_ft:
+            return None    # nothing moved it - the alignment IS the divider
+        if toward_left_ft > 0:
+            return toward_left_ft, str(Side.LEFT)
+        return -toward_left_ft, str(Side.RIGHT)
 
     def treatment_for(self, kind, target) -> Treatment | None:
         """The treatment of `kind` applied at `target`, or None if there is none.

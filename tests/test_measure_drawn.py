@@ -109,6 +109,18 @@ def test_the_reach_is_the_paint_and_not_its_nearest_vertex(greenwood_two_way):
         f"the measurement is still reading the wrong edge")
 
 
+def a_dashed_leg(style="single_yellow_dashed"):
+    """The same synthetic leg, but with a DASHED divider down it.
+
+    Dashed rather than double, because those two are binned differently and only one of them
+    had ever been measured: every centreline at every site in the committed clip is
+    `double_yellow` or `none`, so the dashed path in report_lanes had no coverage at all.
+    """
+    built = an_undivided_leg()
+    built.state.existing_centerline_styles["nb"] = style
+    return built
+
+
 def an_undivided_leg():
     """One 70 ft leg with a traced kerb and a parking bay, and NO centre stripe.
 
@@ -193,6 +205,38 @@ def test_an_undivided_carriageway_is_not_reported_as_a_lane_under_target():
         # AND THE WIDTH IS STILL THERE. Withholding the verdict must not become withholding the
         # measurement - a row with no number on it is the tool declining to answer.
         assert float(row.split()[3]) == pytest.approx(15.09, abs=0.3), row
+
+
+def test_a_DASHED_divider_is_one_stripe_in_pieces_not_many_stripes():
+    """report_lanes averaged per LineString, which is right for a double yellow and blind here.
+
+    A double yellow is TWO parallel stripes, each one LineString running the leg, and averaging
+    them per-LineString is what keeps an uneven vertex count in a bin from weighting one over
+    the other. A DASHED line is ONE stripe cut into ~23 dashes, each also a LineString - so that
+    same average took the mean of 23 arrays that are NaN almost everywhere, every bin came out
+    NaN, and the report printed "nothing drawn in any bin along this side" for a leg with a
+    divider painted down the middle of it.
+
+    A quantitative tool that cannot see anything must say so rather than pass, and this one did
+    say so - which is the only reason it was caught. It went unnoticed for as long as it did
+    because no leg in the committed clip uses a dashed centreline, and single_yellow_dashed is
+    this project's DEFAULT style.
+    """
+    from scripts.measure_drawn import report_lanes
+
+    for style in ("single_yellow_dashed", "single_white_dashed"):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            report_lanes(a_dashed_leg(style), "nb", 10.0)
+        rows = [line for line in out.getvalue().splitlines() if line.startswith("nb ")]
+        assert len(rows) == 2, out.getvalue()
+        for row in rows:
+            assert "nothing drawn in any bin" not in row, (
+                f"the divider is painted down this leg and the tool cannot see it: {row}")
+            assert row.split()[2] == style, row
+            # The same 15.09 ft the undivided case measures, because the dashes lie ON the
+            # alignment here - what changed is whether the tool can find them, not where they are.
+            assert float(row.split()[3]) == pytest.approx(15.09, abs=0.3), row
 
 
 @needs_source_data
