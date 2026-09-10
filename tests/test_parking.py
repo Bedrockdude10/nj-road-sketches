@@ -89,3 +89,122 @@ def test_a_kerb_that_narrows_only_at_its_tail_still_keeps_the_lane_over_the_reac
     assert tail.narrowest_ft is not None and tail.narrowest_ft > 0
     assert f"{tail.narrowest_ft:.2f}" in tail.reason, (
         f"the reason should quote the width that stopped it: {tail.reason}")
+
+
+# --------------------------------------------------------------------------
+# Which way an angled bay leans - traffic_runs_outward and apply_observed_parking
+# --------------------------------------------------------------------------
+
+def a_one_way_pair_of_legs():
+    """The two Grand Central Ave approaches, near enough: one street, both legs NORTHBOUND.
+
+    A junction's legs both point OUTWARD from the centre by construction, so a bearing of 6.6
+    and one of 186.7 deg are the two halves of one straight street - and northbound traffic runs
+    outward along the first and INWARD along the second. That is the whole difficulty this
+    fixture exists to reproduce, and no leg's own frame can see it.
+    """
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+
+    return {"north": Leg(name="north", centerline=LineString([(0, 0), (0, 190)]),
+                          curb_to_curb_ft=70.0),
+            "south": Leg(name="south", centerline=LineString([(0, 0), (0, -190)]),
+                          curb_to_curb_ft=70.0)}
+
+
+def a_model_double(legs, **leg_keys):
+    """Just the `config["legs"]` apply_observed_parking and traffic_runs_outward read.
+
+    A double rather than a real site because the site this is about (lavallette_reese) is
+    outside the committed test fixture's extent - see tests/fixtures/data - so a suite run
+    cannot build it.
+    """
+    import types
+
+    observed = {"sides": ["left", "right"], "angle_deg": 60,
+                "source": "the test's own assertion"}
+    return types.SimpleNamespace(
+        config={"legs": {name: {"existing_parking": observed, **leg_keys} for name in legs}})
+
+
+def test_a_one_way_street_leans_both_its_bays_the_way_THE_TRAFFIC_runs():
+    """`traffic_heads_toward: north` on both legs, so all four bays point north.
+
+    Which means OUTWARD on the northern approach and INWARD on the southern one, with the skew
+    sign flipping between them - and the two kerbs of each leg agreeing, where the two-way rule
+    would have leaned them at each other. A bay leaning against the traffic can only be entered
+    by reversing into the travel lane, so this is not a drafting nicety.
+    """
+    from src.geometry.treatments import DesignState, MarkedParking, apply_observed_parking
+
+    legs = a_one_way_pair_of_legs()
+    model = a_model_double(legs, traffic_heads_toward="north")
+    state = apply_observed_parking(DesignState(legs=legs, corner_fillets={}), model)
+
+    leans = {(t.target.leg, t.target.side): t.runs_outward
+             for t in state.treatments_of(MarkedParking)}
+    assert leans == {("north", "left"): True, ("north", "right"): True,
+                     ("south", "left"): False, ("south", "right"): False}
+    skews = {t.target.leg: t.skew_ft for t in state.treatments_of(MarkedParking)}
+    assert skews["north"] == pytest.approx(9.0, abs=1e-4)
+    assert skews["south"] == pytest.approx(-9.0, abs=1e-4)
+
+
+def test_a_two_way_street_still_leans_its_bays_by_the_SIDE():
+    """No `traffic_heads_toward`, so the ordinary rule holds: right kerb outbound, left inbound.
+
+    Pinned beside the test above so a fix for the one-way case cannot quietly become the rule
+    for every street. This is what four of this repo's five sites are.
+    """
+    from src.geometry.treatments import DesignState, MarkedParking, apply_observed_parking
+
+    legs = a_one_way_pair_of_legs()
+    state = apply_observed_parking(DesignState(legs=legs, corner_fillets={}),
+                                    a_model_double(legs))
+
+    leans = {(t.target.leg, t.target.side): t.runs_outward
+             for t in state.treatments_of(MarkedParking)}
+    assert leans == {("north", "left"): False, ("north", "right"): True,
+                     ("south", "left"): False, ("south", "right"): True}
+
+
+def test_the_direction_of_travel_is_asked_of_the_model_not_of_the_caller():
+    """traffic_runs_outward directly, because THREE pipeline scripts ask it without a site.
+
+    phase3_treatments, phase4_render_3d and phase4_export_geometry each build the panel labelled
+    "Existing Conditions" themselves, and none of them imports a site's scenarios.py. While the
+    lean lived in sites/lavallette_reese/scenarios.py as a module constant, those three got
+    apply_observed_parking's old two-way default and drew half the bays mirrored.
+    """
+    from src.geometry.treatments import traffic_runs_outward
+
+    legs = a_one_way_pair_of_legs()
+    one_way = a_model_double(legs, traffic_heads_toward="north")
+    two_way = a_model_double(legs)
+
+    assert [traffic_runs_outward(one_way, legs[n], s)
+            for n in ("north", "south") for s in ("left", "right")] == [True, True, False, False]
+    assert [traffic_runs_outward(two_way, legs[n], s)
+            for n in ("north", "south") for s in ("left", "right")] == [False, True, False, True]
+
+
+@needs_source_data
+def test_existing_conditions_is_the_untreated_street_where_nothing_was_recorded(site_models):
+    """The helper is a NO-OP on every site that declares no `existing_parking`.
+
+    It is what the pipeline now labels "Existing Conditions" everywhere, so if it added anything
+    of its own the four Mercer County sites' before/after sheets would all have moved - which is
+    Danny's churn test, and the reason the assertion is on the treatments and the notes rather
+    than on a picture.
+    """
+    from src.geometry.treatments import DesignState, existing_conditions
+
+    for site, model in sorted(site_models.items()):
+        declared = [name for name, cfg in model.config.get("legs", {}).items()
+                    if cfg.get("existing_parking")]
+        if declared:
+            continue    # a site with an observation SHOULD differ - that is the point
+        bare = DesignState.from_model(model)
+        assert existing_conditions(model).treatments == bare.treatments, site
+        assert existing_conditions(model).notes == bare.notes, site

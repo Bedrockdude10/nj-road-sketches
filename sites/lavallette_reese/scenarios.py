@@ -35,16 +35,16 @@ narrows a stall, and nothing here removes a space.
 from src.geometry.targets import LegSide
 from src.geometry.treatments import (AddBikeLane, AddBikeLaneBollards,
                                      all_crosswalks_continental, apply_observed_parking,
-                                     DesignState, MarkedParking, ProtectDaylightZone)
-from src.geometry.model import angled_stall_depth_ft, leg_heads_toward, side_facing
+                                     DesignState, MarkedParking, ProtectDaylightZone,
+                                     traffic_runs_outward)
+from src.geometry.model import angled_stall_depth_ft, side_facing
 
-#: The compass direction NJ 35 runs on this carriageway. Grand Central Ave is the NORTHBOUND
-#: half of the one-way pair (OSM `oneway=yes`, NJDOT "South to North"), so a with-traffic bike
-#: lane runs north on both approaches - outward along grand_central_ave_north and inward along
-#: grand_central_ave_south. `one_way: true` in config.yaml records that the street has one
-#: direction; it does not record which, and both the bike arrow and the lean of an angled bay
-#: need which.
-CARRIAGEWAY_RUNS = "north"
+# THE DIRECTION NJ 35 RUNS IS NOT DECLARED HERE. It used to be, as a CARRIAGEWAY_RUNS = "north"
+# constant this file's two builders each translated per leg, and that is the wrong home for it
+# twice over: which way a street runs is a fact about the street rather than a decision a
+# proposal makes (.claude/SKILLS.md section 5), and the "Existing Conditions" state the pipeline
+# builds without asking a site anything then leaned half the bays the wrong way. It is now
+# `legs.<leg>.traffic_heads_toward: north` in config.yaml, read through traffic_runs_outward.
 
 #: The bikeway's own cross-section. BOTH proposals below use the same one, so that the only
 #: difference between them is the ordering across the road.
@@ -111,18 +111,6 @@ def _bay_depth_ft() -> float:
                                  PARKING_ANGLE_DEG)
 
 
-def _traffic_runs_outward(leg, _side) -> bool:
-    """Whether traffic beside this kerb travels OUTWARD along the leg.
-
-    ASKED OF THE COMPASS AND NOT OF THE SIDE, which is the one-way street's whole difference:
-    the ordinary rule is that a leg's right-hand kerb carries outbound traffic and its left
-    carries inbound, and here BOTH kerbs carry northbound traffic. So both bays on
-    grand_central_ave_north lean outward and both on grand_central_ave_south lean inward, and
-    the side has nothing to do with it.
-    """
-    return leg_heads_toward(leg, CARRIAGEWAY_RUNS)
-
-
 def _daylight_every_parked_kerb(state: DesignState) -> DesignState:
     """Bollards in every daylight zone - the paint-and-post curb extension.
 
@@ -144,21 +132,23 @@ def _daylight_every_parked_kerb(state: DesignState) -> DesignState:
     return state
 
 
-def build_existing_conditions(baseline: DesignState, model=None) -> DesignState:
-    """The street as it is: 60-degree angled parking on both kerbs of Grand Central Ave.
-
-    NOT A PROPOSAL, and the only scenario here that changes nothing. It exists because the
-    Phase 2 baseline draws no parking at all - a DesignState knows the kerbs, the corner
-    fillets and the restrictions, and parking is a treatment - so the "Existing Conditions"
-    panel of every before/after sheet showed this street as 70 ft of bare asphalt. That is a
-    false statement about the street and it is the one a reviewer checks first.
-
-    Reese Ave has no observation recorded either way, and absent is not "no parking": it is
-    unrecorded, so nothing is drawn there and this docstring is where that is said out loud.
-    """
-    if model is None:
-        return baseline
-    return apply_observed_parking(baseline, model, runs_outward=_traffic_runs_outward)
+# THERE IS NO build_existing_conditions HERE, AND THERE WAS. It applied the observed bays to the
+# Phase 2 baseline and changed nothing else, because a DesignState knows the kerbs, the corner
+# fillets and the restrictions while parking is a treatment - so every "Existing Conditions"
+# panel drew this street as 70 ft of bare asphalt, which is the first thing a reviewer checks
+# and a false statement about the street.
+#
+# It was the wrong fix, and the tell was that it fixed one panel: a SCENARIO is something the
+# pipeline renders on request, and the panel labelled "Existing Conditions" is built by the
+# pipeline itself, three times over (phase3_treatments, phase4_render_3d,
+# phase4_export_geometry). So the sheets went on showing bare asphalt beside a separate,
+# identical sheet that showed the parking. `existing_conditions(model)` in
+# src/geometry/treatments/parking.py is the one home for it now, it is what those three scripts
+# label, and it needs nothing from a site - which is what forced the lean of the bays out of
+# this file and into config.yaml.
+#
+# Reese Ave has no observation recorded either way, and absent is not "no parking": it is
+# unrecorded, so nothing is drawn there and this comment is where that is said out loud.
 
 
 def build_demo_scenario(baseline: DesignState, model=None) -> DesignState:
@@ -179,7 +169,7 @@ def build_demo_scenario(baseline: DesignState, model=None) -> DesignState:
     """
     if model is None:
         return baseline
-    return all_crosswalks_continental(build_existing_conditions(baseline, model))
+    return all_crosswalks_continental(apply_observed_parking(baseline, model))
 
 
 def _bikeway_on_the_east_kerb(baseline: DesignState, model, section) -> DesignState:
@@ -224,15 +214,15 @@ def _bikeway_on_the_east_kerb(baseline: DesignState, model, section) -> DesignSt
             # see the module docstring. Without it this section is 4.07 ft too wide for its own
             # half of the street and is refused.
             pin_to_kerb=True,
-            # Asked of the leg rather than written down per leg, for the same reason the side is:
-            # both legs' bearings point outward, so the southern approach's riders and drivers
-            # travel INWARD and only the compass knows it.
-            runs_outward=leg_heads_toward(leg, CARRIAGEWAY_RUNS)))
+            # Asked of the street rather than written down per leg, for the same reason the
+            # side is: both legs' bearings point outward, so the southern approach's riders and
+            # drivers travel INWARD and only the compass knows it.
+            runs_outward=traffic_runs_outward(model, leg, east)))
         state = state.apply(AddBikeLaneBollards(LegSide(leg_name, east)))
     # AFTER the bikeways, not before: a kerb the bikeway's own section already carries stalls on
     # must not get a second parking treatment painting over them, and this skips exactly the
     # leg-sides that have an AddBikeLane on them.
-    state = apply_observed_parking(state, model, runs_outward=_traffic_runs_outward)
+    state = apply_observed_parking(state, model)
     return _daylight_every_parked_kerb(state)
 
 

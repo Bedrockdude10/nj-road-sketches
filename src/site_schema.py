@@ -35,6 +35,11 @@ from src.provenance import VALID_PROVENANCE, VALID_WIDTH_LOCATIONS
 # tests/test_site_schema.py:test_centerline_styles_match_treatments.
 VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "none")
 
+# Mirrors the keys of src.geometry.model.leg_frame._COMPASS_AXES, and mirrored here for the
+# same reason as the styles above. Kept honest by
+# tests/test_site_schema.py:test_traffic_directions_match_the_compass.
+VALID_TRAFFIC_DIRECTIONS = ("north", "south", "east", "west")
+
 # Two legs of one junction cannot leave the centre on the same heading. The leg matcher
 # (src/geometry/intersection/osm_roads.py:_assign_leg_pieces) tells legs sharing an SRI apart by
 # picking the nearest bearing, so a duplicate does not produce a warning - it produces a
@@ -146,6 +151,22 @@ class Leg(Strict):
     width_measured_at: Literal[VALID_WIDTH_LOCATIONS] | None = None  # type: ignore[valid-type]
     confirmed: bool = False
     centerline_style: Literal[VALID_CENTERLINE_STYLES] | None = None  # type: ignore[valid-type]
+    #: The compass direction ALL traffic on this leg runs, where the carriageway is one-way.
+    #: None means two-way, which is the ordinary case and the default.
+    #:
+    #: WHY A LEG AND NOT THE CORRIDOR BLOCK: `corridor:` is free-form by design (see
+    #: SiteConfig.corridor) and nothing derives geometry from it, while this decides which way
+    #: an angled bay leans and which way a with-traffic bike lane points. It is also genuinely
+    #: per leg - at NJ 35 & Reese the two Grand Central approaches are one-way northbound and
+    #: the two Reese approaches are two-way, so one key on the junction could not say it.
+    #:
+    #: AND NOT DERIVABLE FROM `bearing_deg`: both legs of a street point OUTWARD from the
+    #: junction by construction, so a one-way street's northern approach runs north and its
+    #: southern approach runs north as well - the same compass direction, opposite leg
+    #: directions. That is the whole reason leg_heads_toward exists, and the reason
+    #: `corridor.one_way: true` alone was not enough: it records that there is one direction,
+    #: not which.
+    traffic_heads_toward: Literal[VALID_TRAFFIC_DIRECTIONS] | None = None  # type: ignore[valid-type]
     #: Parking as it is on the ground along this leg, or absent where nobody has looked. ABSENT
     #: IS NOT "NO PARKING" - it is "unrecorded", the same distinction SurveyedCrossing.is_marked
     #: draws for a crossing with no markings tag, and a site must not read it as permission to

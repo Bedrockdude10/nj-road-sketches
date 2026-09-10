@@ -11,7 +11,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from src.geometry.targets import Target
-from src.geometry.model import (narrowest_half_width_ft)
+from src.geometry.model import (leg_heads_toward, narrowest_half_width_ft)
 
 if TYPE_CHECKING:                       # DesignState is layered above this module;
     from src.geometry.treatments.state import DesignState   # the annotation is a string
@@ -139,6 +139,35 @@ def _parking_restrictions_from_model(model: "IntersectionModel") -> dict:
     for key in out:
         out[key].sort(key=lambda r: r.start_ft)
     return out
+
+
+def traffic_runs_outward(model: "IntersectionModel", leg, side: str) -> bool:
+    """Does the traffic beside this kerb travel OUTWARD along the leg, away from the junction?
+
+    Two things need this and both get it wrong the same way if they guess: which way an angled
+    bay leans (a bay leaning against the traffic can only be entered by reversing into the
+    travel lane) and which way a with-traffic bike lane's arrow points.
+
+    THE ORDINARY ANSWER IS THE SIDE, AND ON A ONE-WAY STREET IT IS THE COMPASS. On a two-way
+    street a leg's right-hand kerb carries outbound traffic and its left carries inbound, so the
+    side alone answers it. On a one-way carriageway BOTH kerbs carry the same compass direction,
+    and no leg's own frame knows which: both legs of a street point outward from the junction by
+    construction, so NJ 35 NB's northern approach runs north outward and its southern approach
+    runs north inward. That is what `legs.<leg>.traffic_heads_toward` records and the only thing
+    it is for - see leg_heads_toward, and site_schema.Leg for why the corridor block could not
+    hold it.
+
+    Here beside _parking_restrictions_from_model rather than in src/geometry/model/ because it
+    reads the CONFIG and not the geometry, and because both callers - a bay and a bikeway - are
+    treatments. Asked of the model rather than written into a site's scenarios.py for the reason
+    section 5 of .claude/SKILLS.md gives: which way the street runs is a fact about the street,
+    so every scenario of that junction has to get the same answer, including the one the
+    pipeline labels "Existing Conditions" and builds without asking a site anything.
+    """
+    heads_toward = ((model.config.get("legs") or {}).get(leg.name) or {}).get("traffic_heads_toward")
+    if heads_toward is None:
+        return side == "right"
+    return leg_heads_toward(leg, heads_toward)
 
 
 @dataclass(frozen=True)

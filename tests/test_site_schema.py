@@ -191,6 +191,37 @@ def test_an_unknown_centerline_style_is_rejected():
         validate_site_config(broken)
 
 
+def test_traffic_directions_match_the_compass():
+    """Same mirroring as the centerline styles, and the same reason to pin it.
+
+    site_schema cannot import src.geometry.model without dragging shapely onto the config-read
+    path, so the four compass words are copied. A fifth word here, or a rename there, and a leg
+    would validate on a direction leg_heads_toward then refuses at build time.
+    """
+    from src.geometry.model.leg_frame import _COMPASS_AXES
+    from src.site_schema import VALID_TRAFFIC_DIRECTIONS
+
+    assert set(VALID_TRAFFIC_DIRECTIONS) == set(_COMPASS_AXES)
+
+
+def test_a_direction_of_travel_that_is_not_a_compass_point_is_rejected():
+    """"northbound" and "outbound" both read as directions and neither is one HERE.
+
+    The value is the compass direction the traffic runs, which is what makes it sayable once for
+    a street whose two approaches point opposite ways - see traffic_runs_outward. A leg-relative
+    word would be the thing this key exists to replace.
+    """
+    broken = config()
+    broken["legs"]["test_st_west"]["traffic_heads_toward"] = "northbound"
+    with pytest.raises(SiteConfigError, match="traffic_heads_toward"):
+        validate_site_config(broken)
+
+
+def test_a_two_way_leg_says_nothing_about_a_direction_of_travel():
+    """Absent is the default and it means TWO-WAY, which is four of the five sites here."""
+    assert validate_site_config(config()).legs["test_st_west"].traffic_heads_toward is None
+
+
 def test_a_negative_width_is_rejected():
     broken = config()
     broken["legs"]["test_st_west"]["curb_to_curb_ft"] = -1

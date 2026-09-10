@@ -42,7 +42,8 @@ from src.geometry.treatments.base import (BOLLARD_DEFAULT_SPACING_FT,
                                           Treatment,
                                           VALID_CENTERLINE_STYLES,
                                           VALID_CROSSWALK_STYLES,
-                                          kerbside_allowance_ft)
+                                          kerbside_allowance_ft,
+                                          traffic_runs_outward)
 from src.geometry.treatments.state import (DesignState)
 from src.geometry.treatments.lanes import (LaneNarrowing, LaneNarrowingBollards)
 from src.geometry.treatments.bikeways import (AASHTO_MIN_BIKE_LANE_FT, AddBikeLane, AddKerbsideBikeLane,
@@ -105,7 +106,7 @@ from src.geometry.treatments.parking import (MIN_HATCHED_ZONE_FT, MIN_USABLE_STA
                                              ParkingBufferBollards,
                                              RESTRICTION_COVERAGE_SLACK_FT,
                                              RestrictionSummary,
-                                             apply_observed_parking,
+                                             apply_observed_parking, existing_conditions,
                                              apply_osm_parking,
                                              hold_travel_lane_at_target,
                                              kerb_may_hold_parking,
@@ -193,6 +194,7 @@ __all__ = [
                                           "complete_centerlines",
                                           "divided_lane_width_ft",
                                           "divider_shift_toward_ft",
+                                          "existing_conditions",
                                           "far_kerb_surplus_ft",
                                           "find_corner",
                                           "hold_travel_lane_at_target",
@@ -206,6 +208,7 @@ __all__ = [
                                           "resolved_crossing_stations",
                                           "restriction_summary",
                                           "route_decision_for",
+                                          "traffic_runs_outward",
                                           "travel_lane_divider_shift_ft",
                                           "travel_lane_edge_ft",
                                           "travel_lane_width_ft",

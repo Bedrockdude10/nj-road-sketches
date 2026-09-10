@@ -20,7 +20,7 @@ from src.geometry.treatments.base import (ANGLED_STALL_LENGTH_FT, ANGLED_STALL_W
                                           PARKING_STALL_DEPTH_DEFAULT_FT,
                                           PARKING_STALL_LENGTH_DEFAULT_FT,
                                           TARGET_LANE_WIDTH_FT, Treatment,
-                                          kerbside_allowance_ft)
+                                          kerbside_allowance_ft, traffic_runs_outward)
 from src.geometry.treatments.bikeways import AddBikeLane, divider_shift_toward_ft
 from src.geometry.treatments.lanes import LaneNarrowing
 from src.geometry.treatments.state import DesignState, FacilityRefusal
@@ -438,6 +438,29 @@ def _kerb_already_treated(state: DesignState, leg_name: str, side: str) -> bool:
     return narrowing is not None and Side(side) in narrowing.sides
 
 
+def existing_conditions(model: "IntersectionModel") -> DesignState:
+    """THE STREET AS IT IS TODAY - the state every pipeline script labels "Existing Conditions".
+
+    Not DesignState.from_model, and the difference is the whole reason this exists. from_model
+    is the UNTREATED street: the kerbs, the widths and the corner fillets with no marking on
+    them at all. That was the same thing as existing conditions only while every marking in
+    this repo was a proposal. It is not any more - a site can declare what is on the ground
+    (`existing_parking`, see src/site_schema.py) - and a render built from from_model then
+    shows Grand Central Ave as 70 ft of bare asphalt when it has 46 marked stalls on it.
+
+    THE TWO ROLES `baseline` USED TO PLAY. A scenario builds ON the untreated state, because a
+    treatment is added and never removed: a bikeway that has to take a kerb needs that kerb
+    clear, and apply_observed_parking deliberately skips a kerb something else already claimed.
+    So the scripts keep from_model for what they hand a builder, and use THIS for what they
+    label and draw as existing. Passing this to a builder instead would hand every scenario a
+    street whose parking is already committed on both kerbs.
+
+    A no-op on a site that declares nothing, which is every site but lavallette_reese - so this
+    is a correction to a label that was wrong, not a change to any drawing that existed.
+    """
+    return apply_observed_parking(DesignState.from_model(model), model)
+
+
 def apply_observed_parking(state: DesignState, model: "IntersectionModel",
                             runs_outward=None) -> DesignState:
     """Mark the parking a surveyor RECORDED on each leg - config `legs.<leg>.existing_parking`.
@@ -458,16 +481,16 @@ def apply_observed_parking(state: DesignState, model: "IntersectionModel",
     treated is left alone, so a proposal that puts a bike lane on one kerb keeps the observed
     parking on the other without having to say which side that is.
 
-    `runs_outward(leg, side) -> bool` decides which way an angled bay LEANS, and it is asked
-    rather than assumed because only the caller knows: on a two-way street the traffic beside a
-    kerb runs outward on the leg's right and inward on its left, which is the default here, and on
-    a ONE-WAY street both kerbs run the same compass direction and neither leg's frame knows it
-    (see leg_heads_toward). A bay leaning the wrong way can only be entered by reversing into the
-    travel lane.
+    `runs_outward(leg, side) -> bool` decides which way an angled bay LEANS - a bay leaning the
+    wrong way can only be entered by reversing into the travel lane. It defaults to
+    traffic_runs_outward, which asks the model, and the override exists only for a caller
+    holding a state with no model behind it. IT USED TO DEFAULT TO `side == "right"`, which is
+    the two-way rule stated as if it were the only one; a one-way carriageway leans both its
+    kerbs the same compass way, so that default silently mirrored half of them.
     """
     if runs_outward is None:
         def runs_outward(leg, side):
-            return side == "right"
+            return traffic_runs_outward(model, leg, side)
     for leg_name, leg_cfg in model.config["legs"].items():
         observed = leg_cfg.get("existing_parking")
         if not observed:

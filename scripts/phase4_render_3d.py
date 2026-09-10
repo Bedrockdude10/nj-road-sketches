@@ -31,7 +31,7 @@ from src.geometry.intersection import load_intersection_model
 from src.sources.osm_context import fetch_buildings, fetch_crossings
 from src.site import add_scenario_arg, add_site_arg, load_site_scenarios, scenario_label, site_output_dir, run_scenario
 from src.render.theme import build_default_theme
-from src.geometry.treatments import DesignState
+from src.geometry.treatments import DesignState, existing_conditions
 
 BLENDER_SCENE_SCRIPT = Path(__file__).resolve().parent / "blender" / "blender_scene.py"
 DEFAULT_MAC_BLENDER = "/Applications/Blender.app/Contents/MacOS/Blender"
@@ -140,7 +140,11 @@ def main():
     missing = [k for k, v in theme.items() if v is None]
     print(f"  -> ready ({len(theme) - len(missing)}/{len(theme)} assets; missing: {missing or 'none'})")
 
-    existing_json = export_scenario(model, baseline, "Existing Conditions", out_dir / "geometry_existing.json",
+    # existing_conditions(model), NOT the baseline the scenario was built on. The two were the
+    # same state while every marking here was a proposal; a site that declares what is on the
+    # ground makes them different, and this render is the one that claims to be the street.
+    existing_json = export_scenario(model, existing_conditions(model), "Existing Conditions",
+                                     out_dir / "geometry_existing.json",
                                      buildings=buildings, crossings=crossings, theme=theme)
     proposed_json = export_scenario(model, scenario, f"Proposed Treatments ({args.scenario})",
                                      out_dir / f"geometry_{label}.json",

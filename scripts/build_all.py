@@ -48,7 +48,7 @@ import matplotlib.pyplot as plt
 from scripts.jobs import MAX_BUILD_JOBS
 from src.checks import SceneInvariantError
 from src.geometry.intersection import load_intersection_model
-from src.geometry.treatments import DesignState
+from src.geometry.treatments import DesignState, existing_conditions
 from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
 from src.render.frame import FRAME_SCALE_ENV
 from src.render.plan_view import draw_change_panel, legend_handles, plot_design_state
@@ -93,15 +93,20 @@ def draw_geometry_plot(model, state, out_path: Path, crossings) -> list:
     return violations
 
 
-def draw_before_after(model, baseline, state, scenario_name: str, out_path: Path, crossings) -> list:
+def draw_before_after(model, existing_state, state, scenario_name: str, out_path: Path, crossings) -> list:
     """The phase 3 before/after pair, with the same filenames the phase scripts write.
 
     Deliberately not a new set of artifacts: the review workflow is looking at
     phase2_geometry_plot.png and phase3_before_after_*.png, and a parallel set of
     similar-but-different pictures is how two views drift apart.
+
+    `existing_state` is existing_conditions(model) and NOT the state the scenario was built on -
+    the untreated street. The left panel is what the proposal is MEASURED AGAINST, and the
+    change panel below it is computed off the two panels' metrics, so a bay already on the
+    ground has to be in it or the proposal is credited with parking it did not add.
     """
     fig, axes = plt.subplots(1, 2, figsize=(18, 10))
-    existing = plot_design_state(axes[0], model, baseline, "Existing Conditions (Phase 2 baseline)",
+    existing = plot_design_state(axes[0], model, existing_state, "Existing Conditions",
                                   crossings=crossings)
     proposed = plot_design_state(axes[1], model, state, f"Proposed Treatments ({scenario_name})",
                                   crossings=crossings)
@@ -187,12 +192,16 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
     try:
         with contextlib.redirect_stdout(quiet):
             model = load_intersection_model(site=site)
-            baseline = DesignState.from_model(model)
+            # THE STREET AS IT IS, which on a site declaring observed parking is not the same
+            # thing as DesignState.from_model(model) - see existing_conditions. Every scenario
+            # is still RUN on from_model below: a proposal builds on the untreated street,
+            # because a treatment is added and never removed.
+            existing = existing_conditions(model)
             crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
     except Exception as e:
         return [f"{site}: could not build the junction model - {type(e).__name__}: {e}"], []
 
-    states = [("existing", "Existing Conditions", baseline)]
+    states = [("existing", "Existing Conditions", existing)]
     with contextlib.redirect_stdout(quiet):
         scenarios = load_site_scenarios(site)
         for name in scenarios_for(site, scenarios):
@@ -212,7 +221,7 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
                 violations = draw_geometry_plot(model, state, out_dir / "phase2_geometry_plot.png", crossings)
             else:
                 suffix = "" if label == "proposed" else f"_{label}"
-                violations = draw_before_after(model, baseline, state, name,
+                violations = draw_before_after(model, existing, state, name,
                                                 out_dir / f"phase3_before_after{suffix}.png", crossings)
         for violation in violations:
             if violation.fatal:

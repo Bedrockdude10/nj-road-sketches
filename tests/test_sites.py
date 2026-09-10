@@ -18,7 +18,7 @@ from src.geometry.model import (build_pavement_polygon, narrowest_half_width_ft,
                                 station_offset_many)
 from src.geometry.targets import LegSide, LegTarget, Side
 from src.geometry.treatments import (DesignState, LaneNarrowing, MarkedParking,
-                                     UpgradeCrosswalkMarkings)
+                                     UpgradeCrosswalkMarkings, existing_conditions)
 from src.render.crosswalks import (CROSSWALK_DEPTH_M, STOP_BAR_CURB_CLEARANCE_M,
                                    crosswalk_bands_ft, resolve_crosswalk_offsets,
                                    resolve_crosswalk_skews, resolve_stop_bar_offsets)
@@ -106,7 +106,13 @@ def demo_paint(site):
 @needs_source_data
 @pytest.mark.parametrize("site", SITES)
 def test_existing_conditions_satisfy_the_invariants(site, site_models):
-    violations = fatal(scene_violations(site_models[site], DesignState.from_model(site_models[site])))
+    """existing_conditions(model), which is what the pipeline DRAWS under that label.
+
+    Not DesignState.from_model, which is the UNTREATED street - the state a scenario is built
+    on. The two differ on any site declaring observed parking, and the difference is a bay
+    20 ft deep against each kerb: exactly the kind of thing an invariant sweep is for.
+    """
+    violations = fatal(scene_violations(site_models[site], existing_conditions(site_models[site])))
     assert not violations, "\n".join(str(v) for v in violations)
 
 
@@ -1777,7 +1783,7 @@ def test_the_plan_view_draws_without_raising(site, site_models):
     from src.render.plan_view import legend_handles, plot_design_state
 
     model = site_models[site]
-    states = {"existing": DesignState.from_model(model)}
+    states = {"existing": existing_conditions(model)}
     for name, builder in sorted(scenario_builders(site).items()):
         with contextlib.redirect_stdout(io.StringIO()):
             states[name] = run_scenario(builder, DesignState.from_model(model), model)

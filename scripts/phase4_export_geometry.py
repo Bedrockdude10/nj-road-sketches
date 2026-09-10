@@ -17,7 +17,7 @@ from src.sources.osm_context import fetch_buildings, fetch_crossings
 from src.site import (add_scenario_arg, add_site_arg, load_site_scenarios, run_scenario,
                        scenario_label, site_output_dir)
 from src.render.theme import build_default_theme
-from src.geometry.treatments import DesignState
+from src.geometry.treatments import DesignState, existing_conditions
 
 
 def main():
@@ -38,7 +38,9 @@ def main():
     crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
     theme = build_default_theme()
 
-    existing_path = export_scenario(model, baseline, "Existing Conditions", out_dir / "geometry_existing.json",
+    # existing_conditions(model), not the builder's baseline - see phase4_render_3d.py.
+    existing_path = export_scenario(model, existing_conditions(model), "Existing Conditions",
+                                     out_dir / "geometry_existing.json",
                                      buildings=buildings, crossings=crossings, theme=theme)
     proposed_path = export_scenario(model, scenario, f"Proposed Treatments ({args.scenario})",
                                      out_dir / f"geometry_{label}.json",

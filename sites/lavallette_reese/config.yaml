@@ -81,6 +81,14 @@ legs:
     curb_to_curb_ft: 70.05
     width_provenance: osm_derived
     centerline_style: none   # a ONE-WAY carriageway has no centre stripe - OSM `oneway=yes`
+    # WHICH WAY that one direction runs, which `corridor.one_way: true` does not say and which
+    # both the lean of an angled bay and a with-traffic bike lane's arrow need. NJDOT calls SRI
+    # 00000035__ "South to North" and OSM tags the whole carriageway `oneway=yes`. Note that
+    # BOTH Grand Central legs say "north" while their bearings are 6.6 and 186.7: a leg's
+    # bearing points outward from the junction, so one compass direction is outward on one
+    # approach and inward on the other - see traffic_runs_outward. Reese Ave is two-way and
+    # therefore omits the key.
+    traffic_heads_toward: north
     source: >
       Traced kerb (OSM barrier=kerb, Danny, 2026-09-10), 17 perpendicular cuts from
       station 20 to 190: median 70.05 ft, range 69.69-70.33 ft. Split about the NJDOT
@@ -111,6 +119,7 @@ legs:
     curb_to_curb_ft: 70.35
     width_provenance: osm_derived
     centerline_style: none
+    traffic_heads_toward: north   # the same one-way carriageway - see the northern approach
     source: >
       Same method and same trace as grand_central_ave_north: 18 cuts from station 20 to
       190, median 70.35 ft, range 70.13-71.01 ft; 29.50 ft left / 40.83 ft right.
