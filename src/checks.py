@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from shapely.geometry import Point
 
-from src.geometry.markings import (PARKING_EDGE_LINE, STALL_DIVIDER,
+from src.geometry.markings import (BAY_EDGE_LINES, STALL_DIVIDER,
                                    lies_legitimately_on, opening_rule)
 from src.geometry.paint import stroke_width_ft
 from src.geometry.targets import Side
@@ -723,7 +723,7 @@ class ParkingIsLegal(SceneCheck):
         violations = []
         zones_by_side = {}
         for piece in paint:
-            if piece.kind not in (STALL_DIVIDER, PARKING_EDGE_LINE) or piece.leg is None:
+            if piece.kind not in (STALL_DIVIDER, *BAY_EDGE_LINES) or piece.leg is None:
                 continue
             leg = state.legs.get(piece.leg)
             if leg is None:

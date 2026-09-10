@@ -220,6 +220,10 @@ PAINT_STYLE = require_every_kind({
     # The square end of a zone with no crossing to be cut by and no room to taper.
     markings.ZONE_END_LINE:       dict(color="goldenrod", linewidth=1.5, zorder=3),
     markings.PARKING_EDGE_LINE:   dict(color="steelblue", linewidth=1.5, zorder=3),
+    # THE SAME STRIPE AS THE LINE ABOVE, and drawn a different colour on purpose: gold is this
+    # sheet's real yellow paint (see the centreline), so the reader can see that the west kerb of
+    # a one-way street carries a yellow line and the east kerb a white one. MUTCD 3B.09 P3.
+    markings.LEFT_EDGE_LINE:      dict(color="gold", linewidth=1.5, zorder=3),
     markings.STALL_DIVIDER:       dict(color="steelblue", linewidth=1, zorder=3),
     # An exclusive bike lane. Green, because that is what a bike lane is coloured on a real
     # street and in every other agency's drawings - and a colour of its own is the point: this
@@ -893,6 +897,8 @@ def legend_handles():
         Line2D([0], [0], color="gold", lw=1.2, label="Centerline paint (double yellow / dashed)"),
         Line2D([0], [0], color="white", lw=1.6,
                 label="Lane line - broken WHITE, lanes running the same way"),
+        Line2D([0], [0], color="gold", lw=1.5,
+                label="Left edge line - solid YELLOW, left edge of a one-way roadway"),
         Patch(facecolor="white", edgecolor=PARKING_LEGALITY_COLOR["restricted"],
                label="OSM: parking restricted"),
         Patch(facecolor="white", edgecolor=PARKING_LEGALITY_COLOR["allowed"],

@@ -411,6 +411,37 @@ for the views to break a line differently.
 
 ---
 
+### The LEFT edge of a one-way roadway is YELLOW — **Verified 2026-09-10**
+
+Opened: **MUTCD 11th Edition (December 2023), Part 3**
+([source](https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/part3.pdf)), §3B.09.
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 3B.09 | 01 | **Standard** | "If used, edge line pavement markings **shall delineate the right or left edges of a roadway**." |
+| 3B.09 | 02 | **Standard** | "right edge line pavement markings, if used, **shall consist of a normal width solid white line** to delineate the right-hand edge of the roadway." |
+| 3B.09 | 03 | **Standard** | "If used on the roadways of divided highways or **one-way streets**, or on any ramp in the direction of travel, left edge line pavement markings **shall consist of a normal width solid yellow line** to delineate the left-hand edge of a roadway…" |
+| 3B.10 | 05 | Option | edge lines "**may be excluded**, based on engineering judgment, for reasons such as if the traveled way edges are delineated by **curbs, parking, or other markings**." |
+
+**What this project draws.** `LEFT_EDGE_LINE`
+([`src/geometry/markings.py`](src/geometry/markings.py)) — the same stripe as
+`PARKING_EDGE_LINE` and the same geometry (`parking_lane_edge_line_ft`), differing only in the
+channel it travels in, because in this repo **the channel decides the colour**
+([`.claude/SKILLS.md`](.claude/SKILLS.md) §3). Which kerb gets it is
+`is_left_edge_of_the_roadway`, and the answer is *not* `side == "left"`: both approaches of a
+street point outward from the junction, so one real kerb is `left` on one leg and `right` on the
+next.
+
+> **Which kerbs this reaches, and which it does not.** Only a kerb whose edge line this project
+> already draws — today that means a kerb with `MarkedParking` on it, which is where
+> `parking_lane_edge_line_ft` is called. A one-way leg with no bay against its left kerb gets no
+> edge line at all, yellow or white. That is ¶01's "if used" and 3B.10 ¶05's option rather than a
+> gap: NJ 35 NB's left edge is delineated by the parking, and the line at the mouth of that bay
+> **is** the roadway's left edge line. It would become a real omission on a one-way leg with a
+> bare left kerb, and there is none in this project.
+
+---
+
 ### Other MUTCD figures — *as cited*
 
 | figure | value | constant | file |

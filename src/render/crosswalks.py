@@ -498,12 +498,27 @@ def resolve_stop_bar_offsets(state: DesignState, crosswalk_offsets: dict[str, tu
     clamped to leg_clearance_ft() so a short leg or tight corner never pushes the bar back
     into the curb return.
     """
+    from src.geometry.treatments import traffic_runs_outward
+
     surveyed = match_stop_lines_to_legs(state.legs, stop_lines or [])
     out = {}
     for leg_name, (crosswalk_offset_ft, _source) in crosswalk_offsets.items():
         min_offset_ft = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
         line = surveyed.get(leg_name)
         if line is None:
+            # NOTHING STOPS ON A LEG TRAFFIC LEAVES BY. The derivation below hangs a bar off
+            # every leg that has a crosswalk, which is right on a two-way street because every
+            # leg there is an approach - and wrong on a ONE-WAY carriageway, where half the legs
+            # are exits. NJ 35 NB runs north through Reese Ave, so its NORTH leg is the departure
+            # and Danny traced three bars for four legs; the fourth was ours, not the street's.
+            #
+            # Only where nobody traced one. A surveyed bar on a leg this rule calls a departure
+            # is evidence about the rule, not about the street, and it is drawn where it is
+            # painted - the same precedence the clamp below gives a real position.
+            leg = state.legs.get(leg_name)
+            if leg is not None and state.traffic_heads_toward.get(leg_name) is not None \
+                    and traffic_runs_outward(state, leg, "right"):
+                continue
             # Derived: clamp, because nothing here knows where the bar really is and the
             # corner return is the one place it certainly isn't.
             out[leg_name] = max(crosswalk_offset_ft - STOP_BAR_SETBACK_FT, min_offset_ft)

@@ -372,6 +372,10 @@ def test_a_derived_stop_bar_is_still_clamped_out_of_the_corner():
     class FakeState:
         legs = {"east": Leg(name="east", centerline=LineString([(0, 0), (120, 0)]), curb_to_curb_ft=30)}
         corner_fillets = {}
+        # A two-way street, which is what "no entry" means - so this leg is an approach and does
+        # get a derived bar. The one-way case, where a leg traffic LEAVES by gets none at all, is
+        # test_a_leg_traffic_LEAVES_BY_gets_no_stop_bar_of_our_invention in tests/test_paint.py.
+        traffic_heads_toward = {}
 
     # crosswalk at 10 ft - 7 ft setback would put the bar at 3 ft, inside any real corner.
     resolved = resolve_stop_bar_offsets(FakeState(), {"east": (10.0, "estimated")}, stop_lines=[])

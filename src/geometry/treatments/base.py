@@ -155,7 +155,7 @@ def _parking_restrictions_from_model(model: "IntersectionModel") -> dict:
     return out
 
 
-def traffic_runs_outward(model: "IntersectionModel", leg, side: str) -> bool:
+def traffic_runs_outward(state, leg, side: str) -> bool:
     """Does the traffic beside this kerb travel OUTWARD along the leg, away from the junction?
 
     Two things need this and both get it wrong the same way if they guess: which way an angled
@@ -171,17 +171,46 @@ def traffic_runs_outward(model: "IntersectionModel", leg, side: str) -> bool:
     it is for - see leg_heads_toward, and site_schema.Leg for why the corridor block could not
     hold it.
 
+    ASKED OF THE RESOLVED DESIGN, NOT OF THE CONFIG. It used to dig
+    `config["legs"][name]["traffic_heads_toward"]` out of the model on every call, which put a
+    second reader of that key one layer below DesignState.from_model - and left the paint
+    builder, which holds a state and no model, unable to ask at all. from_model seeds
+    `state.traffic_heads_toward` once; this is the only thing that reads it.
+
     Here beside _parking_restrictions_from_model rather than in src/geometry/model/ because it
-    reads the CONFIG and not the geometry, and because both callers - a bay and a bikeway - are
-    treatments. Asked of the model rather than written into a site's scenarios.py for the reason
-    section 5 of .claude/SKILLS.md gives: which way the street runs is a fact about the street,
-    so every scenario of that junction has to get the same answer, including the one the
-    pipeline labels "Existing Conditions" and builds without asking a site anything.
+    reads a fact SEEDED from config and not the geometry, and because its callers - a bay, a
+    bikeway and the roadway's own left edge line - are all treatments. Asked of the design
+    rather than written into a site's scenarios.py for the reason section 5 of
+    .claude/SKILLS.md gives: which way the street runs is a fact about the street, so every
+    scenario of that junction has to get the same answer, including the one the pipeline labels
+    "Existing Conditions" and builds without asking a site anything.
     """
-    heads_toward = ((model.config.get("legs") or {}).get(leg.name) or {}).get("traffic_heads_toward")
+    heads_toward = state.traffic_heads_toward.get(leg.name)
     if heads_toward is None:
-        return side == "right"
+        return str(side) == "right"
     return leg_heads_toward(leg, heads_toward)
+
+
+def is_left_edge_of_the_roadway(state, leg, side: str) -> bool:
+    """Is this kerb the LEFT-HAND EDGE of a ONE-WAY roadway, in the direction of travel?
+
+    Which is the whole of what decides an edge line's colour: MUTCD 11th ed. 3B.09 P3 makes the
+    left edge line of a one-way street a solid YELLOW line, against P2's white on the right, and
+    P2 governs both edges of an ordinary two-way street. See STANDARDS.md.
+
+    NOT THE SAME QUESTION AS `side == "left"`, and that is the trap this exists to close. A
+    leg's frame is its own - both approaches of a street point OUTWARD from the junction - so on
+    NJ 35 NB the one west kerb is `left` on the northern approach and `right` on the southern.
+    Asking the side alone would paint the yellow line down the west kerb of one leg and the east
+    kerb of the next, on one continuous carriageway.
+
+    False on a two-way street whatever the side, because there is no left edge to a roadway that
+    carries traffic both ways - the yellow there is the CENTRE line, which is a different
+    marking with a different home (DesignState.centerline_style).
+    """
+    if state.traffic_heads_toward.get(leg.name) is None:
+        return False
+    return (str(side) == "left") == traffic_runs_outward(state, leg, side)
 
 
 @dataclass(frozen=True)

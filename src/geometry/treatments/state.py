@@ -58,6 +58,18 @@ class DesignState:
     # OSM's overtaking=no. What a PROPOSAL paints is a SetCenterlineStyle; ask
     # centerline_style() for the resolved answer or a proposal's change is invisible.
     existing_centerline_styles: dict = field(default_factory=dict)
+    # leg name -> the compass direction ALL traffic on that leg runs, where the carriageway is
+    # one-way; absent/None means two-way, which is the ordinary case. The same standing as the
+    # styles above: an OBSERVED FACT seeded in from_model from config.yaml, not a treatment's
+    # parameter, so every scenario of a junction gets the same answer - including the one the
+    # pipeline labels "Existing Conditions" and builds without asking a site anything.
+    #
+    # HERE AND NOT ON Leg, though it is just as much a fact about the street, because a Leg is
+    # REBUILT five times during load (fitting.py re-centres it on the traced kerbs, and each
+    # rebuild carries its fields across by hand) - a sixth field would be dropped by whichever
+    # of those the next change forgot, silently and only at a site whose kerbs are traced.
+    # Read through traffic_runs_outward; nothing should dig it out of config a second time.
+    traffic_heads_toward: dict = field(default_factory=dict)
     # (leg name, "left"|"right") -> [KerbOpening]. Where OSM says the kerb is DROPPED for a
     # vehicle to cross - a driveway or yard entrance. Seeded in from_model from the traced kerbs'
     # kerb=lowered / kerb=flush tags; read by src/geometry/paint/ to break the kerbside
@@ -145,6 +157,8 @@ class DesignState:
                 centerline_styles[name] = DEFAULT_CENTERLINE_STYLE
         return cls(legs=deepcopy(model.legs), corner_fillets=deepcopy(model.corner_fillets),
                    existing_centerline_styles=centerline_styles,
+                   traffic_heads_toward={name: leg_cfg.get("traffic_heads_toward")
+                                          for name, leg_cfg in model.config["legs"].items()},
                    kerb_openings=kerb_openings_from_model(model),
                    parking_restrictions=_parking_restrictions_from_model(model),
                    cross_streets=cross_streets_from_model(model))

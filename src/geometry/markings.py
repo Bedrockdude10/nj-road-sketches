@@ -122,6 +122,12 @@ LANE_NARROWING_TAPER_LINES = Channel("lane_narrowing_taper_lines", Role.LINE, NA
 LANE_NARROWING_HATCH_LINES = Channel("lane_narrowing_hatch_lines", Role.FILL, NARROW_LINE_WIDTH_M)
 CORNER_HATCHING_LINES = Channel("corner_hatching_lines", Role.FILL, NARROW_LINE_WIDTH_M)
 PARKING_EDGE_LINES = Channel("parking_edge_lines", Role.LINE, EDGE_LINE_WIDTH_M)
+# The YELLOW left edge line of a one-way roadway (MUTCD 3B.09 P3). Its own channel and not more
+# PARKING_EDGE_LINES for the reason BIKE_LANE_CONTRAFLOW_LINES has one: the channel decides the
+# colour at the far end, and blender_scene.py draws every edge-line channel in the white marking
+# material. Routed there, this stripe would come out yellow in the plan view and white in 3D,
+# with nothing in the project able to see the difference.
+LEFT_EDGE_LINES = Channel("left_edge_lines", Role.LINE, EDGE_LINE_WIDTH_M)
 PARKING_STALL_DIVIDER_LINES = Channel("parking_stall_divider_lines", Role.LINE, NARROW_LINE_WIDTH_M)
 # The daylight zones (R.S. 39:4-138 - see src/geometry/daylighting.py) share the parking
 # buffer's channels, because on a real street they are the same white hatching and the same
@@ -147,9 +153,20 @@ BIKE_LANE_CONTRAFLOW_LINES = Channel("bike_lane_contraflow_lines", Role.LINE, NA
 BIKE_LANE_SYMBOL_POLYGONS = Channel("bike_lane_symbol_polygons", Role.COLOUR)
 CORNER_APRON_POLYGONS = Channel("corner_apron_polygons", Role.SURFACE)
 
+#: THE CHANNELS PAINTED YELLOW. Declared as data here, beside the channels themselves, because
+#: section 3 of .claude/SKILLS.md records the one way this project gets a marking's colour wrong:
+#: blender_scene.py draws every edge-line channel in the white material, so a yellow marking
+#: routed through one comes out yellow in the plan view and white in 3D with nothing able to see
+#: the difference. Both renderers are written against this list and a test pins each to it.
+#:
+#: Yellow says THE SAME THING in both entries - do not cross to the other side of this line.
+#: LEFT_EDGE_LINES is the left edge of a one-way roadway (MUTCD 3B.09 P3);
+#: BIKE_LANE_CONTRAFLOW_LINES divides riders travelling opposite ways.
+YELLOW_CHANNELS: tuple[Channel, ...] = (LEFT_EDGE_LINES, BIKE_LANE_CONTRAFLOW_LINES)
+
 CHANNELS: tuple[Channel, ...] = (
     LANE_NARROWING_EDGE_LINES, LANE_NARROWING_TAPER_LINES, LANE_NARROWING_HATCH_LINES,
-    CORNER_HATCHING_LINES, PARKING_EDGE_LINES, PARKING_STALL_DIVIDER_LINES,
+    CORNER_HATCHING_LINES, PARKING_EDGE_LINES, LEFT_EDGE_LINES, PARKING_STALL_DIVIDER_LINES,
     PARKING_BUFFER_HATCH_LINES, PARKING_BUFFER_EDGE_LINES, PARKING_BUFFER_TAPER_LINES,
     BIKE_LANE_EDGE_LINES, BIKE_LANE_HATCH_LINES, BIKE_LANE_SURFACE_POLYGONS,
     BIKE_LANE_CONTRAFLOW_LINES, BIKE_LANE_SYMBOL_POLYGONS, CORNER_APRON_POLYGONS,
@@ -197,6 +214,19 @@ TAPER_FILL = _kind("taper_fill", Role.FILL, LANE_NARROWING_HATCH_LINES)
 CORNER_HATCH_FILL = _kind("corner_hatch_fill", Role.FILL, CORNER_HATCHING_LINES)
 # Marked curbside parking: the lane's edge line and its stall ticks.
 PARKING_EDGE_LINE = _kind("parking_edge_line", Role.LINE, PARKING_EDGE_LINES)
+# THE SAME STRIPE, PAINTED YELLOW BECAUSE OF WHERE IT IS. MUTCD 3B.09 P3 makes the left edge
+# line of a one-way roadway a solid yellow line, against P2's white on the right - so on NJ 35
+# NB the line at the mouth of the west bay is yellow and the identical line on the east bay is
+# white. Two PaintKinds for one real marking, because a kind names exactly one channel and the
+# channel is what carries the colour; see is_left_edge_of_the_roadway for which kerb gets it.
+#
+# ANYTHING ASKING "IS THIS THE LINE IN FRONT OF A PARKING BAY" MUST READ BAY_EDGE_LINES BELOW,
+# never PARKING_EDGE_LINE alone - metrics.py counts stalls between consecutive pieces of it, and
+# reading only the white kind would have counted the east kerb's stalls and none of the west's.
+LEFT_EDGE_LINE = _kind("left_edge_line", Role.LINE, LEFT_EDGE_LINES)
+#: Every kind that draws THE LINE AT THE MOUTH OF A KERBSIDE PARKING BAY. Two of them, for the
+#: colour reason above and for no other; a reader that cares where the bay starts wants both.
+BAY_EDGE_LINES: tuple[PaintKind, ...] = (PARKING_EDGE_LINE, LEFT_EDGE_LINE)
 STALL_DIVIDER = _kind("stall_divider", Role.LINE, PARKING_STALL_DIVIDER_LINES)
 # The hatched strip between a kerbside zone and the kerb, and the lines that bound it.
 BUFFER_FILL = _kind("buffer_fill", Role.FILL, PARKING_BUFFER_HATCH_LINES)
@@ -389,6 +419,12 @@ AT_AN_OPENING: dict[PaintKind, OpeningRule] = {
     DAYLIGHT_EDGE_LINE: _ZONE,
     ZONE_END_LINE: _ZONE,
     BIKE_BUFFER_FILL: _ZONE,
+    LEFT_EDGE_LINE: OpeningRule(
+        AtAnOpening.CARRIED, AtAnOpening.STOPPED,
+        why="The same stripe as PARKING_EDGE_LINE below and therefore the same rule - only its "
+            "colour differs (MUTCD 3B.09 P3). Stated as its own row rather than aliased so that "
+            "a kind with no row still fails the completeness check that AT_AN_OPENING exists "
+            "for."),
     PARKING_EDGE_LINE: OpeningRule(
         AtAnOpening.CARRIED, AtAnOpening.STOPPED,
         why="MUTCD 3B.11(09) then (08), the pair this table exists for. Behind a parking edge "

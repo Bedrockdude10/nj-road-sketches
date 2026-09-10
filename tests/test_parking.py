@@ -114,7 +114,7 @@ def a_one_way_pair_of_legs():
 
 
 def a_model_double(legs, **leg_keys):
-    """Just the `config["legs"]` apply_observed_parking and traffic_runs_outward read.
+    """Just the `config["legs"]` apply_observed_parking reads.
 
     A double rather than a real site because the site this is about (lavallette_reese) is
     outside the committed test fixture's extent - see tests/fixtures/data - so a suite run
@@ -128,6 +128,23 @@ def a_model_double(legs, **leg_keys):
         config={"legs": {name: {"existing_parking": observed, **leg_keys} for name in legs}})
 
 
+def a_site_double(legs, **leg_keys):
+    """(state, model) as load_intersection_model and DesignState.from_model would resolve them.
+
+    ONE helper returning BOTH, because the direction of travel has to reach two places for this
+    to be a real test - `config["legs"]` for the parking observation, and
+    DesignState.traffic_heads_toward for traffic_runs_outward, which from_model seeds from the
+    first. A test that set only the config would ask a state that says "two-way" and pass while
+    testing nothing.
+    """
+    from src.geometry.treatments import DesignState
+
+    state = DesignState(legs=legs, corner_fillets={},
+                        traffic_heads_toward={name: leg_keys.get("traffic_heads_toward")
+                                               for name in legs})
+    return state, a_model_double(legs, **leg_keys)
+
+
 def test_a_one_way_street_leans_both_its_bays_the_way_THE_TRAFFIC_runs():
     """`traffic_heads_toward: north` on both legs, so all four bays point north.
 
@@ -136,11 +153,10 @@ def test_a_one_way_street_leans_both_its_bays_the_way_THE_TRAFFIC_runs():
     would have leaned them at each other. A bay leaning against the traffic can only be entered
     by reversing into the travel lane, so this is not a drafting nicety.
     """
-    from src.geometry.treatments import DesignState, MarkedParking, apply_observed_parking
+    from src.geometry.treatments import MarkedParking, apply_observed_parking
 
     legs = a_one_way_pair_of_legs()
-    model = a_model_double(legs, traffic_heads_toward="north")
-    state = apply_observed_parking(DesignState(legs=legs, corner_fillets={}), model)
+    state = apply_observed_parking(*a_site_double(legs, traffic_heads_toward="north"))
 
     leans = {(t.target.leg, t.target.side): t.runs_outward
              for t in state.treatments_of(MarkedParking)}
@@ -157,11 +173,10 @@ def test_a_two_way_street_still_leans_its_bays_by_the_SIDE():
     Pinned beside the test above so a fix for the one-way case cannot quietly become the rule
     for every street. This is what four of this repo's five sites are.
     """
-    from src.geometry.treatments import DesignState, MarkedParking, apply_observed_parking
+    from src.geometry.treatments import MarkedParking, apply_observed_parking
 
     legs = a_one_way_pair_of_legs()
-    state = apply_observed_parking(DesignState(legs=legs, corner_fillets={}),
-                                    a_model_double(legs))
+    state = apply_observed_parking(*a_site_double(legs))
 
     leans = {(t.target.leg, t.target.side): t.runs_outward
              for t in state.treatments_of(MarkedParking)}
@@ -169,19 +184,23 @@ def test_a_two_way_street_still_leans_its_bays_by_the_SIDE():
                      ("south", "left"): False, ("south", "right"): True}
 
 
-def test_the_direction_of_travel_is_asked_of_the_model_not_of_the_caller():
+def test_the_direction_of_travel_is_asked_of_the_design_not_of_the_caller():
     """traffic_runs_outward directly, because THREE pipeline scripts ask it without a site.
 
     phase3_treatments, phase4_render_3d and phase4_export_geometry each build the panel labelled
     "Existing Conditions" themselves, and none of them imports a site's scenarios.py. While the
     lean lived in sites/lavallette_reese/scenarios.py as a module constant, those three got
     apply_observed_parking's old two-way default and drew half the bays mirrored.
+
+    OF THE DESIGN, not of the model: the answer is seeded once by DesignState.from_model and read
+    from the state thereafter, so that the paint builder - which holds a state and no model - can
+    ask the same question when it decides an edge line's colour.
     """
     from src.geometry.treatments import traffic_runs_outward
 
     legs = a_one_way_pair_of_legs()
-    one_way = a_model_double(legs, traffic_heads_toward="north")
-    two_way = a_model_double(legs)
+    one_way, _ = a_site_double(legs, traffic_heads_toward="north")
+    two_way, _ = a_site_double(legs)
 
     assert [traffic_runs_outward(one_way, legs[n], s)
             for n in ("north", "south") for s in ("left", "right")] == [True, True, False, False]

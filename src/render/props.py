@@ -692,9 +692,22 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState, center_f
         if same_pole:
             ped_pos, ped_heading = pole_pos, pole_heading
         else:
+            # STEPPED CLEAR OF THE ROADWAY LIKE THE POLE ABOVE, and it was not. The vehicle pole
+            # goes through _step_outward_clear; its separate pedestrian post was placed by
+            # sliding PED_HEAD_POLE_OFFSET_FT ALONG the kerb from it and drawn wherever that
+            # landed. On a tight corner that is inside the carriageway, and the tangent is no
+            # help - sliding further along a kerb that curves into the junction goes deeper in,
+            # not out. So the offset is applied first and the OUTWARD bisector is what clears it.
+            # Fatal at NJ 35 & Reese, where furniture_in_roadway refused the whole export.
             tangent = np.array([-outward[1], outward[0]])
-            ped_pos = (pole_pos[0] + tangent[0] * PED_HEAD_POLE_OFFSET_FT,
-                       pole_pos[1] + tangent[1] * PED_HEAD_POLE_OFFSET_FT)
+            ped_base = np.array(pole_pos) + tangent * PED_HEAD_POLE_OFFSET_FT
+            placed_ped = _step_outward_clear(ped_base, outward, 0.0, pavement)
+            if placed_ped is None:
+                print(f"  NOTE: the separate pedestrian-signal post for corner {leg_a}/{leg_b} "
+                      f"can't be placed clear of the modelled roadway. Not drawn - the vehicle "
+                      f"signal above stands, so the corner is not left bare.")
+                continue
+            ped_pos = tuple(placed_ped)
             ped_heading = pole_heading
         props.append({
             "type": "pedestrian_signal_head", "position_ft": ped_pos, "heading_deg": ped_heading,

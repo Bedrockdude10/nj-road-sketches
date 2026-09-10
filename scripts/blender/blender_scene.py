@@ -176,6 +176,7 @@ SAMPLED_POLYLINE_CHANNELS = (
     ("lane_narrowing_edge_lines", 0.25),
     ("lane_narrowing_taper_lines", 0.15),
     ("parking_edge_lines", 0.25),
+    ("left_edge_lines", 0.25),
     ("parking_buffer_edge_lines", 0.25),
     ("parking_buffer_taper_lines", 0.15),
     ("bike_lane_edge_lines", 0.25),
@@ -187,6 +188,13 @@ TWO_POINT_CHANNELS = (
     "parking_buffer_hatch_lines", "bike_lane_hatch_lines",
 )
 TWO_POINT_WIDTH_M = 0.15
+# THE CHANNELS DRAWN IN THE YELLOW MATERIAL. Every other paint channel is white, so this is the
+# whole of what makes a stripe yellow at this end - which is why a yellow marking gets its own
+# channel upstream rather than sharing an edge-line one (src/geometry/markings.py). Two entries,
+# and they are yellow for the same reason in two different places: `left_edge_lines` is the left
+# edge of a ONE-WAY roadway (MUTCD 3B.09 P3) and `bike_lane_contraflow_lines` divides riders
+# going opposite ways. Yellow means "do not cross to the other side of this".
+YELLOW_CHANNELS = ("left_edge_lines", "bike_lane_contraflow_lines")
 # The centerline styles drawn in the WHITE marking material rather than the yellow one - a
 # broken lane line between two lanes running the same way. Blender runs under its own bundled
 # Python and cannot import src, so this mirrors src/geometry/treatments/base.py:
@@ -424,19 +432,19 @@ def build_scene(data: dict):
     # (channel, stripe width) - the two widths are a drawn-scale choice, not a standard: a solid
     # edge line reads at 0.25 m here and a hatch stroke at 0.15 m.
     for key, width in SAMPLED_POLYLINE_CHANNELS:
+        batch = yellow if key in YELLOW_CHANNELS else white
         for line in data.get(key, []):
             for ring in polyline_rings(line, width):
-                white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
+                batch.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     # The hatch strokes and stall ticks really are two-point segments, so only their ends matter.
     for key in TWO_POINT_CHANNELS:
         for line in data.get(key, []):
             ring = line_ring(line[0], line[-1], TWO_POINT_WIDTH_M)
             if ring is not None:
                 white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
-    # A TWO-WAY LANE'S CENTRE STRIPE IS YELLOW, and the channel is what decides that: every
-    # edge-line channel above is drawn in the white marking material, and a yellow line is not a
-    # white line somewhere else. Same distinction the roadway centreline gets, for the same reason -
-    # yellow means opposing directions. Already cut into dashes upstream.
+    # A TWO-WAY LANE'S CENTRE STRIPE IS YELLOW, and the channel is what decides that - see
+    # YELLOW_CHANNELS. Its own loop rather than a row in SAMPLED_POLYLINE_CHANNELS because it is
+    # laid at CENTERLINE_WIDTH_M, not at an edge line's width. Already cut into dashes upstream.
     for line in data.get("bike_lane_contraflow_lines", []):
         for ring in polyline_rings(line, CENTERLINE_WIDTH_M):
             yellow.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)

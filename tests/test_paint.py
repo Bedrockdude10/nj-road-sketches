@@ -977,7 +977,7 @@ def test_sampled_polylines_are_rendered_as_polylines_not_chords():
     two_point = set(declared["TWO_POINT_CHANNELS"])
     # The channels whose entries come from inset_line_ft or a taper arc - many vertices apiece.
     for name in ("lane_narrowing_edge_lines", "lane_narrowing_taper_lines", "parking_edge_lines",
-                  "parking_buffer_edge_lines", "parking_buffer_taper_lines",
+                  "left_edge_lines", "parking_buffer_edge_lines", "parking_buffer_taper_lines",
                   "bike_lane_edge_lines"):
         assert name in sampled, f"{name} is a sampled polyline and is not declared as one"
         assert name not in two_point, f"{name} would be drawn as the chord between its endpoints"
@@ -1673,3 +1673,122 @@ def test_a_one_way_lane_pinned_to_its_kerb_MOVES_THE_LINE_BETWEEN_THE_TRAVEL_LAN
     unpinned = DesignState(legs={"east": leg}, corner_fillets={}).apply(
         AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=2.0))
     assert unpinned.travel_lane_divider_shift("east") is None
+
+
+# --------------------------------------------------------------------------
+# The left edge line of a one-way roadway is YELLOW (MUTCD 3B.09 P3)
+# --------------------------------------------------------------------------
+def _a_state_with_one_way_legs(heads_toward="north"):
+    """A DesignState double carrying nothing but the two legs and which way they run.
+
+    A double and not a site model, because tests/fixtures/data clips to Mercer County and the
+    only one-way carriageway this project draws is in Ocean - see conftest.
+    """
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+    from src.geometry.treatments import DesignState
+
+    # Both point OUTWARD from the junction at the origin, which is the whole point: the northern
+    # approach runs away up the page and the southern one away down it.
+    legs = {"gc_north": Leg(name="gc_north", centerline=LineString([(0, 0), (0, 190)]),
+                            curb_to_curb_ft=70.0),
+            "gc_south": Leg(name="gc_south", centerline=LineString([(0, 0), (0, -190)]),
+                            curb_to_curb_ft=70.0)}
+    return DesignState(legs=legs, corner_fillets={},
+                       traffic_heads_toward=dict.fromkeys(legs, heads_toward))
+
+
+def test_the_left_edge_of_a_ONE_WAY_roadway_is_the_same_real_kerb_on_both_approaches():
+    """The trap this exists for: both legs of a street point OUTWARD from the junction.
+
+    So `side == "left"` names the west kerb on the northern approach and the EAST kerb on the
+    southern one. Asked that way, the yellow line would cross the street at the junction.
+    """
+    from src.geometry.treatments import is_left_edge_of_the_roadway
+
+    state = _a_state_with_one_way_legs("north")
+    yellow = {(name, side) for name in state.legs for side in ("left", "right")
+              if is_left_edge_of_the_roadway(state, state.legs[name], side)}
+    assert yellow == {("gc_north", "left"), ("gc_south", "right")}, (
+        "the yellow edge line has to land on ONE real kerb along a one-way street; it went to "
+        f"{sorted(yellow)}")
+
+
+def test_a_two_way_street_has_no_left_edge_line_on_either_kerb():
+    """Both edges of an ordinary street are white (3B.09 P2) - the yellow there is the CENTRE
+    line, which is a different marking with a different home."""
+    from src.geometry.treatments import DesignState, is_left_edge_of_the_roadway
+
+    legs = {"main": a_straight_leg("main")}
+    two_way = DesignState(legs=legs, corner_fillets={})
+    assert not any(is_left_edge_of_the_roadway(two_way, legs["main"], side)
+                   for side in ("left", "right"))
+
+
+def test_the_yellow_stripes_are_the_same_two_in_both_renderers():
+    """blender_scene.py's YELLOW_CHANNELS against markings.YELLOW_CHANNELS, read from the source.
+
+    The same AST mirror the centreline styles get, and for the reason section 3 of SKILLS.md
+    gives: Blender runs under its own bundled Python and cannot import src, so the two lists are
+    written twice and nothing but a test can hold them together. A yellow marking routed through
+    a white channel renders yellow in the plan view and white in 3D, with no check able to see it.
+    """
+    import ast
+    from pathlib import Path
+
+    from src.geometry.markings import YELLOW_CHANNELS
+
+    source = (Path(__file__).resolve().parent.parent
+              / "scripts" / "blender" / "blender_scene.py").read_text()
+    declared = {node.targets[0].id: ast.literal_eval(node.value)
+                for node in ast.parse(source).body
+                if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "YELLOW_CHANNELS"}
+    assert "YELLOW_CHANNELS" in declared, (
+        "blender_scene.py no longer declares which channels are yellow - the guard has nothing "
+        "to read, which is not the same as the render being right")
+    assert set(declared["YELLOW_CHANNELS"]) == {c.key for c in YELLOW_CHANNELS}
+
+
+def test_the_plan_view_draws_every_yellow_channel_yellow_too():
+    """The 3D render is not the only place the colour can drift: PAINT_STYLE is per KIND, so a
+    kind whose channel is yellow must not be styled in the blue the white bay edge line uses."""
+    from src.geometry import markings
+    from src.render.plan_view import PAINT_STYLE
+
+    yellow_keys = {c.key for c in markings.YELLOW_CHANNELS}
+    for kind in markings.KINDS.values():
+        if kind.channel is None or kind.channel.key not in yellow_keys:
+            continue
+        colour = PAINT_STYLE.get(kind, {}).get("color")
+        assert colour in ("gold", "goldenrod", "yellow"), (
+            f"{kind} travels in a YELLOW channel but the plan view draws it {colour!r}")
+
+
+def test_a_leg_traffic_LEAVES_BY_gets_no_stop_bar_of_our_invention():
+    """One-way street, so half its legs are exits - and nobody stops on the way out.
+
+    The derivation hangs a bar off every leg carrying a crosswalk, which is right on a two-way
+    street because every leg there is an approach. Danny traced three bars at NJ 35 & Reese for
+    four legs; the fourth was this function's, not the street's.
+    """
+    from src.render.crosswalks import resolve_stop_bar_offsets
+
+    state = _a_state_with_one_way_legs("north")
+    offsets = dict.fromkeys(state.legs, (40.0, "modelled"))
+    bars = resolve_stop_bar_offsets(state, offsets, stop_lines=[])
+    # gc_north points north and traffic heads north, so it is the way OUT of the junction.
+    assert set(bars) == {"gc_south"}, (
+        f"a bar was derived for a leg traffic leaves by; got {sorted(bars)}")
+
+
+def test_a_two_way_street_still_gets_a_stop_bar_on_every_leg():
+    """The rule above must not reach an ordinary street, where every leg is an approach."""
+    from src.geometry.treatments import DesignState
+    from src.render.crosswalks import resolve_stop_bar_offsets
+
+    state = _a_state_with_one_way_legs("north")
+    two_way = DesignState(legs=state.legs, corner_fillets={})      # no traffic_heads_toward
+    offsets = dict.fromkeys(two_way.legs, (40.0, "modelled"))
+    assert set(resolve_stop_bar_offsets(two_way, offsets, stop_lines=[])) == set(two_way.legs)

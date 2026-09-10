@@ -219,7 +219,7 @@ def _bikeway_on_the_east_kerb(baseline: DesignState, model, section) -> DesignSt
             # Asked of the street rather than written down per leg, for the same reason the
             # side is: both legs' bearings point outward, so the southern approach's riders and
             # drivers travel INWARD and only the compass knows it.
-            runs_outward=traffic_runs_outward(model, leg, east)))
+            runs_outward=traffic_runs_outward(baseline, leg, east)))
         state = state.apply(AddBikeLaneBollards(LegSide(leg_name, east)))
     # AFTER the bikeways, not before: a kerb the bikeway's own section already carries stalls on
     # must not get a second parking treatment painting over them, and this skips exactly the

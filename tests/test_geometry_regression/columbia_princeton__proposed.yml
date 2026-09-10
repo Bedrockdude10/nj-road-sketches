@@ -74,6 +74,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  left_edge_lines:
+    count: 0
+    extent: null
+    points: 0
   parking_buffer_edge_lines:
     count: 0
     extent: null

@@ -20,7 +20,8 @@ from src.geometry.treatments.base import (ANGLED_STALL_LENGTH_FT, ANGLED_STALL_W
                                           PARKING_STALL_DEPTH_DEFAULT_FT,
                                           PARKING_STALL_LENGTH_DEFAULT_FT,
                                           TARGET_LANE_WIDTH_FT, Treatment,
-                                          kerbside_allowance_ft, traffic_runs_outward)
+                                          is_left_edge_of_the_roadway, kerbside_allowance_ft,
+                                          traffic_runs_outward)
 from src.geometry.treatments.bikeways import AddBikeLane, divider_shift_toward_ft
 from src.geometry.treatments.lanes import LaneNarrowing
 from src.geometry.treatments.state import DesignState, FacilityRefusal
@@ -183,7 +184,8 @@ class MarkedParking(Treatment):
         where the law forbids parking at all."""
         from src.geometry.daylighting import merged_no_parking_spans_ft, no_parking_zones_ft
         from src.geometry.markings import (BUFFER_EDGE_LINE, BUFFER_FILL, DAYLIGHT_EDGE_LINE,
-                                           DAYLIGHT_FILL, PARKING_EDGE_LINE, STALL_DIVIDER,
+                                           DAYLIGHT_FILL, LEFT_EDGE_LINE, PARKING_EDGE_LINE,
+                                           STALL_DIVIDER,
                                            ZONE_END_LINE)
         from src.geometry.model import (inset_line_ft, lane_narrowing_polygons_ft,
                                         offset_band_polygon, parking_lane_edge_line_ft,
@@ -308,7 +310,11 @@ class MarkedParking(Treatment):
                 curb_offset_ft=curb_offset_ft - LANE_EDGE_LINE_WIDTH_FT / 2)
             if edge is None:
                 continue  # the corner return consumes the whole leg - see plan_view's note
-            ctx.add(PARKING_EDGE_LINE, edge, leg_name, side)
+            # THE COLOUR IS DECIDED HERE, BY WHERE THE KERB IS, not by what is behind the line.
+            # This one stripe is the mouth of the bay AND the edge of the roadway, and MUTCD
+            # 3B.09 P3 makes it yellow where the roadway is one-way and this is its left edge.
+            ctx.add(LEFT_EDGE_LINE if is_left_edge_of_the_roadway(ctx.state, leg, side)
+                    else PARKING_EDGE_LINE, edge, leg_name, side)
 
             # A STALL, UNLIKE THE EDGE LINE ABOVE, MUST NOT BE DRAWN WHERE IT WILL BE CUT.
             # PARKING_EDGE_LINE is CARRIED across a driveway (real curbside parking keeps its
@@ -483,14 +489,15 @@ def apply_observed_parking(state: DesignState, model: "IntersectionModel",
 
     `runs_outward(leg, side) -> bool` decides which way an angled bay LEANS - a bay leaning the
     wrong way can only be entered by reversing into the travel lane. It defaults to
-    traffic_runs_outward, which asks the model, and the override exists only for a caller
-    holding a state with no model behind it. IT USED TO DEFAULT TO `side == "right"`, which is
-    the two-way rule stated as if it were the only one; a one-way carriageway leans both its
-    kerbs the same compass way, so that default silently mirrored half of them.
+    traffic_runs_outward, which asks the DESIGN (from_model seeded it), and the override exists
+    only for a caller holding a state built some other way. IT USED TO DEFAULT TO
+    `side == "right"`, which is the two-way rule stated as if it were the only one; a one-way
+    carriageway leans both its kerbs the same compass way, so that default silently mirrored
+    half of them.
     """
     if runs_outward is None:
         def runs_outward(leg, side):
-            return traffic_runs_outward(model, leg, side)
+            return traffic_runs_outward(state, leg, side)
     for leg_name, leg_cfg in model.config["legs"].items():
         observed = leg_cfg.get("existing_parking")
         if not observed:

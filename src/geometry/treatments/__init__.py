@@ -45,7 +45,7 @@ from src.geometry.treatments.base import (BOLLARD_DEFAULT_SPACING_FT,
                                           VALID_CENTERLINE_STYLES,
                                           VALID_CROSSWALK_STYLES,
                                           kerbside_allowance_ft,
-                                          traffic_runs_outward)
+                                          is_left_edge_of_the_roadway, traffic_runs_outward)
 from src.geometry.treatments.state import (DesignState)
 from src.geometry.treatments.lanes import (LaneNarrowing, LaneNarrowingBollards)
 from src.geometry.treatments.bikeways import (AASHTO_MIN_BIKE_LANE_FT, AddBikeLane, AddKerbsideBikeLane,
@@ -202,6 +202,7 @@ __all__ = [
                                           "far_kerb_surplus_ft",
                                           "find_corner",
                                           "hold_travel_lane_at_target",
+                                          "is_left_edge_of_the_roadway",
                                           "kerb_may_hold_parking",
                                           "kerbside_allowance_ft",
                                           "lane_surplus_that_cannot_be_striped_ft",

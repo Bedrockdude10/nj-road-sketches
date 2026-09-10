@@ -6,7 +6,7 @@ scene both renderers draw from (src/render/scene.py:SceneGeometry), never from t
 
 A crossing's length is NOT the leg's configured width: crosswalk_reach_to_curbs_ft measures
 to the traced kerbs, asymmetrically (12 ft one way, 20 the other on a 30 ft street). Parking
-stalls are counted over the PARKING_EDGE_LINE pieces the paint builder emitted, cut by the
+stalls are counted over the BAY_EDGE_LINES pieces the paint builder emitted, cut by the
 entrances a stall may not be marked across - see marked_stall_runs for why the edge line alone
 is no longer the run.
 
@@ -21,7 +21,7 @@ import numpy as np
 from shapely.geometry import LineString
 from shapely.ops import substring, unary_union
 
-from src.geometry.markings import PARKING_EDGE_LINE, STALL_DIVIDER
+from src.geometry.markings import BAY_EDGE_LINES, STALL_DIVIDER
 from src.geometry.model import stall_lane_runs_ft, station_offset_many, whole_stalls_ft
 from src.geometry.targets import Corner, LegSide
 from typing import TYPE_CHECKING
@@ -126,7 +126,10 @@ def marked_stall_runs(paint: list, state: "DesignState", openings=None):
     from src.geometry.treatments import MarkedParking
 
     for piece in paint:
-        if piece.kind is not PARKING_EDGE_LINE:
+        # BOTH bay edge lines, not just the white one: a one-way street's left kerb carries the
+        # same stripe in yellow (markings.BAY_EDGE_LINES), and reading PARKING_EDGE_LINE alone
+        # counted the stalls on one kerb of NJ 35 NB and none of the other.
+        if piece.kind not in BAY_EDGE_LINES:
             continue
         parking = state.treatment_for(MarkedParking, LegSide(piece.leg, piece.side))
         leg = state.legs.get(piece.leg)

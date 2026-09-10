@@ -116,11 +116,21 @@ legs:
       source: >
         FIELD OBSERVATION, Danny, 2026-09-10: 60-degree angled parking against BOTH kerbs, and
         expected to stay that way - the borough wants as much parking as the street can hold.
+        CONFIRMED INDEPENDENTLY 2026-09-10 against aerial imagery and Street View (Sep 2025) of
+        Grand Central Ave at Reese: stalls on all four kerbs of the two Grand Central legs, all
+        leaning the same compass way, which is what the drawing has (skew +9.00 ft on the north
+        leg and -9.00 on the south - opposite leg frames, one direction of lean).
         The ANGLE is observed; the 9 x 18 ft stall behind it is not, and is the project's
         standard (N.J.A.C. 5:21, see ANGLED_STALL_WIDTH_FT). At 60 degrees that is a 20.09 ft
         bay taking 10.39 ft of kerb per stall, so the two bays spend 40.18 ft of the 69.55 ft
         between the traced kerbs and leave 14.69 ft per travel lane - which is what makes a bike
         lane fit here at all, out of the lanes' surplus rather than out of the parking.
+        NOT DRAWN, AND VISIBLE IN THE IMAGERY: an accessible stall in the WEST bay, blue-bordered
+        with a blue hatched access aisle beside it. Every stall this project draws is the same
+        stall - there is no accessible-stall marking in src/geometry/markings.py - so the bay is
+        drawn one space too uniform. It changes no width and no count; it is recorded here so
+        the omission is a known one rather than an unnoticed one, and OSM `capacity:disabled` on
+        the parking way is where the fact would belong if it were read.
 
   grand_central_ave_south:
     sri: "00000035__"
@@ -138,8 +148,9 @@ legs:
       sides: ["left", "right"]
       angle_deg: 60
       source: >
-        Same observation as grand_central_ave_north - it is one street through the junction, and
-        the bays run continuously past Reese Ave on both kerbs.
+        Same observation as grand_central_ave_north, and confirmed in the same imagery - it is
+        one street through the junction, and the bays run continuously past Reese Ave on both
+        kerbs.
 
   reese_ave_east:
     sri: "15151042__"
@@ -167,6 +178,47 @@ legs:
     source: >
       Same method and caveat as reese_ave_east: stations 45 and 50 only (40.90 and 40.89 ft;
       17.5 ft left / 23.4 ft right).
+
+# PRESENCE OF THIS BLOCK IS WHAT "SIGNALIZED" MEANS (src/site_schema.py: Signals), and it buys
+# two separate things: the signal hardware itself, and A STOP BAR ON EVERY APPROACH -
+# src/render/scene.py only resolves stop_bar_offsets where a site declares signals, so without
+# this every leg of a signalized state-highway junction exported `stop_bar_offset_m: null` and
+# the centreline paint ran on to the crosswalk with nothing ending it.
+signals:
+  pole_type: >
+    Mast arm - a horizontal arm from a corner pole out over the roadway, with the vehicle head
+    hanging above the travel lanes. NOT span-wire and NOT a short pole-mounted davit arm.
+  source: >
+    STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025
+    looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag:
+    there is no `highway=traffic_signals` node at this junction in the borough snapshot, which
+    is why nothing in the pipeline could infer it. What the photo attests directly is the
+    signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the
+    northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave
+    street-name blade on the arm.
+  corners:
+    # PEDESTRIAN HEAD MOUNTING IS THE WEAKEST FACT IN THIS FILE, and it is stated rather than
+    # left out because omitting a corner draws no pole there at all (props.py:
+    # _traffic_signal_props skips any corner with no entry), which would render a signalized
+    # junction with one signal on it. What the photograph shows is the SOUTHEAST corner, where
+    # the pedestrian head is on a post of its own, set back from the mast-arm pole. The other
+    # three are CARRIED ACROSS FROM IT, not observed - a beach-town junction rebuilt in one
+    # contract usually is symmetrical, and that is an expectation, not evidence. One street-view
+    # pass round the four corners replaces this whole list with observation; until then every
+    # pedestrian_head below except the first is an assumption this comment is the record of.
+    - legs: [grand_central_ave_south, reese_ave_east]     # southeast - the one in the photo
+      pedestrian_head: separate_pole
+    - legs: [grand_central_ave_north, reese_ave_east]     # northeast - ASSUMED
+      pedestrian_head: separate_pole
+    - legs: [grand_central_ave_south, reese_ave_west]     # southwest - ASSUMED
+      pedestrian_head: separate_pole
+    - legs: [grand_central_ave_north, reese_ave_west]     # northwest - ASSUMED
+      pedestrian_head: separate_pole
+  # EMPTY AND NOT OMITTED. No NO TURN ON RED restriction is legible in the imagery, and an empty
+  # list is the project's way of saying "looked, saw none" - the same distinction
+  # site_schema.ExistingParking draws between absent and unrecorded. Add legs here if a sign
+  # inventory or a closer look finds one.
+  no_turn_on_red_legs: []
 
 treatments:
   # A fallback only: load_intersection_model prefers a radius fitted to the traced kerb
