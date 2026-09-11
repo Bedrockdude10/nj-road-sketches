@@ -1056,6 +1056,41 @@ def station_offset_many(centerline: LineString, points: np.ndarray) -> tuple[np.
     (points x centerline segments) projection is one numpy expression instead of two shapely
     calls per point. Centerlines carry a handful of vertices, so the matrix is small and
     this collapses the dominant cost of reading a junction's traced kerbs.
+
+    Past either end a point measures against that end's tangent - what keeps a station behind
+    the junction NEGATIVE, so a leg can't claim the kerb of the leg opposite it (see
+    station_offset), and what stops everything beyond the leg's working length collapsing onto
+    one station. So the frame's domain is the polyline PLUS its two terminal rays, and each ray
+    is expressed as the bound its terminal segment does NOT have. That makes the rays CANDIDATES
+    IN the nearest-thing search below. They are never a correction applied to its result, and
+    for two separate reasons, at 60 ft and at 1e-10 ft.
+
+    THE 60 FT ONE. Applied as a correction, WHICH end a point is past has to be read back off
+    the clamped projection, and once a line HOOKS BACK that names the wrong end. On
+    (0 0, 22 0, 27.4 8.4, 23.2 17.5, 13.3 18.9) a point 26 ft out along the far tangent is
+    25.77 ft from the opening segment and 26.00 ft from the closing one, so it projected onto
+    the OPENING segment, clamped to that segment's start at station 0, and was then measured
+    against the START tangent: station -12.40 on a 52 ft line, for a point at station 78.00.
+    Searched as rays the same point is 0.00 ft off the far one against 22.59 ft off the near
+    one, which is not a close call. That shape is a self-approaching line rather than a road,
+    but the failure is a wrong END, not a wrong distance, so nothing bounds it.
+    (tests/test_frame_properties.py::test_stations_increase_along_the_line_including_past_both_ends.)
+
+    THE 1e-10 FT ONE, WHICH IS WHY THE STATION IS MEASURED FROM THE SEGMENT START AND NOT FROM
+    THE END VERTEX. Re-anchoring a past-the-end point at verts[-1] - `cumulative[-1] + (p -
+    verts[-1]) @ dir`, the obvious way to write it - is algebraically the same number and
+    numerically a different one: these are NJ State Plane feet, so a coordinate is ~5e5 and the
+    difference of two of them keeps ~1e-10 ft of absolute precision. A second expression for the
+    station therefore puts a ~1e-10 ft STEP at the end vertex, and the "am I past the end" test
+    disagrees with the projection across it. That is not too small to matter - measured on
+    wbroad_louellen, against a single expression per segment, it moved
+    parking_buffer_edge_lines from 13 stalls to 12 and a lane-narrowing edge line by 0.24 ft,
+    because a stall count is a length over a pitch and integer division has no tolerance. One
+    expression per segment, continuous across its own end, has no such step to fall down.
+
+    Searching the rays is also what makes this the exact inverse of point_at, which extrapolates
+    off these same two terminal segments (frame_at clips the segment index) for every station
+    outside [0, length].
     """
     verts, seg_dir, seg_len, cumulative = polyline_frame(centerline)
     seg_start = verts[:-1]
@@ -1063,7 +1098,14 @@ def station_offset_many(centerline: LineString, points: np.ndarray) -> tuple[np.
     pts = np.atleast_2d(np.asarray(points, dtype=float))
     rel = pts[:, None, :] - seg_start[None, :, :]             # (p, s, 2)
     along = np.einsum("psc,sc->ps", rel, seg_dir)
-    clamped = np.clip(along, 0.0, seg_len[None, :])
+
+    # The two terminal rays: the first and last segments, unbounded on their outward side.
+    lower = np.zeros_like(seg_len)
+    lower[0] = -np.inf
+    upper = np.array(seg_len, dtype=float)
+    upper[-1] = np.inf
+
+    clamped = np.clip(along, lower[None, :], upper[None, :])
     perp = rel - clamped[:, :, None] * seg_dir[None, :, :]
     nearest = np.argmin(np.hypot(perp[:, :, 0], perp[:, :, 1]), axis=1)
 
@@ -1072,17 +1114,4 @@ def station_offset_many(centerline: LineString, points: np.ndarray) -> tuple[np.
     tangents = seg_dir[nearest]
     rel_nearest = rel[rows, nearest]
     offsets = tangents[:, 0] * rel_nearest[:, 1] - tangents[:, 1] * rel_nearest[:, 0]
-
-    # Past either end, measure against that end's tangent rather than letting the projection
-    # clamp. Behind the junction this is what keeps a station negative, so a leg can't claim
-    # the curb of the leg opposite it (see station_offset). Past the far end it stops every
-    # point beyond the leg's working length from collapsing onto the same station, and makes
-    # this an exact inverse of point_at over the whole line.
-    for outside, vertex, direction, base in (
-            (stations <= 0, verts[0], seg_dir[0], 0.0),
-            (stations >= cumulative[-1], verts[-1], seg_dir[-1], cumulative[-1])):
-        if outside.any():
-            rel_end = pts[outside] - vertex
-            stations[outside] = base + rel_end @ direction
-            offsets[outside] = direction[0] * rel_end[:, 1] - direction[1] * rel_end[:, 0]
     return stations, offsets
