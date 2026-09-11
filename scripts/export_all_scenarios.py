@@ -35,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.build_all import scenarios_for
 from scripts.jobs import MAX_BUILD_JOBS
 from src.geometry.intersection import load_intersection_model
-from src.geometry.treatments import DesignState
+from src.geometry.treatments import DesignState, existing_conditions
 from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
 from src.site import list_sites, load_site_scenarios, run_scenario, scenario_label
 from src.sources.osm_context import fetch_buildings, fetch_crossings
@@ -79,7 +79,13 @@ def export_site(site: str, out_dir: Path) -> tuple[list[Path], list[str]]:
             (scenario_label(name), name) for name in names]:
         try:
             with contextlib.redirect_stdout(quiet):
-                state = (DesignState.from_model(model) if label == "existing" else
+                # existing_conditions, NOT from_model - the fourth script to need that
+                # distinction and the last one to get it. from_model is the UNTREATED street,
+                # so this harness was writing NJ 35 NB's baseline as 70 ft of bare asphalt:
+                # no bays, no bike lane, and therefore nothing for a before/after to move.
+                # A verification loop blind to exactly the drawing it labels "existing" is
+                # worse than none, because it reports "no export moved" and is believed.
+                state = (existing_conditions(model) if label == "existing" else
                          run_scenario(getattr(scenarios, name), DesignState.from_model(model),
                                       model))
                 written.append(export_scenario(

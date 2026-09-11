@@ -11,7 +11,8 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from src.geometry.targets import Target
-from src.geometry.model import (leg_heads_toward, narrowest_half_width_ft)
+from src.geometry.model import (angled_stall_depth_ft, leg_heads_toward,
+                                narrowest_half_width_ft)
 
 if TYPE_CHECKING:                       # DesignState is layered above this module;
     from src.geometry.treatments.state import DesignState   # the annotation is a string
@@ -155,6 +156,17 @@ def _parking_restrictions_from_model(model: "IntersectionModel") -> dict:
     return out
 
 
+def carriageway_is_one_way(state, leg) -> bool:
+    """Does this leg's carriageway carry traffic in ONE direction only?
+
+    The single reader of "is `traffic_heads_toward` set", so that the three questions that turn
+    on it - which way a bay leans, which edge line is yellow, and how far a stop bar reaches -
+    cannot come to differ about what a missing key means. Absent is TWO-WAY, which is the
+    ordinary case and the one a site says nothing about.
+    """
+    return state.traffic_heads_toward.get(leg.name) is not None
+
+
 def traffic_runs_outward(state, leg, side: str) -> bool:
     """Does the traffic beside this kerb travel OUTWARD along the leg, away from the junction?
 
@@ -175,7 +187,8 @@ def traffic_runs_outward(state, leg, side: str) -> bool:
     `config["legs"][name]["traffic_heads_toward"]` out of the model on every call, which put a
     second reader of that key one layer below DesignState.from_model - and left the paint
     builder, which holds a state and no model, unable to ask at all. from_model seeds
-    `state.traffic_heads_toward` once; this is the only thing that reads it.
+    `state.traffic_heads_toward` once, and carriageway_is_one_way above is the only thing that
+    asks whether it is set.
 
     Here beside _parking_restrictions_from_model rather than in src/geometry/model/ because it
     reads a fact SEEDED from config and not the geometry, and because its callers - a bay, a
@@ -185,10 +198,9 @@ def traffic_runs_outward(state, leg, side: str) -> bool:
     scenario of that junction has to get the same answer, including the one the pipeline labels
     "Existing Conditions" and builds without asking a site anything.
     """
-    heads_toward = state.traffic_heads_toward.get(leg.name)
-    if heads_toward is None:
+    if not carriageway_is_one_way(state, leg):
         return str(side) == "right"
-    return leg_heads_toward(leg, heads_toward)
+    return leg_heads_toward(leg, state.traffic_heads_toward[leg.name])
 
 
 def is_left_edge_of_the_roadway(state, leg, side: str) -> bool:
@@ -208,7 +220,7 @@ def is_left_edge_of_the_roadway(state, leg, side: str) -> bool:
     carries traffic both ways - the yellow there is the CENTRE line, which is a different
     marking with a different home (DesignState.centerline_style).
     """
-    if state.traffic_heads_toward.get(leg.name) is None:
+    if not carriageway_is_one_way(state, leg):
         return False
     return (str(side) == "left") == traffic_runs_outward(state, leg, side)
 
@@ -326,6 +338,45 @@ ANGLED_STALL_LENGTH_FT = 18.0
 # intersection. A legal minimum, not a rendering choice - marked parking starts at whichever of
 # this and leg_clearance_ft's past-the-corner-curve point is farther from the intersection.
 LEGAL_PARKING_SETBACK_FT = 25.0
+
+
+@dataclass(frozen=True)
+class ObservedBay:
+    """The kerbside parking a surveyor recorded on one leg, resolved to the figures a treatment
+    needs. `sides` is which kerbs carry it; `depth_ft` is the angle's consequence, never a lane
+    width anybody chose.
+
+    A record and not a treatment, because TWO treatments place it: MarkedParking on an ordinary
+    kerb, and AddBikeLane's own section on a kerb that also carries a bike lane (one rigid
+    section places all of a rigid cross-section - SKILLS 0a). Resolving `angle_deg` and the
+    stall's dimensions in each of them is the two-derivations-of-one-fact shape, and it would
+    have gone wrong in the usual quiet way: the second copy would have dropped the second term
+    of angled_stall_depth_ft and understated the bay by 4.50 ft.
+    """
+    sides: tuple
+    depth_ft: float
+    stall_length_ft: float
+    stall_width_ft: float
+    angle_deg: float | None
+
+
+def observed_bay(model: "IntersectionModel", leg_name: str) -> "ObservedBay | None":
+    """What config `legs.<leg>.existing_parking` records for this leg, or None where nothing was
+    recorded - which is UNRECORDED and not "no parking", see site_schema.ExistingParking."""
+    observed = model.config["legs"].get(leg_name, {}).get("existing_parking")
+    if not observed:
+        return None
+    angle_deg = observed.get("angle_deg")
+    width_ft = observed.get("stall_width_ft") or ANGLED_STALL_WIDTH_FT
+    length_ft = observed.get("stall_length_ft") or (
+        ANGLED_STALL_LENGTH_FT if angle_deg else PARKING_STALL_LENGTH_DEFAULT_FT)
+    # THE BAY'S DEPTH IS THE ANGLE'S CONSEQUENCE, not a lane width anybody chose: 20.09 ft
+    # at 60 degrees against the 8 ft a parallel lane takes. Parallel parking keeps the
+    # project's parallel depth, which IS a design figure.
+    depth_ft = (angled_stall_depth_ft(length_ft, width_ft, angle_deg) if angle_deg
+                else PARKING_STALL_DEPTH_DEFAULT_FT)
+    return ObservedBay(sides=tuple(observed["sides"]), depth_ft=depth_ft,
+                       stall_length_ft=length_ft, stall_width_ft=width_ft, angle_deg=angle_deg)
 
 
 BOLLARD_DEFAULT_SPACING_FT = 10.0  # typical flex-post delineator spacing for a channelized buffer

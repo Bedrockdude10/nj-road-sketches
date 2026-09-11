@@ -123,6 +123,13 @@ class AddBikeLane(Treatment):
     #: two lanes, so the bike lane comes out of two 14.7 ft travel lanes and all of that surplus
     #: is on one side of the alignment. See BikeLane.near_half_ft, which is what this sets.
     pin_to_kerb: bool = False
+    #: WHETHER THIS LANE IS A RECORD OR A DECISION - the same field MarkedParking carries and for
+    #: the same reason. Nothing about the geometry changes either way; what changes is what the
+    #: drawing CLAIMS. Every AddBikeLane in this repo used to be a proposal, so "this leg-side has
+    #: a bikeway" was a safe reading of "this design restriped this leg", and
+    #: TravelLaneHoldsItsTarget is built on that reading. NJ 35 NB already has a lane on its east
+    #: kerb (apply_osm_bike_lanes), and an existing-conditions drawing restripes nothing.
+    observed: bool = False
 
     @property
     def lane(self) -> BikeLane:
@@ -161,11 +168,17 @@ class AddBikeLane(Treatment):
         # A DECIMAL WHERE THERE IS ONE. Rounded to whole feet this reported E Broad's narrowed
         # protected lane as "4 ft lane" when it is 4.49 - understating a width by half a foot in
         # the one line a reader would check it against.
+        # AND WHETHER IT IS ALREADY THERE. Said out loud because the two drawings are otherwise
+        # identical: nothing else in the export separates "this lane is painted today" from "this
+        # lane is what we propose", and on a street whose proposal is a RELOCATION that is the
+        # distinction a reader most needs.
+        recorded = ", observed=True" if self.observed else ""
         return (f"AddBikeLane({self.target.leg}, {self.target.side}): {_feet(self.width_ft)} ft lane"
                 + (f", {_feet(self.buffer_ft)} ft buffer" if self.buffer_ft else "")
                 + (f", parking-protected behind {self.parking_ft:.0f} ft of marked parking"
                    if self.parking_ft
                    else f", {self.shy_ft:.1f} ft shy of the kerb" if self.shy_ft else "")
+                + recorded
                 + self._extent())
 
     def _extent(self) -> str:

@@ -467,6 +467,7 @@ next.
 | figure | value | constant | file |
 |---|---|---|---|
 | Bike lane design width (and the width to design to) | 5 ft | `AASHTO_MIN_BIKE_LANE_FT` | `src/geometry/treatments/` |
+| Width an EXISTING bike lane is drawn at when OSM records none | 5 ft | `ASSUMED_BIKE_LANE_FT` | `src/geometry/treatments/bikeways/observed.py` |
 | Bike lane hard floor, no curb face | 4 ft | `MIN_BIKE_LANE_FT` | `src/geometry/treatments/` |
 | Parallel parking lane depth | 8 ft | `PARKING_STALL_DEPTH_DEFAULT_FT` | `src/geometry/treatments/` |
 | Parallel parking stall length | 22 ft | `PARKING_STALL_LENGTH_DEFAULT_FT` | `src/geometry/treatments/` |
@@ -481,6 +482,12 @@ Two of these carry project decisions worth knowing:
 - **4 ft is a real floor and the buffer outranks the lane.** Where a kerb is a few inches short,
   the lane narrows toward 4 ft rather than the buffer being spent — a 4.5 ft lane with a post
   beside it beats a 5 ft lane with a truck beside it. See `widest_protected_lane_ft`.
+- **The third row is an ASSUMPTION STANDING IN FOR A MEASUREMENT, and is the only row here that
+  describes a street that already exists.** `cycleway:left|right=lane` says a bike lane is painted;
+  it does not say how wide. Where `cycleway:*:width` is absent — as it is on NJ 35 through
+  Lavallette — the existing lane is drawn at the design width, and `state.notes` says so on that
+  leg and names the tag that would replace the assumption with a survey. A mapped width is always
+  preferred; only the absence of one reaches this row.
 
 **And the two parking rows are PARALLEL parking only.** 8 ft is a depth off the kerb and 22 ft is
 a length along it, which is the geometry of a stall lying parallel to the street and nothing else.

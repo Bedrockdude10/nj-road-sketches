@@ -9,11 +9,11 @@ from typing import ClassVar
 import numpy as np
 
 from src.geometry.targets import LegSide, LegTarget, Side
-from src.geometry.model import (angled_stall_depth_ft, angled_stall_line_depth_ft,
+from src.geometry.model import (angled_stall_line_depth_ft,
                                 angled_stall_mouth_ft, angled_stall_pitch_ft,
                                 angled_stall_skew_ft, half_width_profile,
                                 narrowest_half_width_ft)
-from src.geometry.treatments.base import (ANGLED_STALL_LENGTH_FT, ANGLED_STALL_WIDTH_FT,
+from src.geometry.treatments.base import (ANGLED_STALL_WIDTH_FT,
                                           BOLLARD_DEFAULT_SPACING_FT,
                                           LANE_NARROWING_DEFAULT_STRIPE_FT,
                                           LANE_WIDTH_SLACK_FT, MIN_MARKED_PARKING_DEPTH_FT,
@@ -21,7 +21,7 @@ from src.geometry.treatments.base import (ANGLED_STALL_LENGTH_FT, ANGLED_STALL_W
                                           PARKING_STALL_LENGTH_DEFAULT_FT,
                                           TARGET_LANE_WIDTH_FT, Treatment,
                                           is_left_edge_of_the_roadway, kerbside_allowance_ft,
-                                          traffic_runs_outward)
+                                          observed_bay, traffic_runs_outward)
 from src.geometry.treatments.bikeways import AddBikeLane, divider_shift_toward_ft
 from src.geometry.treatments.lanes import LaneNarrowing
 from src.geometry.treatments.state import DesignState, FacilityRefusal
@@ -461,10 +461,33 @@ def existing_conditions(model: "IntersectionModel") -> DesignState:
     label and draw as existing. Passing this to a builder instead would hand every scenario a
     street whose parking is already committed on both kerbs.
 
-    A no-op on a site that declares nothing, which is every site but lavallette_reese - so this
-    is a correction to a label that was wrong, not a change to any drawing that existed.
+    A no-op on a site that declares nothing and has no `cycleway:*` on its ways, which is every
+    site but lavallette_reese - so this is a correction to a label that was wrong, not a change
+    to any drawing that existed.
     """
-    return apply_observed_parking(DesignState.from_model(model), model)
+    return apply_existing_markings(DesignState.from_model(model), model)
+
+
+def apply_existing_markings(state: DesignState, model: "IntersectionModel") -> DesignState:
+    """Every marking this project knows is ALREADY ON THE GROUND, applied to `state`.
+
+    TWO SOURCES, IN THIS ORDER. What OSM records (apply_osm_bike_lanes) and what a surveyor
+    recorded in config (apply_observed_parking). The BIKEWAY GOES ON FIRST because where one kerb
+    carries both, the bikeway's own section carries the bay too - one rigid section places all of
+    a rigid cross-section (.claude/SKILLS.md 0a) - and apply_observed_parking is the applier that
+    knows to stand aside for it. The other order paints a parking lane over ground the bikeway
+    has already spent.
+
+    SEPARATE FROM existing_conditions BECAUSE A PROPOSAL NEEDS IT TOO. A builder starts from the
+    untreated street, puts its own treatments down, and then has to draw everything it did NOT
+    change - otherwise the proposal sheet shows a street missing the markings the existing sheet
+    shows, and the two sheets side by side credit the proposal with removing them. Both appliers
+    leave a leg-side alone that the caller has already treated, which is what makes calling this
+    last safe.
+    """
+    from src.geometry.treatments.bikeways import apply_osm_bike_lanes
+
+    return apply_observed_parking(apply_osm_bike_lanes(state, model), model)
 
 
 def apply_observed_parking(state: DesignState, model: "IntersectionModel",
@@ -498,30 +521,20 @@ def apply_observed_parking(state: DesignState, model: "IntersectionModel",
     if runs_outward is None:
         def runs_outward(leg, side):
             return traffic_runs_outward(state, leg, side)
-    for leg_name, leg_cfg in model.config["legs"].items():
-        observed = leg_cfg.get("existing_parking")
-        if not observed:
-            continue        # UNRECORDED, not "no parking" - see site_schema.ExistingParking
+    for leg_name in model.config["legs"]:
+        bay = observed_bay(model, leg_name)
         leg = state.legs.get(leg_name)
-        if leg is None:
+        if bay is None or leg is None:
             continue
-        angle_deg = observed.get("angle_deg")
-        width_ft = observed.get("stall_width_ft") or ANGLED_STALL_WIDTH_FT
-        length_ft = observed.get("stall_length_ft") or (
-            ANGLED_STALL_LENGTH_FT if angle_deg else PARKING_STALL_LENGTH_DEFAULT_FT)
-        # THE BAY'S DEPTH IS THE ANGLE'S CONSEQUENCE, not a lane width anybody chose: 20.09 ft
-        # at 60 degrees against the 8 ft a parallel lane takes. Parallel parking keeps the
-        # project's parallel depth, which IS a design figure.
-        depth_ft = (angled_stall_depth_ft(length_ft, width_ft, angle_deg) if angle_deg
-                    else PARKING_STALL_DEPTH_DEFAULT_FT)
-        for side in observed["sides"]:
+        for side in bay.sides:
             if state.treatment_for(MarkedParking, LegSide(leg_name, side)) is not None:
                 continue
             if any(t.target == LegSide(leg_name, side) for t in state.treatments_of(AddBikeLane)):
                 continue    # a bikeway on this kerb carries the parking in its own section
             state = state.apply(MarkedParking(
-                LegSide(leg_name, side), depth_ft=depth_ft, stall_length_ft=length_ft,
-                angle_deg=angle_deg, stall_width_ft=width_ft,
+                LegSide(leg_name, side), depth_ft=bay.depth_ft,
+                stall_length_ft=bay.stall_length_ft, angle_deg=bay.angle_deg,
+                stall_width_ft=bay.stall_width_ft,
                 runs_outward=runs_outward(leg, side), observed=True))
     return state
 

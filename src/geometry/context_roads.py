@@ -68,20 +68,33 @@ def is_carriageway(tags: dict) -> bool:
     return True
 
 
+def osm_width_ft(raw) -> float | None:
+    """An OSM width value in FEET, or None where it is absent or not a plain number.
+
+    OSM widths are metres unless the value carries a unit, and the only unit worth handling is
+    the bare "m" a mapper sometimes writes anyway. Anything else - a range, feet, an inch mark -
+    returns None rather than a guess, because a width invented from a value nobody could parse
+    is worse than the class default. One home so a second caller cannot come to disagree about
+    what "5" means; the SANITY BOUNDS stay with each caller, because what is a plausible
+    carriageway is not what is a plausible bike lane.
+    """
+    if raw is None:
+        return None
+    try:
+        return float(str(raw).replace("m", "").strip()) * 3.28084
+    except ValueError:
+        return None
+
+
 def assumed_width_ft(tags: dict) -> float:
     """How wide to draw a street nobody traced.
 
     OSM's own `width` tag first (a mapper who recorded one measured something), then the highway
     class. A `_link` takes its parent class.
     """
-    raw = tags.get("width")
-    if raw is not None:
-        try:                                  # metres in OSM unless a unit is given
-            metres = float(str(raw).replace("m", "").strip())
-            if 6.0 <= metres * 3.28084 <= 80.0:
-                return metres * 3.28084
-        except ValueError:
-            pass
+    feet = osm_width_ft(tags.get("width"))
+    if feet is not None and 6.0 * 3.28084 <= feet <= 80.0 * 3.28084:
+        return feet
     highway = (tags.get("highway") or "").removesuffix("_link")
     return ROADWAY_DRAWN_WIDTH_FT.get(highway, ROADWAY_DEFAULT_WIDTH_FT)
 

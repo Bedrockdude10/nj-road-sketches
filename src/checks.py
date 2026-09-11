@@ -24,7 +24,6 @@ from shapely.geometry import Point
 from src.geometry.markings import (BAY_EDGE_LINES, STALL_DIVIDER,
                                    lies_legitimately_on, opening_rule)
 from src.geometry.paint import stroke_width_ft
-from src.geometry.targets import Side
 from src.geometry.model import curb_offsets_at_stations, station_offset_many
 
 if TYPE_CHECKING:                      # the runtime import is in _empty_state, below
@@ -47,10 +46,10 @@ CURB_BEHIND_JUNCTION_TOLERANCE_FT = 6.0
 # bounded by the roadway itself (crosswalks.crosswalk_reach_to_curbs_ft); a loose bound here
 # hides the failure it is named for - end bars painted up the corner onto the sidewalk.
 MIN_CROSSWALK_IN_PAVEMENT = 0.99
-# A stop bar covers the entering half only, and it RESTS AGAINST the centreline rather than
-# crossing it - so this is float noise and the width of a polygon vertex, not a design margin.
-# The bar is built to start exactly at the line (crosswalks.stop_bar_band_geometry_ft), so
-# anything past it is a fault rather than a tolerance being used up.
+# A stop bar covers the approach lanes only, and it RESTS AGAINST the line that ends them
+# rather than crossing it - so this is float noise and the width of a polygon vertex, not a
+# design margin. The bar is built to start exactly at that line (crosswalks.stop_bar_ends_ft),
+# so anything past it is a fault rather than a tolerance being used up.
 STOP_BAR_PAST_CENTERLINE_TOLERANCE_FT = 0.1
 # Paint is specified to a tenth of a foot; this absorbs float noise, nothing more.
 LANE_WIDTH_TOLERANCE_FT = 0.05
@@ -903,6 +902,15 @@ def _divider_shift_toward_ft(state: "DesignState", leg_name: str, side: str) -> 
     return divider_shift_toward_ft(state, leg_name, side)
 
 
+def _stop_bar_inner_end_ft(state: "DesignState", leg_name: str) -> tuple[float, float]:
+    """This leg's stop bar's two ends. Delegates to src/render/crosswalks.py, which is where the
+    one definition lives - see stop_bar_ends_ft for why the inner end is not always a centreline.
+    Imported here rather than at module scope because src/render/ imports src/checks.py."""
+    from src.render.crosswalks import stop_bar_ends_ft
+
+    return stop_bar_ends_ft(state, leg_name)
+
+
 def _travel_lane_target_ft(state: "DesignState", leg_name: str, side: str) -> float:
     """How far from the alignment this kerb's travel lane reaches. Delegates to
     src/geometry/treatments/, which is where the one definition lives - see travel_lane_edge_ft
@@ -1026,8 +1034,12 @@ class TravelLanesHoldTheTarget(SceneCheck):
                 not an omission. See MarkedParking.observed, and this class's own docstring,
                 which rules out exactly this reading two paragraphs up.
                 """
-                if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:
-                    return True
+                bike_lane = state.treatment_for(AddBikeLane, LegSide(leg_name, side))
+                if bike_lane is not None:
+                    # ...unless the lane is one OSM says is already painted. NJ 35 NB's east kerb
+                    # carries one today (apply_osm_bike_lanes), and a drawing that records it
+                    # narrows nothing - the same reading MarkedParking.observed closes below.
+                    return not bike_lane.observed
                 parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
                 if parking is not None:
                     return not parking.observed
@@ -1432,8 +1444,16 @@ class ZonesGiveWayAtAnOpening(SceneCheck):
 class StopBarsOnEnteringHalf(SceneCheck):
     """A driver stops in their own lanes, never across the opposing ones.
 
-    The bar must stay on one side of its leg's centerline, never full width across both
-    directions of travel.
+    ON A TWO-WAY STREET that means the bar stays on one side of the leg's centreline, never full
+    width across both directions of travel. ON A ONE-WAY CARRIAGEWAY THERE ARE NO OPPOSING LANES,
+    so the same rule permits the full width - the line the bar rests against is the far kerb, and
+    a bar held back to half the roadway leaves a whole approach lane with nothing to stop at.
+
+    RE-EXPRESSED RATHER THAN EXEMPTED (.claude/SKILLS.md section 4): the check asks the design
+    where this bar's inner end belongs and measures against that, so a one-way leg is still
+    checked - just against its own far kerb instead of against a centreline it does not have.
+    Exempting one-way legs would have dropped the check on the only site where the arithmetic
+    was wrong.
     """
 
     def run(self, scene: SceneContext) -> list[Violation]:
@@ -1449,18 +1469,21 @@ class StopBarsOnEnteringHalf(SceneCheck):
             # lane shifts the travel lanes off the alignment, and then the line a driver actually
             # sees is the divider. Measured from the alignment, a bar resting correctly against
             # that divider looks like it crosses, and a bar genuinely painted 3.15 ft across it
-            # looks fine - which is what shipped on broad_st_east.
-            divider_ft = _divider_shift_toward_ft(scene.state, leg_name, Side.LEFT)
-            # Positive is the entering (LEFT) side, so anything below the divider is over the line.
-            past_ft = float(divider_ft - offsets.min())
+            # looks fine - which is what shipped on broad_st_east. On a one-way leg the same
+            # question returns the far KERB, which is why this reads the resolved end rather than
+            # the divider it used to.
+            _outer_ft, inner_ft = _stop_bar_inner_end_ft(scene.state, leg_name)
+            # Positive is the entering (LEFT) side, so anything below the inner end is over it.
+            past_ft = float(inner_ft - offsets.min())
             if past_ft > STOP_BAR_PAST_CENTERLINE_TOLERANCE_FT:
                 violations.append(Violation(
                     "stop_bar_crosses_centerline",
-                    f"{leg_name}'s stop bar is painted {past_ft:.2f} ft past the centreline into "
-                    f"the opposing lanes - it must rest AGAINST that line, not cross it. A stop "
-                    f"bar covers the entering half only (MUTCD), and where a two-way bike lane "
-                    f"has shifted the travel lanes the line to rest against is the divider, not "
-                    f"the NJDOT alignment",
+                    f"{leg_name}'s stop bar is painted {past_ft:.2f} ft past the line at "
+                    f"{inner_ft:+.2f} ft that ends its approach lanes - it must rest AGAINST that "
+                    f"line, not cross it. A stop bar covers the approach only (MUTCD); that line "
+                    f"is the centreline on a two-way street, the DIVIDER where a two-way bike lane "
+                    f"has shifted the travel lanes, and the far KERB on a one-way carriageway - "
+                    f"never the NJDOT alignment",
                     (bar.centroid.x, bar.centroid.y)))
         return violations
 

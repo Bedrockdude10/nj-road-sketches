@@ -536,7 +536,7 @@ def test_a_skewed_stop_bar_starts_on_the_centreline_in_both_views():
     for skew_deg in (0.0, -44.03, 12.5, 60.0):
         for inner_ft in (0.0, 2.4):
             span_ft, lateral_ft = stop_bar_band_geometry_ft(
-                34.0, edge_is_kerb=True, inner_ft=inner_ft, skew_deg=skew_deg)
+                17.0, inner_ft, skew_deg=skew_deg)
             # As a renderer builds it: the span is the figure that gets stretched by 1/cos,
             # then the whole thing is projected back onto the leg's own perpendicular.
             cos_s = math.cos(math.radians(abs(skew_deg)))
@@ -550,12 +550,9 @@ def test_a_skewed_stop_bar_starts_on_the_centreline_in_both_views():
     class _Fake:
         """Only what _stop_bar_span_m reads, so this stays a unit test."""
 
-    span_ft, lateral_ft = stop_bar_band_geometry_ft(34.0, edge_is_kerb=True, inner_ft=0.0,
-                                                   skew_deg=-44.03)
+    span_ft, lateral_ft = stop_bar_band_geometry_ft(17.0, 0.0, skew_deg=-44.03)
     from unittest.mock import patch
-    with patch("src.render.export.stop_bar_width_ft", return_value=34.0), \
-         patch("src.render.export.entering_lane_width_ft", return_value=None), \
-         patch("src.render.export.divider_shift_toward_ft", return_value=0.0):
+    with patch("src.render.export.stop_bar_ends_ft", return_value=(17.0, 0.0)):
         exported = _stop_bar_span_m(None, "leg", True, skew_deg=-44.03)
     assert exported["stop_bar_lateral_offset_m"] == pytest.approx(lateral_ft * FT_TO_M)
     assert exported["stop_bar_span_m"] == pytest.approx(span_ft * FT_TO_M)

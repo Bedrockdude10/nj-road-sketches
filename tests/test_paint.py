@@ -1783,6 +1783,41 @@ def test_a_leg_traffic_LEAVES_BY_gets_no_stop_bar_of_our_invention():
         f"a bar was derived for a leg traffic leaves by; got {sorted(bars)}")
 
 
+def test_a_ONE_WAY_carriageways_stop_bar_spans_EVERY_approach_lane():
+    """NJ 35 NB is two lanes wide and both of them are approach lanes.
+
+    The bar was sized off the "entering half" - correct on a two-way street, where the far half
+    belongs to oncoming traffic, and half a street on a carriageway where nobody is coming the
+    other way. It reached the middle of the roadway and stopped, leaving the left lane with
+    nothing to stop at.
+    """
+    from src.render.crosswalks import STOP_BAR_CURB_CLEARANCE_M, stop_bar_ends_ft
+    from src.render.coords import FT_TO_M
+
+    state = _a_state_with_one_way_legs("north")
+    clearance_ft = STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
+    kerb_ft = 70.0 / 2 - clearance_ft
+    for name in state.legs:
+        outer_ft, inner_ft = stop_bar_ends_ft(state, name)
+        assert (outer_ft, inner_ft) == pytest.approx((kerb_ft, -kerb_ft)), (
+            f"{name}: a one-way carriageway's bar runs kerb to kerb; this one runs "
+            f"{inner_ft:+.2f} to {outer_ft:+.2f} ft of a roadway {kerb_ft * 2:.2f} ft wide")
+
+
+def test_a_TWO_WAY_legs_stop_bar_still_stops_at_the_centreline():
+    """The rule above must not reach an ordinary street. There the far lanes are oncoming, and a
+    bar painted across them tells a driver to stop in the wrong half of the road."""
+    from src.geometry.treatments import DesignState
+    from src.render.crosswalks import stop_bar_ends_ft
+
+    state = _a_state_with_one_way_legs("north")
+    two_way = DesignState(legs=state.legs, corner_fillets={})      # no traffic_heads_toward
+    for name in two_way.legs:
+        _outer_ft, inner_ft = stop_bar_ends_ft(two_way, name)
+        assert inner_ft == pytest.approx(0.0), (
+            f"{name}: the bar starts {inner_ft:+.2f} ft off the centreline of a two-way street")
+
+
 def test_a_two_way_street_still_gets_a_stop_bar_on_every_leg():
     """The rule above must not reach an ordinary street, where every leg is an approach."""
     from src.geometry.treatments import DesignState

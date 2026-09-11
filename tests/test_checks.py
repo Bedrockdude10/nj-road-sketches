@@ -24,6 +24,8 @@ from src.checks import (
 from src.geometry.model import Leg
 from src.geometry.targets import LegSide
 from src.geometry.treatments import DesignState, MarkedParking
+from src.render.coords import FT_TO_M
+from src.render.crosswalks import STOP_BAR_CURB_CLEARANCE_M
 
 
 def run(check, **fields):
@@ -226,6 +228,35 @@ def test_a_stop_bar_on_one_half_is_fine():
     leg = a_leg()
     half = Polygon([(58, 0.5), (60, 0.5), (60, 15), (58, 15)])
     assert run(StopBarsOnEnteringHalf(), stop_bars={"east": half}, state=a_state({"east": leg})) == []
+
+
+def _a_one_way_state(leg):
+    """The same crossroads, declared one-way: `east` points east and traffic heads WEST, so it
+    is an approach and every lane between its kerbs is an approach lane."""
+    return DesignState(legs={leg.name: leg}, corner_fillets={},
+                       traffic_heads_toward={leg.name: "west"})
+
+
+def test_a_full_width_stop_bar_on_a_ONE_WAY_carriageway_is_fine():
+    """There are no opposing lanes to cross, so the width the two-way rule forbids is the
+    width the street requires. The check is re-expressed against the design's own inner end,
+    not exempted for one-way legs - see StopBarsOnEnteringHalf."""
+    leg = a_leg()
+    kerb_ft = 15.0 - STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
+    full_width = Polygon([(58, -kerb_ft), (60, -kerb_ft), (60, kerb_ft), (58, kerb_ft)])
+    assert run(StopBarsOnEnteringHalf(), stop_bars={"east": full_width},
+               state=_a_one_way_state(leg)) == []
+
+
+def test_a_stop_bar_past_the_FAR_KERB_of_a_one_way_carriageway_is_still_a_violation():
+    """The check still has something to say about a one-way leg: the bar ends at the far kerb's
+    edge line, and paint does not run into the gutter."""
+    leg = a_leg()
+    over = Polygon([(58, -15.0), (60, -15.0), (60, 15.0), (58, 15.0)])
+    violations = run(StopBarsOnEnteringHalf(), stop_bars={"east": over},
+                     state=_a_one_way_state(leg))
+    assert len(violations) == 1
+    assert violations[0].check == "stop_bar_crosses_centerline"
 
 
 # --------------------------------------------------------------------------

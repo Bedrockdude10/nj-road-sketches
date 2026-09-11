@@ -66,6 +66,10 @@ from src.geometry.treatments.bikeways.place import (
                                             AddTwoWayBikeLane,
                                             THROUGH_JUNCTION_OVERLAP_FT,
 )
+from src.geometry.treatments.bikeways.observed import (
+    ASSUMED_BIKE_LANE_FT,
+    apply_osm_bike_lanes,
+)
 from src.geometry.treatments.bikeways.divider import (
                                             divider_shift_toward_ft,
                                             travel_lane_edge_ft,
@@ -85,6 +89,7 @@ from src.geometry.treatments.bikeways.through_junction import (
 
 __all__ = [
                                             "AASHTO_MIN_BIKE_LANE_FT",
+                                            "ASSUMED_BIKE_LANE_FT",
                                             "BIKE_LANE_BOLLARD_SPACING_FT",
                                             "BIKE_LANE_BUFFER_FT",
                                             "BIKE_LANE_DEFAULT_SHY_FT",
@@ -118,6 +123,7 @@ __all__ = [
                                             "TwoWayBikeLane",
                                             "_feet",
                                             "_lane_line_ft",
+                                            "apply_osm_bike_lanes",
                                             "bike_lane_spare_ft",
                                             "bike_symbol_polygon",
                                             "bike_symbol_stations_ft",

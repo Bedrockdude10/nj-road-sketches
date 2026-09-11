@@ -456,6 +456,116 @@ def test_untagged_is_not_the_same_as_restriction_none():
         assert parking_is_restricted(value)
 
 
+# --------------------------------------------------------------------------
+# OSM cycleways - the bike lane that is ALREADY PAINTED
+# --------------------------------------------------------------------------
+
+def test_osm_cycleway_sides_flip_for_a_leg_running_against_its_way():
+    """The same flip the parking restrictions get, and the trap is worse here.
+
+    NJ 35 NB is ONE way drawn northbound carrying `cycleway:right=lane`, and it reaches this
+    junction as two legs pointing in opposite directions. Read straight through, the existing
+    bike lane lands on the west kerb of one approach and the east kerb of the next - on one
+    continuous carriageway, with the lane crossing the street at the junction.
+    """
+    from src.geometry.intersection import cycleway_by_side
+
+    tags = {"cycleway:left": "no", "cycleway:right": "lane"}
+    assert cycleway_by_side(tags, aligned=True) == {"left": "no", "right": "lane"}
+    assert cycleway_by_side(tags, aligned=False) == {"left": "lane", "right": "no"}
+
+
+def test_an_untagged_kerb_is_not_the_same_as_cycleway_no():
+    """Absent means OSM says nothing about this kerb; `no` is a positive statement that there is
+    no lane on it. Neither draws one, but only one of them is evidence - and only one of them
+    should stop a mapper being asked."""
+    from src.geometry.intersection import CYCLEWAY_IS_A_MARKED_LANE, cycleway_by_side
+
+    assert cycleway_by_side({}, True) == {"left": None, "right": None}
+    assert "no" not in CYCLEWAY_IS_A_MARKED_LANE
+    assert None not in CYCLEWAY_IS_A_MARKED_LANE
+
+
+def test_only_a_lane_IN_the_carriageway_is_drawn_as_paint():
+    """`track` is physically separated and `shared_lane` is a sharrow - real facilities, neither
+    of them a stripe reserving width on this road surface. Drawing either as a bike lane states
+    something false about the kerb line or about how much room traffic has."""
+    from src.geometry.intersection import CYCLEWAY_IS_A_MARKED_LANE
+
+    for value in ("track", "shared_lane", "share_busway", "separate", "no", "opposite_track"):
+        assert value not in CYCLEWAY_IS_A_MARKED_LANE, (
+            f"cycleway={value} would be drawn as a marked lane in the carriageway")
+    assert "lane" in CYCLEWAY_IS_A_MARKED_LANE
+
+
+def test_a_mistagged_cycleway_width_is_refused_rather_than_drawn():
+    """A width outside what a bike lane can be is a mistagging - a metres/feet mix-up puts a 5 ft
+    lane in as 16 - and reading it would draw a lane nobody painted. None falls back to the
+    assumption, which at least says out loud that it is one."""
+    from src.geometry.intersection import cycleway_width_by_side
+
+    assert cycleway_width_by_side({"cycleway:right:width": "1.5"}, True)["right"] == pytest.approx(4.92, abs=0.01)
+    for bad in ("5", "0.2", "banana", ""):        # 5 m is 16.4 ft; 0.2 m is 8 in
+        assert cycleway_width_by_side({"cycleway:right:width": bad}, True)["right"] is None
+
+
+def test_a_bike_lane_mapped_over_PART_of_a_leg_does_not_claim_the_whole_leg():
+    """OSM splits a way where a tag changes, so a bikeway that ends mid-block is two spans.
+
+    Reading either one as the whole leg is a false statement in one direction or the other, and
+    the one that matters is the optimistic direction: a lane drawn the full length of a leg it
+    covers half of. The same care kerb_may_hold_parking takes with a restriction over part of a
+    kerb (.claude/SKILLS.md 7).
+    """
+    from src.geometry.treatments.bikeways.observed import _reach_ft
+
+    class _Model:
+        def __init__(self, spans):
+            self._spans = spans
+
+        def cycleway_spans(self, _leg):
+            return self._spans
+
+    whole = [(0.0, 130.0, {"right": "lane"}, {}, 1)]
+    assert _reach_ft([(0.0, 130.0, None)], "leg", _Model(whole)) is None
+
+    part = [(0.0, 60.0, {"right": "lane"}, {}, 1), (60.0, 130.0, {"right": "no"}, {}, 2)]
+    assert _reach_ft([(0.0, 60.0, None)], "leg", _Model(part)) == pytest.approx(60.0)
+
+    # A lane recorded only on the FAR span reaches the junction through nothing, so the
+    # contiguous run from station 0 is empty and the lane stops where it starts.
+    far = [(0.0, 60.0, {"right": "no"}, {}, 1), (60.0, 130.0, {"right": "lane"}, {}, 2)]
+    assert _reach_ft([(60.0, 130.0, None)], "leg", _Model(far)) == pytest.approx(0.0)
+
+
+@needs_source_data
+def test_the_existing_bike_lane_lands_on_ONE_real_kerb_of_nj_35(site_models):
+    """The side flip above, stated in terms of the street, and the reason this whole reader
+    exists: NJ 35 NB has carried `cycleway:right=lane` since the way was drawn, nothing in src/
+    read the key, and every proposal for this junction was drawn as ADDING a bikeway.
+
+    NOT PARAMETRIZED OVER site_models, because lavallette_reese is not in SITES - the roads
+    fixture is clipped to Mercer County and this junction is in Ocean (see conftest). Loaded
+    here against the full download for the same reason the site's other whole-street facts are.
+    """
+    import os
+
+    from src.geometry.intersection import CYCLEWAY_IS_A_MARKED_LANE, load_intersection_model
+
+    if os.environ.get("ROAD_SKETCHES_DATA_DIR"):
+        pytest.skip("the roads fixture is clipped to Mercer County; NJ 35 is in Ocean")
+    with contextlib.redirect_stdout(io.StringIO()):
+        model = load_intersection_model(site="lavallette_reese")
+    laned = {(leg_name, side)
+             for leg_name in model.legs
+             for _s, _e, values, _w, _i in model.cycleway_spans(leg_name)
+             for side in ("left", "right")
+             if values[side] in CYCLEWAY_IS_A_MARKED_LANE}
+    assert laned == {("grand_central_ave_north", "right"), ("grand_central_ave_south", "left")}, (
+        "the existing bike lane has to land on ONE real kerb - the EAST one - along a one-way "
+        f"street whose two approaches point opposite ways; it went to {sorted(laned)}")
+
+
 @needs_source_data
 def test_the_same_kerb_is_restricted_from_both_of_its_legs(site_models):
     """Columbia Avenue is tagged once but reaches the junction as two opposed legs.
@@ -1709,7 +1819,7 @@ def test_e_broad_east_hatching_reaches_its_stop_bar():
 @needs_source_data
 @pytest.mark.parametrize("site", SITES)
 def test_the_stop_bar_reaches_the_centreline_and_the_lane_edge(site, site_models):
-    """It spans the approach lane: centerline to lane edge, nothing standing off either.
+    """It spans the approach lanes end to end, with nothing standing off either end.
 
     stop_bar_band_geometry_ft subtracted the kerb clearance from the SPAN while centring the
     bar on the middle of the entering half, so half the clearance landed at the centerline
@@ -1723,7 +1833,8 @@ def test_the_stop_bar_reaches_the_centreline_and_the_lane_edge(site, site_models
 
     from src.render.crosswalks import (STOP_BAR_PLAN_DEPTH_FT, entering_lane_width_ft,
                                        resolve_crosswalk_offsets, resolve_crosswalk_skews,
-                                       resolve_stop_bar_offsets, stop_bar_bands_ft)
+                                       resolve_stop_bar_offsets, stop_bar_bands_ft,
+                                       stop_bar_ends_ft)
     from src.sources.osm_context import fetch_stop_lines
 
     model = site_models[site]
@@ -1743,10 +1854,13 @@ def test_the_stop_bar_reaches_the_centreline_and_the_lane_edge(site, site_models
         leg = state.legs[leg_name]
         _st, off = station_offset_many(leg.centerline,
                                        np.asarray(band.exterior.coords, dtype=float))
+        # BOTH ENDS ASKED OF THE DESIGN, neither assumed. This used to take the inner end to be
+        # the centreline and measure min|offset| against zero, which is the whole width of a
+        # one-way carriageway's bar reported as an error the day such a site joins SITES.
         entering_ft = entering_lane_width_ft(state, leg_name)
-        edge_ft = entering_ft if entering_ft is not None else leg.curb_to_curb_ft / 2
-        inner = min(abs(off.min()), abs(off.max()))
-        outer = max(abs(off.min()), abs(off.max()))
+        edge_ft, inner_ft = stop_bar_ends_ft(state, leg_name)
+        inner = abs(off.min() - inner_ft)
+        outer = off.max()
         # A SKEWED bar is a rotated rectangle, so its two centerline-side corners straddle the
         # centerline by half the depth's rotated projection - one inboard, one outboard, and
         # no placement puts both on it. That is the bar meeting the centerline correctly, not
@@ -1754,8 +1868,9 @@ def test_the_stop_bar_reaches_the_centreline_and_the_lane_edge(site, site_models
         # get the flat 0.25 ft this always used, because sin(0) is 0.
         skew_slack = STOP_BAR_PLAN_DEPTH_FT * abs(math.sin(math.radians(skews.get(leg_name, 0.0)))) / 2
         assert inner < 0.25 + skew_slack, (
-            f"{site}/{leg_name}: the stop bar stands {inner:.2f} ft off the road centerline, "
-            f"which is a gap with nothing on the other side of it")
+            f"{site}/{leg_name}: the stop bar stands {inner:.2f} ft off the line at "
+            f"{inner_ft:+.2f} ft it is measured to, which is a gap with nothing on the other "
+            f"side of it")
         # Where the lane was narrowed the bar meets its own edge line; where the far end is
         # the kerb it is held back deliberately, so allow the clearance there.
         allowed = 0.25 if entering_ft is not None else STOP_BAR_CURB_CLEARANCE_M / FT_TO_M + 0.25

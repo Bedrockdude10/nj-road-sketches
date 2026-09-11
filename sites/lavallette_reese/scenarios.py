@@ -13,29 +13,45 @@ west, and is a different junction and a different site. Three consequences:
     why the side is asked for with side_facing(leg, "east") and never written down per leg;
   * the street is enormously wide for what it carries: 69.55-69.91 ft between traced kerbs.
 
-WHAT THE STREET SPENDS THAT WIDTH ON TODAY IS ANGLED PARKING, and every proposal here keeps it.
-60 degrees against BOTH kerbs, observed in the field and declared in config.yaml because OSM
-carries no parking tag on this street at all (see legs.*.existing_parking and
-apply_observed_parking). At 60 degrees a 9x18 ft stall is a 20.09 ft bay taking 10.39 ft of kerb,
-so:
+WHAT THE STREET SPENDS THAT WIDTH ON TODAY IS ANGLED PARKING AND A BIKE LANE. 60-degree bays
+against BOTH kerbs, observed in the field and declared in config.yaml because OSM carries no
+parking tag on this street at all (legs.*.existing_parking, apply_observed_parking) - and, on the
+EAST kerb, a bike lane OSM has recorded since the way was drawn (`cycleway:right=lane` on way
+876102077, apply_osm_bike_lanes). At 60 degrees a 9x18 ft stall is a 20.09 ft bay taking 10.39 ft
+of kerb, so what is painted on grand_central_ave_north today measures:
 
-    two bays          40.18 ft        the parking, unchanged in every scenario
-    two travel lanes  29.37 ft        14.69 ft each TODAY - the whole surplus
+    west bay          20.09 ft        angled parking, unchanged in every scenario
+    west travel lane  12.01 ft        DRAWN - measure_drawn.py --lanes
+    east travel lane  11.00 ft        DRAWN
+    bike lane          5.00 ft        OSM says lane, not how wide; 5 ft assumed
+    east bay          20.09 ft
                       -------
-                      69.55 ft
+                      69.57 ft        between the traced kerbs at the leg's narrowest
 
-THE BIKE LANE COMES OUT OF THE TRAVEL LANES, NOT OUT OF THE PARKING. That is the entire
-arithmetic of these proposals and it was got wrong first time round, by charging the bikeway
-against the 34.78 ft half of the street its kerb sits in and reporting that it did not fit. It
-does: two 14.69 ft lanes hold 7.37 ft more than two 11 ft lanes need, which is a 5 ft lane and a
-2 ft buffer. But that surplus is all on ONE side of the alignment, because only one kerb gets a
-bike lane, so the section has to be pinned to its own kerb and the travel way allowed to sit
-asymmetrically - AddBikeLane.pin_to_kerb, and BikeLane.near_half_ft under it. Nothing here
-narrows a stall, and nothing here removes a space.
+SO THESE PROPOSALS ARE A RELOCATION OF AN EXISTING TREATMENT, NOT AN ADDITION - which is the
+single most important sentence about this junction and the one every version of this file before
+now got wrong. Nothing in `src/` read `cycleway:*` until apply_osm_bike_lanes; the only mention of
+the word anywhere was in the list of tags that are NOT a carriageway. So the street was modelled
+as 70 ft of asphalt with parking and nothing else, this docstring did its arithmetic on two 14.69
+ft travel lanes that have never existed, and every sheet credited the proposal with introducing a
+bikeway that is already painted.
+
+WHAT THE PROPOSAL ACTUALLY BUYS IS THE BUFFER. The lane stays 5 ft and stays on the east kerb;
+what is added is min_bike_lane_buffer_ft between it and moving traffic, and the whole cost of
+that falls on the west travel lane: 12.01 ft today, 11.19 ft after, against a target of 11.00.
+The east lane is 11.00 ft either way. Nothing here narrows a stall and nothing here removes a
+space - and now that the baseline is the street as it is, the change panel says so.
+
+THE SECTION IS STILL PINNED TO ITS OWN KERB, for the reason it always was: only one kerb gets a
+bikeway, so the room it needs is all on one side of the alignment and the travel way has to sit
+asymmetrically - AddBikeLane.pin_to_kerb, and BikeLane.near_half_ft under it. Split down the
+middle the same section is 4.07 ft too wide for its half of the street and reads as refused,
+which is what it wrongly reported when the bikeway was charged against the 34.78 ft half its kerb
+sits in.
 """
 from src.geometry.targets import LegSide
 from src.geometry.treatments import (AddBikeLane, AddBikeLaneBollards,
-                                     all_crosswalks_continental, apply_observed_parking,
+                                     all_crosswalks_continental, apply_existing_markings,
                                      DesignState, MarkedParking, ProtectDaylightZone,
                                      traffic_runs_outward)
 from src.geometry.model import angled_stall_depth_ft, side_facing
@@ -50,34 +66,39 @@ from src.geometry.model import angled_stall_depth_ft, side_facing
 #: The bikeway's own cross-section. BOTH proposals below use the same one, so that the only
 #: difference between them is the ordering across the road.
 #:
-#: 5 ft is AASHTO's design width for an exclusive lane - not the 4 ft floor, and not negotiable
-#: here, because on either ordering this lane runs against either a kerb or a parking lane and
-#: that is the case AASHTO asks 5 ft for.
+#: 5 ft IS WHAT IS THERE, and it is also AASHTO's design width for an exclusive lane - not the 4
+#: ft floor - because on either ordering this lane runs against either a kerb or a parking lane
+#: and that is the case AASHTO asks 5 ft for. The two agreeing is luck: OSM records a lane on
+#: this kerb and not a width, so ASSUMED_BIKE_LANE_FT draws the existing one at AASHTO's figure
+#: too, and the day somebody tags `cycleway:right:width` the baseline moves and this does not.
+#: Keep them separate - one is a measurement of the street, this one is the proposal.
 #:
-#: THE BUFFER IS AT ITS FLOOR AND THE STREET DECIDED THAT, not a preference. What the bikeway
-#: has to fit into is the travel lanes' surplus over target width, and that surplus is what the
-#: observed parking leaves:
+#: THE BUFFER IS THE PROPOSAL, AND IT IS AT ITS FLOOR BECAUSE THE STREET DECIDED THAT. What it
+#: has to fit into is the travel lanes' surplus over target width, and the lane and both bays are
+#: already painted:
 #:
 #:     69.57 ft   between the traced kerbs, grand_central_ave_north at its narrowest
 #:    -40.18 ft   two 60-degree bays, unchanged
+#:     -5.00 ft   the bike lane that is already there
 #:     -------
-#:     29.39 ft   for traffic today: 14.69 ft per lane
+#:     24.39 ft   for traffic today: 12.01 ft against the west kerb and 11.00 against the lane
 #:    -22.00 ft   two lanes at TARGET_LANE_WIDTH_FT
 #:     -------
-#:      7.39 ft   the whole budget for a bike lane, its buffer and the stripe between them
+#:      2.39 ft   the whole budget for a buffer and the stripe bounding it
 #:
-#: A 5 ft lane and the 0.82 ft stripe bounding it spend 5.82 of that, leaving 1.57 ft - under
-#: min_bike_lane_buffer_ft, which is 1.64 ft because a buffer has to hold the two stripes that
-#: bound it. So the section is 0.07 ft over the budget at the narrowest buffer that is a buffer
-#: at all, and that 0.07 ft comes off the travel lanes rather than off the parking.
+#: The 0.82 ft stripe spends a third of that, leaving 1.57 ft - just under min_bike_lane_buffer_ft,
+#: which is 1.64 ft because a buffer has to hold the two stripes that bound it. So the section is
+#: 0.07 ft over the budget at the narrowest buffer that is a buffer at all, and that 0.07 ft comes
+#: off the travel lanes rather than off the parking. The measured result is a west lane of
+#: 11.19 ft, 0.82 ft narrower than today and 0.19 ft over target.
 #:
 #: THE PROJECT'S STANDARD 2 FT BUFFER DOES NOT FIT, and it is worth recording what it costs
 #: rather than leaving the floor looking like a default: at 2 ft the section is 27.91 ft, the
 #: travel way shifts 4.06 ft, and the west kerb's lane comes out at 10.78 ft - which
 #: TravelLanesKeepTheirWidth fails, fatally and correctly. At the floor the shift is 3.70 ft and
 #: both lanes hold 11 ft or better. The buffer is the only piece in the section with anywhere to
-#: give: the lane is at AASHTO's design width, the stripe is a stripe, and the bays are what is
-#: on the ground.
+#: give: the lane is at AASHTO's design width, the stripe is a stripe, and the bays and the lane
+#: are what is on the ground.
 BIKE_LANE_FT = 5.0
 
 
@@ -156,6 +177,13 @@ def build_demo_scenario(baseline: DesignState, model=None) -> DesignState:
     """Crossings brought up to continental over the existing street - the reference the rest
     move from.
 
+    SO IT HAS TO BE THE EXISTING STREET, all of it. This applied the observed parking and stopped
+    there, which was the whole street until apply_osm_bike_lanes read `cycleway:right=lane` off
+    NJ 35: the reference drew two 14.89 ft travel lanes and no bikeway, against an existing-
+    conditions sheet beside it showing 12.01 and 11.00 with a 5 ft lane between them. Two panels
+    of one junction disagreeing about what is painted on it, with the more conservative one
+    labelled as the reference every proposal is measured from.
+
     NO complete_centerlines. It adds a double yellow to any leg with no centre stripe today, on
     the reasoning that "nothing marks the middle of the road" - which is true here and is not a
     defect: Grand Central Ave is ONE-WAY, so its two lanes run the same way and a yellow
@@ -171,7 +199,7 @@ def build_demo_scenario(baseline: DesignState, model=None) -> DesignState:
     """
     if model is None:
         return baseline
-    return all_crosswalks_continental(apply_observed_parking(baseline, model))
+    return all_crosswalks_continental(apply_existing_markings(baseline, model))
 
 
 def _bikeway_on_the_east_kerb(baseline: DesignState, model, section) -> DesignState:
@@ -221,20 +249,26 @@ def _bikeway_on_the_east_kerb(baseline: DesignState, model, section) -> DesignSt
             # drivers travel INWARD and only the compass knows it.
             runs_outward=traffic_runs_outward(baseline, leg, east)))
         state = state.apply(AddBikeLaneBollards(LegSide(leg_name, east)))
-    # AFTER the bikeways, not before: a kerb the bikeway's own section already carries stalls on
-    # must not get a second parking treatment painting over them, and this skips exactly the
-    # leg-sides that have an AddBikeLane on them.
-    state = apply_observed_parking(state, model)
+    # AFTER the bikeways, not before: a kerb this proposal's own section already carries stalls
+    # on must not get a second parking treatment painting over them, and both appliers inside
+    # this skip exactly the leg-sides already treated. That is also what makes the EXISTING
+    # bikeway a no-op here rather than a second lane on the same kerb - this proposal has already
+    # claimed the east kerb, so apply_osm_bike_lanes stands aside and the relocation is drawn as
+    # one lane, in its new cross-section.
+    state = apply_existing_markings(state, model)
     return _daylight_every_parked_kerb(state)
 
 
 def build_bike_lane_inboard(baseline: DesignState, model=None) -> DesignState:
     """The bikeway BETWEEN the travel lanes and the parking, with the bay still against the kerb.
 
-    Across the east kerb, outward from the alignment: travel lane, 2 ft buffer, 5 ft bike lane,
-    then the 60-degree bay to the kerb. The bay does not move at all - this is the street as it
-    is with a bike lane inserted into the travel lanes' surplus, which is the cheapest thing
-    that can be built here and the one that asks nothing of the parking.
+    Across the east kerb, outward from the alignment: travel lane, buffer, 5 ft bike lane, then
+    the 60-degree bay to the kerb. That is the ORDER THE LANE IS IN TODAY, so on this proposal
+    nothing relocates at all: the bay does not move, the lane does not move, and the only new
+    paint is the buffer between the lane and moving traffic. It costs 0.82 ft off the west travel
+    lane (12.01 ft drawn today, 11.19 ft drawn after) and nothing else - no stall is narrowed and
+    no space is removed. The cheapest thing that can be built here, and after
+    apply_osm_bike_lanes the change panel finally says how little it is.
 
     THE TRADE AGAINST build_bike_lane_at_the_kerb IS THE REVERSING MOVEMENT. A driver leaving a
     front-in 60-degree bay reverses across whatever is inboard of it, and on this ordering that
