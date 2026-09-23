@@ -29,7 +29,8 @@ import matplotlib.pyplot as plt   # after matplotlib.use: the backend must be se
 
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.network.slice_design import slice_design, slice_pavement
-from src.geometry.treatments import route_decision_for
+from src.geometry.treatments import (existing_conditions, osm_derived_baseline,
+                                     route_decision_for)
 from src.sources.osm_context import (height_from_tags, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
@@ -151,22 +152,50 @@ def context_layers(context: dict[str, list[dict]]) -> dict[str, list[dict]]:
             for key in ("crossings", "traffic_control", "street_furniture", "kerb_ways")}
 
 
-def design_for(features: gpd.GeoDataFrame):
-    """(model, state, pavement) for a slice, with every route decision in it applied.
+def _route_decisions(state, model, features: gpd.GeoDataFrame):
+    """Whatever `route_decision_for` proposes along each street in the window.
 
-    EVERY street in the window is offered its decision, not one named street: that is what makes
-    this a network drawing rather than a site. A street with no decision simply gets none back.
+    EVERY street is offered its decision, not one named street: that is what makes this a
+    network drawing rather than a site. A street with no decision simply gets none back, and the
+    side a facility takes is the route's own (Broad St's two-way bikeway is on the north kerb -
+    see CORRIDOR_SIDE), not something the crop chooses.
     """
-    model, state = slice_design(features)
+    town = features["municipality"].dropna().iloc[0]
     for street in sorted({leg.name for leg in model.legs.values()}):
-        decision = route_decision_for(street, features["municipality"].dropna().iloc[0])
+        decision = route_decision_for(street, town)
         if decision is not None:
             state = decision.apply_to(state, model)
+    return state
+
+
+#: The scenarios a window can be drawn in, each composed from treatments that take a (state,
+#: model) and no leg names - so there is nothing per-site here and nothing to add for a new crop.
+#: `sites/*/scenarios.py` builds the same three out of hand-written leg tuples; these do not.
+SCENARIOS = {
+    "existing": lambda state, model, features: state,
+    "proposed": lambda state, model, features: osm_derived_baseline(state, model),
+    # NOT on top of `proposed`: osm_derived_baseline paints the kerbs the way OSM says they are
+    # used, and that parking competes with the facility for the same width - stacked, the section
+    # lands 14.6 ft wide and leaves a 10.3 ft travel lane, which travel_lane_too_narrow refuses.
+    # The route decision IS the proposal here; what the kerbs do under it is the decision's own.
+    "two_way_bikeway": lambda state, model, features: _route_decisions(state, model, features),
+}
+
+
+def design_for(features: gpd.GeoDataFrame, scenario: str = "two_way_bikeway"):
+    """(model, state, pavement) for a slice, drawn in one scenario.
+
+    The baseline is `existing_conditions`, the same state every site pipeline labels "Existing
+    Conditions", so "existing" here means what it means everywhere else in this repo.
+    """
+    model, _ = slice_design(features)
+    state = SCENARIOS[scenario](existing_conditions(model), model, features)
     return model, state, slice_pavement(features)
 
 
-def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
-    model, state, pavement = design_for(features)
+def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
+             scenario: str = "two_way_bikeway") -> Path:
+    model, state, pavement = design_for(features, scenario)
     context = slice_context(features)
     fig, ax = plt.subplots(figsize=(11, 11))
     plot_design_state(ax, model, state, name, pavement=pavement, sidewalks=[],
@@ -178,10 +207,11 @@ def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
     return out
 
 
-def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
+def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
+             scenario: str = "two_way_bikeway") -> Path:
     from scripts.phase4_render_3d import find_blender, render_all
 
-    model, state, pavement = design_for(features)
+    model, state, pavement = design_for(features, scenario)
     context = slice_context(features)
     out_dir.mkdir(parents=True, exist_ok=True)
     geometry, png = out_dir / f"{name}_3d.json", out_dir / f"{name}_3d.png"
@@ -208,6 +238,8 @@ def main() -> None:
     parser.add_argument("--network-dir", type=Path, default=NETWORK_DIR)
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
     parser.add_argument("--3d", dest="three_d", action="store_true", help="also render in 3D")
+    parser.add_argument("--scenario", default="two_way_bikeway", choices=sorted(SCENARIOS),
+                        help="which design to draw (default: two_way_bikeway)")
     args = parser.parse_args()
 
     network = load_network(args.area, args.network_dir)
@@ -224,9 +256,9 @@ def main() -> None:
     stem = args.name or stem
     counts = ", ".join(f"{n} {k}" for k, n in features["kind"].value_counts().items())
     print(f"{stem}: {len(features)} feature(s) - {counts}")
-    print(f"wrote {draw_2d(features, stem, args.out_dir)}")
+    print(f"wrote {draw_2d(features, stem, args.out_dir, args.scenario)}")
     if args.three_d:
-        print(f"wrote {draw_3d(features, stem, args.out_dir)}")
+        print(f"wrote {draw_3d(features, stem, args.out_dir, args.scenario)}")
 
 
 if __name__ == "__main__":
