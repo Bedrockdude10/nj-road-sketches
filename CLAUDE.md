@@ -27,12 +27,17 @@ render inside the loop is a round trip that cannot answer the question you asked
 - **`scripts/verify.py` before you report done.** One command for the whole loop: exports the
   working tree and `--base` side by side, diffs them, runs the suite, and reports failures as
   NEW / KNOWN / FIXED against a recorded baseline. `--no-tests` is ~22 s, `--no-tests --site
-  <site>` ~6 s, everything ~5 min. **NEW is the only number that says anything about your
-  change** - this repo's suite is often red from work in flight, and re-deriving whose red it
-  is by hand was costing more than the run.
+  <site>` ~6 s, everything ~2.5 min (its suite runs `-n auto`, as `test.sh` does). **NEW is
+  the only number that says anything about your change** - this repo's suite is often red from
+  work in flight, and re-deriving whose red it is by hand was costing more than the run.
 - **`./scripts/test.sh`, never bare `pytest`.** The script pins the venv interpreter, so a
   wrong `python` on PATH cannot masquerade as a broken repo. It runs `-n auto`; pass `-n 0`
   when you need `-x`, `pdb`, or readable ordering.
+- **The full suite runs once per change, at the end, through `verify.py`.** While iterating,
+  name the test files or `-k` that can see the change. Re-running the whole suite after every
+  edit was the largest tool cost here (~16 runs a session), so a PreToolUse hook
+  (`.claude/hooks/no_full_suite_in_loop.sh`) refuses an unnarrowed run; `FULL_SUITE=1` gets
+  past it when you mean it.
 - `scripts/whatis.py <symbol>`, ~1 s, before you write a second copy of anything: signature,
   the docstring's first line, and every call site. §1 of SKILLS.md is the list of facts that
   already have a home; this is how you find the ones that are not on it.

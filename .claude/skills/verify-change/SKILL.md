@@ -40,10 +40,12 @@ the scene, builds the paint and props and asserts every invariant, without spend
 ## 3. The suite
 
 ```bash
-./scripts/test.sh
+./scripts/test.sh tests/test_<what you touched>.py    # while iterating
+.venv/bin/python scripts/verify.py                     # once, at the end
 ```
 
-Never bare `pytest`. Includes lint, import contracts and goldens. A golden failure is not
+The whole suite runs once, through `verify.py`, not after every edit; a hook refuses an
+unnarrowed `test.sh` (prefix `FULL_SUITE=1` to override). Never bare `pytest`. Includes lint, import contracts and goldens. A golden failure is not
 automatically a bug — read the diff, confirm every moved number is one you meant to move, then
 `--force-regen` and commit the goldens **in the same commit as the cause**.
 
