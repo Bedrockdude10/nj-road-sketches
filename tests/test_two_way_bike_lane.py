@@ -15,7 +15,20 @@ import pytest
 
 from src.geometry.treatments import (TARGET_LANE_WIDTH_FT, BikeLane, TwoWayBikeLane,
                                       far_kerb_surplus_ft, travel_lane_divider_shift_ft)
+from src.geometry.treatments.bikeways.terminus import EndTheBikeway
+from src.geometry.treatments.state import DesignState
+from src.site import load_site_scenarios
 from tests.conftest import needs_source_data
+
+
+def build_scenario(site: str, scenario: str, model) -> DesignState:
+    """One site's named scenario, built the way build_all.py builds it."""
+    import contextlib
+    import io
+
+    builder = getattr(load_site_scenarios(site), f"build_{scenario}")
+    with contextlib.redirect_stdout(io.StringIO()):
+        return builder(DesignState.from_model(model), model)
 
 # Broad & Greenwood's east leg, measured: 21.59 ft to the north kerb, 21.67 to the south.
 NORTH_HALF_FT, SOUTH_HALF_FT = 21.59, 21.67
@@ -616,3 +629,50 @@ def test_the_terminus_box_and_its_signs_stand_off_the_boundary_not_the_sheet(leg
     assert at[WARNING_SIGN] == pytest.approx(near_ft - BIKE_LANE_ENDS_ADVANCE_FT), (
         f"the W9-5 stands at station {at[WARNING_SIGN]:.1f}, which is not "
         f"{BIKE_LANE_ENDS_ADVANCE_FT:.0f} ft in advance of the lane's end at {near_ft:.1f}")
+
+
+# wbroad_lanning loads under the committed clip but is NOT in conftest's SITES, so nothing else
+# here covers it. ebroad_elm, the corridor's other terminus, exceeds the clip entirely
+# (FixtureExtentExceeded) and cannot be tested from the fixture at all - the gap is recorded in
+# the assertion message rather than papered over with a smaller claim.
+TERMINUS_SITE, TERMINUS_LEG = "wbroad_lanning", "w_broad_st_southwest"
+
+
+@pytest.fixture(scope="module")
+def terminus_model():
+    import contextlib
+    import io
+
+    from src.geometry.intersection import load_intersection_model
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        return load_intersection_model(site=TERMINUS_SITE)
+
+
+@needs_source_data
+def test_the_terminus_is_derived_from_the_boundary_not_named_in_the_site(terminus_model):
+    """A facility ends where the borough does, so the ROUTE DECISION places it - not a
+    `terminus = "<leg>"` literal in a site file.
+
+    Those literals were one rule written twice against leg keys only that site knows, and a third
+    junction on the same route had no terminus because nobody had written the line there. The leg
+    asserted here is the one that was hardcoded, and the speed comes from config's corridor block
+    rather than a second copy of 25.
+    """
+    state = build_scenario(TERMINUS_SITE, "proposal_two_way_bike_lane", terminus_model)
+
+    ended = [t for t in state.treatments if isinstance(t, EndTheBikeway)]
+    assert [t.target.leg for t in ended] == [TERMINUS_LEG], (
+        f"{TERMINUS_SITE} should end the bikeway on the one approach that leaves town "
+        f"({sorted(state.municipal_limits_ft)}), and ended {[t.target.leg for t in ended]}")
+    assert ended[0].speed_limit_mph == terminus_model.config["corridor"]["speed_limit_mph"]
+
+
+@needs_source_data
+def test_a_route_places_no_terminus_where_it_never_leaves_town(site_models):
+    """Most approaches never cross the line; `municipal_limits_ft` holds only those that do, so
+    an interior junction on the same route must come out with no box at all."""
+    state = build_scenario("wbroad_louellen", "proposal_two_way_bike_lane",
+                           site_models["wbroad_louellen"])
+    assert not state.municipal_limits_ft
+    assert not [t for t in state.treatments if isinstance(t, EndTheBikeway)]

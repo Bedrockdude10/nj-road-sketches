@@ -31,9 +31,7 @@ def build_proposal_two_way_bike_lane(baseline: DesignState, model=None) -> Desig
     a two-stage bicycle turn box at the far end (MUTCD 9E.11, whose Figure 9E-11 is titled for
     this exact case), shared-lane markings past the merge, and the W9-5 / R9-23 signing.
     """
-    from src.geometry.model import side_facing
-    from src.geometry.treatments import BROAD_ST_TWO_WAY_BIKEWAY, CORRIDOR_SIDE, EndTheBikeway
-    from src.geometry.targets import LegSide
+    from src.geometry.treatments import BROAD_ST_TWO_WAY_BIKEWAY
 
     if model is None:
         return baseline
@@ -41,21 +39,4 @@ def build_proposal_two_way_bike_lane(baseline: DesignState, model=None) -> Desig
                               legs=("n_lanning_ave_north", "s_lanning_ave_south"))
     state = complete_centerlines(state)
     state = all_crosswalks_continental(state)
-    state = BROAD_ST_TWO_WAY_BIKEWAY.apply_to(state, model)
-
-    # THE TERMINUS IS THE SOUTHWEST APPROACH, because that is the one that reaches the borough
-    # line - the northeast approach carries the same facility onward to Louellen and needs no
-    # ending. The side is read off the leg rather than named: CORRIDOR_SIDE is a COMPASS kerb
-    # and which of a leg's own sides faces it flips between approaches.
-    terminus = "w_broad_st_southwest"
-    if terminus in state.legs:
-        try:
-            side = side_facing(state.legs[terminus], CORRIDOR_SIDE)
-        except ValueError:
-            return state
-        # speed_limit_mph gates the sharrows: MUTCD 9E.09(03) forbids them at 40 mph or more,
-        # and terminus.py refuses rather than guessing when the speed is unknown. 25 mph here,
-        # from OSM's maxspeed on way 27459436 and recorded in config.yaml's corridor block.
-        return state.apply(EndTheBikeway(LegSide(terminus, side),
-                                          speed_limit_mph=25), model=model)
-    return state
+    return BROAD_ST_TWO_WAY_BIKEWAY.apply_to(state, model)

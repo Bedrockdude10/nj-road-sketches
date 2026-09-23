@@ -159,7 +159,44 @@ class CorridorFacility:
             # makes AddTwoWayBikeLane answer to AddBikeLane, which is the question being asked.
             if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:
                 carrying.append((leg_name, side))
-        return self._carry_through_the_junction(state, carrying, quiet)
+        # AFTER the crossbike, because EndTheBikeway measures the box off the DRAWN lane's far
+        # end and the extension is part of what is drawn. This is also the order the two site
+        # files used, so deriving the terminus moves no note and no marking.
+        state = self._carry_through_the_junction(state, carrying, quiet)
+        return self._end_where_it_leaves_town(state, model, carrying, quiet)
+
+    def _end_where_it_leaves_town(self, state: DesignState, model: "IntersectionModel",
+                                  carrying: list, quiet: bool) -> DesignState:
+        """End the facility on any carrying approach that crosses the municipal line.
+
+        THE TERMINUS IS DERIVED, NOT NAMED. It was a `terminus = "e_broad_st_east"` literal in two
+        site files - one rule written twice against leg keys only that site knows - and a third
+        junction on the same route had no terminus because nobody had written the line there. A
+        facility ends where the borough does (see municipality.py): that is a fact about the route
+        and the boundary, so it belongs to the route decision.
+
+        `municipal_limits_ft` holds only legs that DO leave town, so this places nothing on the
+        approaches that never cross - which is most of them.
+        """
+        # Function-level: terminus imports this module's own section constants, so a module-level
+        # import here would close the cycle.
+        from src.geometry.treatments.bikeways.terminus import EndTheBikeway
+
+        speed = ((model.config.get("corridor") or {}).get("speed_limit_mph")
+                 if getattr(model, "config", None) else None)
+        for leg_name, side in carrying:
+            if state.municipal_limits_ft.get(leg_name) is None:
+                continue
+            try:
+                state = state.apply(EndTheBikeway(LegSide(leg_name, side),
+                                                   speed_limit_mph=speed), model=model)
+            except ValueError as refused:
+                # EndTheBikeway refuses rather than drawing an orphan box. That is a fact about
+                # this approach, not an error - reported the way every other rung is.
+                if not quiet:
+                    print(f"  NOTE: {self.road} leaves town on {leg_name} but the terminus was "
+                          f"not placed: {refused}")
+        return state
 
     def _carry_through_the_junction(self, state: DesignState, carrying: list, quiet: bool
                                      ) -> DesignState:
