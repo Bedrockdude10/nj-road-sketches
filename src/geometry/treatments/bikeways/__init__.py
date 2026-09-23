@@ -21,6 +21,7 @@ EVERY NAME IS RE-EXPORTED HERE, including the underscored ones, because an impor
 have to know which file a function landed in.
 """
 from src.geometry.treatments.bikeways.sections import (
+                                            KerbsideBikeLane,
                                             AASHTO_MIN_BIKE_LANE_FT,
                                             BIKE_LANE_BUFFER_FT,
                                             BIKE_LANE_DEFAULT_SHY_FT,
@@ -29,7 +30,7 @@ from src.geometry.treatments.bikeways.sections import (
                                             CONSTRAINED_TWO_WAY_BIKE_LANE_FT,
                                             CORRIDOR_SIDE,
                                             MIN_BIKE_LANE_FT,
-                                            MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT,
+                                            MIN_SHIFTED_TRAVEL_LANE_FT,
                                             MIN_TWO_WAY_BIKE_LANE_FT,
                                             NJDOT_TWO_WAY_OBJECTION,
                                             TWO_WAY_BIKE_LANE_BUFFER_FT,
@@ -61,8 +62,13 @@ from src.geometry.treatments.bikeways.symbols import (
 )
 from src.geometry.treatments.bikeways.place import (
                                             AddBikeLane,
+                                            AddKerbsideBikeLane,
                                             AddTwoWayBikeLane,
                                             THROUGH_JUNCTION_OVERLAP_FT,
+)
+from src.geometry.treatments.bikeways.observed import (
+    ASSUMED_BIKE_LANE_FT,
+    apply_osm_bike_lanes,
 )
 from src.geometry.treatments.bikeways.divider import (
                                             divider_shift_toward_ft,
@@ -80,9 +86,23 @@ from src.geometry.treatments.bikeways.through_junction import (
                                             MIN_MARK_FRACTION,
                                             lane_end_face,
 )
+from src.geometry.treatments.bikeways.terminus import (
+                                            BICYCLE_LENGTH_FT,
+                                            EndTheBikeway,
+                                            SHARROW_CLEAR_OF_KERB_FT,
+                                            SHARROW_CLEAR_OF_PARKING_FT,
+                                            SHARROW_FIRST_FT,
+                                            SHARROW_INTERVAL_FT,
+                                            SHARROW_MAX_SPEED_MPH,
+                                            TURN_BOX_LENGTH_FT,
+                                            TURN_BOX_QUEUE_BICYCLES,
+                                            lane_far_end_face,
+)
 
 __all__ = [
                                             "AASHTO_MIN_BIKE_LANE_FT",
+                                            "ASSUMED_BIKE_LANE_FT",
+                                            "BICYCLE_LENGTH_FT",
                                             "BIKE_LANE_BOLLARD_SPACING_FT",
                                             "BIKE_LANE_BUFFER_FT",
                                             "BIKE_LANE_DEFAULT_SHY_FT",
@@ -96,24 +116,35 @@ __all__ = [
                                             "MIN_EXTENSION_GAP_FT",
                                             "MIN_FACILITY_RUN_FT",
                                             "MIN_MARK_FRACTION",
-                                            "MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT",
+                                            "MIN_SHIFTED_TRAVEL_LANE_FT",
                                             "MIN_TWO_WAY_BIKE_LANE_FT",
                                             "NJDOT_TWO_WAY_OBJECTION",
+                                            "SHARROW_CLEAR_OF_KERB_FT",
+                                            "SHARROW_CLEAR_OF_PARKING_FT",
+                                            "SHARROW_FIRST_FT",
+                                            "SHARROW_INTERVAL_FT",
+                                            "SHARROW_MAX_SPEED_MPH",
                                             "SYMBOL_CLEAR_OF_OPENING_FT",
                                             "SYMBOL_INTERVAL_FT",
                                             "SYMBOL_LENGTH_FT",
                                             "SYMBOL_WIDTH_FT",
                                             "THROUGH_JUNCTION_OVERLAP_FT",
+                                            "TURN_BOX_LENGTH_FT",
+                                            "TURN_BOX_QUEUE_BICYCLES",
                                             "TWO_WAY_BIKE_LANE_BUFFER_FT",
                                             "TWO_WAY_BIKE_LANE_WIDTH_FT",
                                             "AddBikeLane",
                                             "AddBikeLaneBollards",
+                                            "AddKerbsideBikeLane",
                                             "AddTwoWayBikeLane",
                                             "BikeLane",
+                                            "EndTheBikeway",
                                             "ExtendBikeLaneThroughJunction",
+                                            "KerbsideBikeLane",
                                             "TwoWayBikeLane",
                                             "_feet",
                                             "_lane_line_ft",
+                                            "apply_osm_bike_lanes",
                                             "bike_lane_spare_ft",
                                             "bike_symbol_polygon",
                                             "bike_symbol_stations_ft",
@@ -122,6 +153,7 @@ __all__ = [
                                             "far_kerb_surplus_ft",
                                             "governing_half_widths_ft",
                                             "lane_end_face",
+                                            "lane_far_end_face",
                                             "min_bike_lane_buffer_ft",
                                             "section_at",
                                             "travel_lane_divider_shift_ft",

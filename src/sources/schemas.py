@@ -46,7 +46,9 @@ import pandera.pandas as pa
 # value of checking it is that the two sides of the join agree; two regexes that could drift would
 # defeat the point of writing one at all.
 PIN_PATTERN = r"^\d{4}_[^_]+_[^_]+(_.+)?$"
-# A four-digit NJ municipality code (1106 Hopewell Twp, 1108 Pennington Boro, and neighbours).
+# A four-digit NJ municipality code, statewide (1106 Hopewell Twp, 1108 Pennington Boro, 1516
+# Lavallette Boro). Which town a junction is IN is stated in its config, not read from here -
+# this only says the column is the code the two files join on.
 MUN_PATTERN = r"^\d{4}$"
 # NJDOT's Standard Route Identifier: 10 or 17 characters, no spaces.
 SRI_PATTERN = r"^\S{10}(\S{7})?$"
@@ -83,7 +85,11 @@ class RoadNetworkSchema(pa.DataFrameModel):
 
 
 class ParcelsSchema(pa.DataFrameModel):
-    """Mercer County's parcel polygons.
+    """A county's parcel polygons, in New Jersey's standard statewide schema.
+
+    ONE SCHEMA FOR EVERY COUNTY, because the columns below are the state's, not Mercer's: a site
+    in another county names that county's file in its own `data_sources:` (sites/README.md) and
+    is validated against exactly this.
 
     PAMS_PIN is the key the assessor's storey count joins through (src/sources/assessor.py), and
     MUN is what tells one municipality's parcels from another's - this project spans Hopewell

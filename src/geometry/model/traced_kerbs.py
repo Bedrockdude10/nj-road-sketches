@@ -167,16 +167,39 @@ def traced_corner_join(curb_a: LineString, curb_b: LineString) -> tuple[LineStri
     return substring(curb_a, blend_a, curb_a.length), _chaikin(seam), substring(curb_b, blend_b, curb_b.length)
 
 
+def _turns_enough_to_be_a_return(line: LineString) -> bool:
+    """Whether a traced kerb bends like a corner return rather than running past one."""
+    fit = fit_circle_ft(line)
+    return fit is not None and fit["sweep_deg"] >= MIN_KERB_ARC_SWEEP_DEG
+
+
 def traced_corner_arc(kerb_lines: list, curb_a: LineString, curb_b: LineString) -> LineString | None:
     """One traced kerb, oriented to run from curb_a's side to curb_b's side.
 
     build_corner_fillets' contract is (trimmed_a, arc, trimmed_b) with the arc running
     from its tangent point on curb_a to the one on curb_b, and build_pavement_polygon's
     ring walk depends on that order. A traced kerb has whatever direction the mapper drew
-    it in, so it is reversed if needed. Where several kerbs share a corner the longest is
-    used - the others are usually short ramp segments rather than the return itself.
+    it in, so it is reversed if needed.
+
+    A CANDIDATE HAS TO TURN, and "longest wins" is only applied among the ones that do.
+    assign_kerbs_to_corners groups traces by which two legs their midpoint is nearest, and
+    OSM traces the block rather than the corner - so every corner at Lavallette & Reese was
+    handed the ~200 ft two-point straight running past it alongside the real ~8 ft return,
+    and the longest-wins rule picked the straight at all four. Nothing downstream can survive
+    that: the "arc" ran 208.74 ft up the leg, the substring trimming the kerb back to its far
+    end collapsed to a single point, leg_clearance_ft read 193.00 ft on a 190 ft leg, and
+    parking_runs found nowhere on the whole leg a stall could legally be marked. Sweep is the
+    discriminator because a block kerb does not bend - fit_circle_ft returns None outright for
+    a two-point line - and the same MIN_KERB_ARC_SWEEP_DEG the radius fit uses.
+
+    NOT kerb_radius_is_usable, which additionally demands the fitted radius fall in
+    PLAUSIBLE_CORNER_RADIUS_FT. That band guards a radius that gets reused AS A NUMBER; an
+    arc is drawn along the traced path itself, so a return tighter than the band still draws
+    where the mapper put it. Requiring it here rejected Lavallette's four real returns (R=3.4
+    to 4.7 ft) and fell through to a fitted fillet that bridged the corner with a straight.
     """
-    usable = [line for line in kerb_lines if line.length > 1.0]
+    usable = [line for line in kerb_lines
+              if line.length > 1.0 and _turns_enough_to_be_a_return(line)]
     if not usable:
         return None
     line = max(usable, key=lambda l: l.length)
@@ -483,15 +506,28 @@ CURB_GAP_SAMPLE_FT = 10.0
 CURB_CHORD_DEVIATION_FT = 2.0
 
 
-def _outward_slope(points: list[tuple[float, float]]) -> float:
-    """d(offset)/d(station) for the outward end of a traced side, or 0 if the tracing is
-    too short to establish one - in which case the curb continues at the width last seen."""
+def _outward_slope_and_baseline(points: list[tuple[float, float]]) -> tuple[float, float]:
+    """d(offset)/d(station) for the outward end of a traced side, AND the length of tracing it
+    was measured over. Both, because the baseline is what licenses the slope: a trend read off
+    18 ft of kerb is evidence about the next 18 ft and about nothing further.
+
+    (0, 0) if the tracing is too short to establish a slope at all - in which case the curb
+    continues at the width last seen, which is also what a zero baseline asks for downstream.
+    """
     end_station, end_offset = points[-1]
     for station, offset in reversed(points[:-1]):
         if end_station - station >= CURB_EXTRAPOLATION_MIN_BASELINE_FT:
             slope = (end_offset - offset) / (end_station - station)
-            return float(np.clip(slope, -CURB_EXTRAPOLATION_MAX_SLOPE, CURB_EXTRAPOLATION_MAX_SLOPE))
-    return 0.0
+            return (float(np.clip(slope, -CURB_EXTRAPOLATION_MAX_SLOPE,
+                                  CURB_EXTRAPOLATION_MAX_SLOPE)),
+                    end_station - station)
+    return 0.0, 0.0
+
+
+def _outward_slope(points: list[tuple[float, float]]) -> float:
+    """Just the slope. Kept as its own name because that is what reads at the call sites that
+    only extend a kerb a few feet."""
+    return _outward_slope_and_baseline(points)[0]
 
 
 def _inward_slope(points: list[tuple[float, float]]) -> float:
@@ -537,8 +573,28 @@ def curb_line_from_points(points: list[tuple[float, float]], leg: "Leg",
         return None
 
     if deduped[-1][0] < working_length_ft:
-        deduped.append((working_length_ft,
-                        deduped[-1][1] + _outward_slope(deduped) * (working_length_ft - deduped[-1][0])))
+        # THE SLOPE IS CARRIED NO FURTHER THAN THE TRACING IT WAS MEASURED OVER, then the curb
+        # runs parallel at the width last seen.
+        #
+        # An unbounded slope is fine over the ~100 ft this function was written for and is a
+        # fabrication over 2,000: W Broad southwest of Lanning is traced 14-238 ft at a steady
+        # 32.9 ft between kerbs, with a -0.0025 ft/ft convergence inside that window, and
+        # running it to the borough line at station 2,307 closed the street to 22.65 ft - a
+        # 10 ft narrowing nobody surveyed, which refused the bikeway on the one leg the site
+        # exists to draw. The trend is real; the extent it was claimed over was not.
+        #
+        # RUN-OUT = THE BASELINE THE SLOPE WAS MEASURED OVER, so the rule needs no new number
+        # and scales with the evidence: a trend read off 18 ft of kerb is carried 18 ft past
+        # the tracing and then stops. Past the run-out the kerb holds its width - the same
+        # thing _outward_slope already gives when the baseline is too short to establish a
+        # trend at all, which is the case this generalises.
+        end_station, end_offset = deduped[-1]
+        slope, baseline_ft = _outward_slope_and_baseline(deduped)
+        run_out_ft = min(working_length_ft - end_station, baseline_ft)
+        held_offset = end_offset + slope * run_out_ft
+        if end_station + run_out_ft < working_length_ft:
+            deduped.append((end_station + run_out_ft, held_offset))
+        deduped.append((working_length_ft, held_offset))
     if extend_to_junction and deduped[0][0] > 0.0:
         station = deduped[0][0]
         deduped.insert(0, (0.0, deduped[0][1] - _inward_slope(deduped) * station))

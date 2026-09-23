@@ -1,0 +1,159 @@
+# West Broad St (CR 654) & Lanning Ave, Hopewell Borough, NJ 08525.
+#
+# THE WEST END OF THE BOROUGH'S BROAD ST CORRIDOR, and the only site that can draw it.
+# W Broad St runs southwest from here for 2,307 ft to the borough line and stops: OSM's
+# way 27459436 ends at [-74.7744533, 40.3827373], which is the jurisdictional boundary and
+# the point past which nothing this project proposes is buildable. Every other Broad St
+# site is 2,000+ ft short of it, so until this one existed the corridor's western terminus
+# was an assertion in prose with no drawing behind it.
+#
+# It is also why sites/osm_areas.yaml needed a THIRD Hopewell-area entry: the borough line
+# here sits at latitude 40.38274, SOUTH of hopewell_borough's own south edge (40.3830), and
+# that file forbids widening an existing bbox. See hopewell_wbroad_west.
+#
+# See sites/README.md for the schema.
+
+data_sources:
+  road_network: data/NJ_Roadway_Network.geojson
+  parcels: data/MercerCountyParcels.shp
+  tax_list: data/MercerTaxList.dbf
+
+intersection:
+  name: "W Broad St (CR 654) & Lanning Ave, Hopewell Borough, NJ 08525"
+  municipality: "Hopewell Borough"
+  center_wgs84: [-74.7674488, 40.3861181]
+  street1: "West Broad Street"
+  street2: "North Lanning Avenue"
+  anchor_query: "West Broad Street, Hopewell, NJ 08525"
+  resolution_method: >
+    OSM shared-node match on node 103981610, which is carried by West Broad Street way
+    27459436 (ref=CR 654) and by BOTH Lanning Avenue ways - 11640384 North Lanning Avenue
+    to the northwest and 11647930 South Lanning Avenue to the southeast. A four-leg
+    junction, and the two Lanning legs are separately named streets rather than one way
+    through, which is why they are two legs here rather than one.
+  # 750 m, NOT the 150 m every other site uses. 150 m is 492 ft, and it is a HARD CAP on how
+  # far a leg's centerline is loaded - the southwest leg asked for 2,307.5 ft and came out 490,
+  # which looks like a treatment refusing rather than like a clip. This radius has to clear the
+  # longest working_length_ft on the sheet (703.5 m) with margin, and the snapshot area
+  # hopewell_wbroad_west is sized to contain it.
+  clip_radius_m: 750
+  leg_working_length_ft: 130
+  # The southwest leg overrides this to run the whole way to the borough line; see its
+  # working_length_ft and the source note there, which is the one place in this repo a leg
+  # is deliberately carried past its tracing.
+  #
+  # Crossings from OSM, all three uncontrolled and all three within 25 ft of the junction:
+  #   w_broad_st_northeast  - way 364660162, crossing:markings=zebra
+  #   n_lanning_ave_north   - way 376498245, crossing:markings=lines
+  #   s_lanning_ave_south   - way 376498289, crossing:markings=lines
+  # No crossing is mapped on the southwest leg of W Broad. NOT reviewed against imagery by
+  # us - this is OSM's survey, not the July 2026 crosswalk inventory, which does not reach
+  # this junction.
+  existing_marked_crosswalks: ["w_broad_st_northeast", "n_lanning_ave_north", "s_lanning_ave_south"]
+
+corridor:
+  jurisdiction: "County"
+  speed_limit_mph: 25   # OSM maxspeed=25 mph on West Broad Street way 27459436. Both Lanning
+                        # Avenue ways are untagged.
+  lanes: 2              # OSM lanes=2 on all three ways
+  # NO sld_pavement_width_ft. The other Broad St sites carry 48 ft from the Route 518 segment
+  # average, and it does not apply here: this is CR 654, a different SRI, and the traced kerbs
+  # below put the real roadway at 32-33 ft. A 48 ft nominal would size every offset on this
+  # sheet off a number 15 ft too wide.
+
+legs:
+  w_broad_st_southwest:
+    sri: "11000654__"
+    bearing_deg: 238.0
+    street_name: "West Broad Street (southwest of Lanning Ave, to the borough line) - CR 654"
+    curb_to_curb_ft: 33  # OSM-DERIVED from Danny's traced kerbs - see source
+    width_provenance: osm_derived
+    confirmed: false
+    centerline_style: double_yellow  # NOT confirmed here; carried from the same CR 518/654
+                                      # Broad St corridor, same basis as sites/wbroad_louellen.
+    working_length_ft: 2307.5
+    source: >
+      OSM-DERIVED, from the traced kerbs themselves rather than from a proxy. A perpendicular
+      cut every 5 ft over stations 30-210 returns 19 paired kerb readings: min 32.71, max
+      33.08, mean 32.91, sd 0.09 ft. That is the tightest width measurement anywhere in this
+      project, and it is what makes the extrapolation below defensible.
+      .
+      WORKING LENGTH 2,307.5 FT, WHICH IS PAST WHERE THE KERB IS TRACED, AND THAT IS THE
+      DELIBERATE PART. Tracing stops 777.7 ft southwest of Louellen St, roughly 240 ft along
+      this leg; the remaining ~2,070 ft of centerline is carried on the bearing and the
+      nominal width above (src/geometry/model: curb_line_from_points extrapolates exactly
+      this way). Normally .claude/SKILLS.md section 2 forbids treating the nominal number as a
+      measurement of the street - "whether there is room" is a question about the traced kerb.
+      This leg is the documented exception, on Danny's call and on the sd above: W Broad west
+      of Lanning is constant-width to 0.09 ft over every foot of it anyone has traced, so the
+      extrapolation asserts only that it stays constant, which is the weakest claim available
+      and the one the data supports. IT IS STILL AN EXTRAPOLATION. Nothing measured off the
+      kerb past station ~240 on this leg is a measurement of the street.
+
+  w_broad_st_northeast:
+    sri: "11000654__"
+    bearing_deg: 57.4
+    street_name: "West Broad Street (northeast of Lanning Ave, toward Louellen St) - CR 654"
+    curb_to_curb_ft: 32  # OSM-DERIVED from the traced kerbs - see source
+    width_provenance: osm_derived
+    confirmed: false
+    centerline_style: double_yellow  # NOT confirmed - same basis as the southwest leg.
+    source: >
+      OSM-DERIVED from Danny's traced kerbs, same perpendicular-cut method as the southwest
+      leg. Over stations 30-210 the profile runs 32.82 ft down to 31.85 at station 170 and
+      back to 32.93 at 210 - mean 32.4, so 32 ft. Past station 220 the reading climbs steadily
+      to 50.4 ft by station 330; that is the kerb opening out into driveway apron and the
+      Louellen St mouth (Louellen is 537 ft out), not roadway, and it is excluded.
+      .
+      WORTH KNOWING: this is the SAME physical block as sites/wbroad_louellen's
+      w_broad_st_southwest, which carries 50 ft as an ESTIMATE from a parcel-gap method. The
+      traced kerbs say 32. The estimate is the one that is wrong, and that site's own source
+      note already says not to cost anything off it. Not corrected there from here - a width
+      is that site's fact to change, with its own export diff.
+
+  n_lanning_ave_north:
+    sri: "11051021__"   # NJDOT calls this whole SRI "S LANNING AVE", and its name describes
+                        # only half of what it covers: the centerline runs THROUGH W Broad and
+                        # splits into two pieces here, at 327.6 and 147.9 deg. There is no
+                        # "N LANNING AVE" anywhere in NJ_Roadway_Network.
+    bearing_deg: 327.6
+    street_name: "North Lanning Avenue (northwest of W Broad St)"
+    curb_to_curb_ft: 27  # OSM-DERIVED from the traced kerbs, THINLY - see source
+    width_provenance: osm_derived
+    confirmed: false
+    centerline_style: none   # NOT confirmed. A 27 ft borough residential street is normally
+                              # unstriped; stated as `none` rather than defaulted to a dashed
+                              # yellow this project has no evidence for. Needs street-view review.
+    source: >
+      OSM-DERIVED from the traced kerbs, but on only THREE paired readings (stations 25, 30,
+      35: 26.41, 26.49, 26.63 ft, mean 26.5). The kerb here is traced round the corner and
+      no further, which is the ordinary OSM pattern (.claude/SKILLS.md section 0a: every kerb
+      at every site starts 12-58 ft out). Three samples 10 ft apart describe the corner, not
+      the block. Defensible as the width AT THE JUNCTION, which is all this sheet draws of it.
+
+  s_lanning_ave_south:
+    sri: "11051021__"   # the same SRI as the north leg - see the note there
+    bearing_deg: 147.5
+    street_name: "South Lanning Avenue (southeast of W Broad St)"
+    curb_to_curb_ft: 29  # OSM-DERIVED from the traced kerbs, thinly - see source
+    width_provenance: osm_derived
+    confirmed: false
+    centerline_style: none   # NOT confirmed - same basis as North Lanning.
+    source: >
+      OSM-DERIVED from the traced kerbs: five paired readings over stations 25-45, min 28.63,
+      max 28.87, mean 28.76, sd 0.09 ft. Same caveat as North Lanning - the tracing covers the
+      corner and stops, so this is the width at the junction rather than along the block.
+
+# NOT SIGNALIZED. OSM maps two highway=stop nodes and no traffic_signals node:
+#   n_lanning_ave_north  - node with direction=forward, 32 ft out
+#   s_lanning_ave_south  - node with direction=backward, 27 ft out
+# So Lanning stops and W Broad runs through, which is what a county route crossing a
+# residential street looks like. No `signals` block, which is what "not signalized" means
+# here (sites/README.md); the stop signs come from OSM via build_props.
+
+treatments:
+  existing_corner_radius_ft: 20  # ESTIMATE
+  existing_corner_radius_source: >
+    No survey, aerial measurement or field visit. 20 ft placeholder, the same value and the
+    same reasoning as every other Hopewell site: typical as-built radius for an older
+    small-borough arterial/local corner. Replace once actually measured.

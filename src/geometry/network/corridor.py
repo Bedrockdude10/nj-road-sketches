@@ -82,6 +82,12 @@ class Corridor:
     centerline: LineString
     junctions: tuple[JunctionOnRoad, ...]
     kerb_runs: tuple[KerbRun, ...]
+    #: Every town this chain of junctions runs through, in order, deduplicated. A TUPLE and not
+    #: a string because a street does not stop at a town line while the DECISIONS about it do -
+    #: route_decision_for is keyed on (street, town) - so a corridor that crosses a boundary has
+    #: to be able to say so rather than silently adopting the first town's proposals for all of
+    #: it. Every corridor this project models today is one town long.
+    municipalities: tuple[str, ...] = ()
     #: (start_ft, end_ft, SRI) - which NJDOT route carries which stretch. Not decoration: CR 518
     #: turns west onto Louellen St, so Broad Street carries two SRIs and any report that says
     #: "SRI 00000518__" of the whole thing is wrong about the western third of it.
@@ -494,6 +500,16 @@ def corridors_from_models(models: dict[str, "IntersectionModel"]) -> list[Corrid
     return [corridor for corridor in corridors if corridor is not None]
 
 
+def _municipalities_of(models: dict[str, "IntersectionModel"], pieces: list[dict]) -> tuple[str, ...]:
+    """The towns this chain runs through, in order, without repeats. See Corridor.municipalities."""
+    towns: list[str] = []
+    for piece in pieces:
+        town = (models[piece["site"]].config.get("intersection") or {}).get("municipality")
+        if town and town not in towns:
+            towns.append(town)
+    return tuple(towns)
+
+
 def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
                     roads_by_key: dict) -> Corridor | None:
     """Assemble one chain into a Corridor: pieces, bridges, extensions, kerb runs.
@@ -580,6 +596,7 @@ def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
             name=_corridor_name([models[piece["site"]].config["legs"][leg].get("street_name")
                                  for piece in pieces for leg, _sign in piece["legs"]]),
             centerline=centerline, junctions=junctions, kerb_runs=tuple(runs),
+            municipalities=_municipalities_of(models, pieces),
             sri_spans=_sri_spans(junctions, sris, centerline.length),
             cross_street_ft=tuple(cross_street_ft),
             seams=tuple((float(stations[index]), gap) for index, gap in seam_marks))

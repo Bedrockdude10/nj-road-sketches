@@ -33,7 +33,13 @@ from src.provenance import VALID_PROVENANCE, VALID_WIDTH_LOCATIONS
 # Mirrors src.geometry.treatments.VALID_CENTERLINE_STYLES, which cannot be imported here
 # without dragging shapely and the geometry stack into every config read. Kept honest by
 # tests/test_site_schema.py:test_centerline_styles_match_treatments.
-VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "none")
+VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow",
+                           "single_white_dashed", "none")
+
+# Mirrors the keys of src.geometry.model.leg_frame._COMPASS_AXES, and mirrored here for the
+# same reason as the styles above. Kept honest by
+# tests/test_site_schema.py:test_traffic_directions_match_the_compass.
+VALID_TRAFFIC_DIRECTIONS = ("north", "south", "east", "west")
 
 # Two legs of one junction cannot leave the centre on the same heading. The leg matcher
 # (src/geometry/intersection/osm_roads.py:_assign_leg_pieces) tells legs sharing an SRI apart by
@@ -59,12 +65,23 @@ class DataSources(Strict):
     network and the county parcels are large licensed downloads kept out of git, and the whole
     suite is designed to skip rather than fail when they are absent (tests/conftest.py)."""
     road_network: str
-    parcels: str
+    # OPTIONAL because nothing geometric reads the parcels - no treatment, check or kerb does.
+    # They are plan-sheet context, corner outlines in the 3D, and the second choice of building
+    # height after OSM's own, which is itself inert without `tax_list`. A site in a county whose
+    # parcels are not downloaded draws without them rather than not building.
+    parcels: str | None = None
     tax_list: str | None = None
 
 
 class Intersection(Strict):
     name: str
+    #: WHICH TOWN THIS JUNCTION IS IN, spelled the way the corridor decisions spell it
+    #: (src/geometry/treatments/corridor.py:ROUTE_DECISIONS). Required, and not parsed out of
+    #: `name`, because it is a JOIN KEY rather than a caption: a route decision is looked up by
+    #: (street, municipality), and street names repeat between towns - almost every New Jersey
+    #: borough has a Broad Street. Derived from prose it would be derived wrongly exactly once,
+    #: and the symptom would be one town's bikeway drawn down another town's street.
+    municipality: Sourced
     center_wgs84: tuple[float, float]
     street1: str
     street2: str
@@ -88,6 +105,41 @@ class Intersection(Strict):
         return self
 
 
+class ExistingParking(Strict):
+    """Parking observed ON THE GROUND along one leg - a fact about the street, not a proposal.
+
+    HERE RATHER THAN IN A SCENARIO because that is the rule this file's own preamble states and
+    section 5 of .claude/SKILLS.md restates: a fact about the street as it exists belongs to the
+    site's factual basis, and a decision a proposal makes belongs to a Treatment. Angled parking
+    at NJ 35 & Reese is the first fact of this kind this project has had to carry, and putting it
+    in scenarios.py would have made the drawing's ground truth a proposal's private constant -
+    invisible to every other scenario of the same junction, which all have to draw the same
+    street.
+
+    NOT DERIVABLE FROM OSM, which is why it needs stating at all: there is not one `parking:*` tag
+    on Grand Central Ave (verified against the borough snapshot, 2026-09-10). Same position as
+    `intersection.existing_marked_crosswalks`, whose comment makes the same point - a field
+    observation beats a missing tag, and the config is where an observation is recorded.
+
+    `sides` is in each LEG's own frame, so the same real kerb is "left" on one approach and
+    "right" on the next - see side_facing. `angle_deg` is measured FROM THE KERB: 90 is head-in
+    perpendicular, None is parallel parking. The stall dimensions are None for "the project's
+    standard stall" (src/geometry/treatments/base.py) rather than restated here, because a figure
+    copied into a schema is a second home for it and this file cannot import the first.
+    """
+    sides: list[Literal["left", "right"]] = Field(min_length=1)
+    source: Sourced
+    angle_deg: float | None = Field(default=None, gt=0, le=90)
+    stall_width_ft: float | None = Field(default=None, gt=0)
+    stall_length_ft: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _distinct_sides(self):
+        if len(set(self.sides)) != len(self.sides):
+            raise ValueError(f"a side may only be listed once, got {self.sides}")
+        return self
+
+
 class Leg(Strict):
     sri: str
     # The only value in this file that has to be geometrically accurate (sites/README.md).
@@ -100,6 +152,27 @@ class Leg(Strict):
     width_measured_at: Literal[VALID_WIDTH_LOCATIONS] | None = None  # type: ignore[valid-type]
     confirmed: bool = False
     centerline_style: Literal[VALID_CENTERLINE_STYLES] | None = None  # type: ignore[valid-type]
+    #: The compass direction ALL traffic on this leg runs, where the carriageway is one-way.
+    #: None means two-way, which is the ordinary case and the default.
+    #:
+    #: WHY A LEG AND NOT THE CORRIDOR BLOCK: `corridor:` is free-form by design (see
+    #: SiteConfig.corridor) and nothing derives geometry from it, while this decides which way
+    #: an angled bay leans and which way a with-traffic bike lane points. It is also genuinely
+    #: per leg - at NJ 35 & Reese the two Grand Central approaches are one-way northbound and
+    #: the two Reese approaches are two-way, so one key on the junction could not say it.
+    #:
+    #: AND NOT DERIVABLE FROM `bearing_deg`: both legs of a street point OUTWARD from the
+    #: junction by construction, so a one-way street's northern approach runs north and its
+    #: southern approach runs north as well - the same compass direction, opposite leg
+    #: directions. That is the whole reason leg_heads_toward exists, and the reason
+    #: `corridor.one_way: true` alone was not enough: it records that there is one direction,
+    #: not which.
+    traffic_heads_toward: Literal[VALID_TRAFFIC_DIRECTIONS] | None = None  # type: ignore[valid-type]
+    #: Parking as it is on the ground along this leg, or absent where nobody has looked. ABSENT
+    #: IS NOT "NO PARKING" - it is "unrecorded", the same distinction SurveyedCrossing.is_marked
+    #: draws for a crossing with no markings tag, and a site must not read it as permission to
+    #: draw bare asphalt where a bay might be.
+    existing_parking: ExistingParking | None = None
 
 
 class SignalCorner(Strict):

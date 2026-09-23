@@ -1,0 +1,137 @@
+# East Broad St (CR 518) & Elm St, Hopewell Borough, NJ 08525.
+#
+# THE EAST END OF THE BOROUGH'S BROAD ST CORRIDOR. The borough line on E Broad is 133 ft
+# east of this junction, so this is the last intersection the corridor has - and unlike the
+# west end, the kerb here is traced right up to it. A two-way bikeway that runs out of
+# jurisdiction has to hand its riders back to the carriageway somewhere, and this is the
+# junction where that happens; see src/geometry/treatments/bikeways/terminus.py.
+#
+# Inside the existing hopewell_borough snapshot area - no new OSM download for this one.
+#
+# See sites/README.md for the schema.
+
+data_sources:
+  road_network: data/NJ_Roadway_Network.geojson
+  parcels: data/MercerCountyParcels.shp
+  tax_list: data/MercerTaxList.dbf
+
+intersection:
+  name: "E Broad St (CR 518) & Elm St, Hopewell Borough, NJ 08525"
+  municipality: "Hopewell Borough"
+  center_wgs84: [-74.7533947, 40.3915081]
+  street1: "East Broad Street"
+  street2: "North Elm Street"
+  anchor_query: "East Broad Street, Hopewell, NJ 08525"
+  resolution_method: >
+    OSM shared-node match on node 104079674, carried by East Broad Street way 1065892474
+    (ref=CR 518), North Elm Street way 1065749261 and South Elm Street way 11644989. A
+    four-leg junction; Elm St is two separately named ways either side of Broad, so it is
+    two legs here.
+  clip_radius_m: 150
+  leg_working_length_ft: 130
+  # Crossings from OSM, both uncontrolled:
+  #   s_elm_st_south   - way 363310290, crossing:markings=ladder
+  #   e_broad_st_west  - way 376498319, crossing:markings=zebra
+  # Nothing mapped on the east leg of Broad or on North Elm. NOT reviewed against imagery
+  # by us; the July 2026 crosswalk inventory does not reach this junction.
+  existing_marked_crosswalks: ["s_elm_st_south", "e_broad_st_west"]
+
+corridor:
+  jurisdiction: "County"
+  speed_limit_mph: 25   # OSM maxspeed=25 mph on East Broad Street and North Elm Street.
+                        # South Elm Street is untagged.
+  lanes: 2              # OSM lanes=2 on all four ways
+  sld_pavement_width_ft: 48  # Route 518 nominal/segment-average - see legs.*.curb_to_curb_ft,
+                              # which are the real widths and are 8-16 ft narrower
+
+legs:
+  e_broad_st_west:
+    sri: "00000518__"
+    bearing_deg: 251.9
+    street_name: "East Broad Street (west of Elm St, toward Princeton Ave) - CR 518"
+    curb_to_curb_ft: 40  # OSM-DERIVED from the traced kerbs - see source
+    width_provenance: osm_derived
+    confirmed: false
+    centerline_style: double_yellow  # NOT confirmed here; carried from the street-view-confirmed
+                                      # double yellow on this same CR 518 corridor at
+                                      # Broad/Greenwood. Needs its own review.
+    source: >
+      OSM-DERIVED, measured off Danny's traced kerbs rather than from a proxy: a perpendicular
+      cut every 5 ft over stations 35-125 returns 19 paired readings, min 40.27, max 41.76,
+      mean 40.38, sd 0.33 ft. Consistent with sites/ebroad_princeton's e_broad_st_east (39 ft,
+      also osm_derived) one block west, which is the same physical segment.
+
+  e_broad_st_east:
+    sri: "00000518__"
+    bearing_deg: 72.7
+    street_name: "East Broad Street (east of Elm St, to the borough line) - CR 518"
+    curb_to_curb_ft: 40  # CARRIED from the west leg - an estimate, see source
+    width_provenance: estimated
+    confirmed: false
+    centerline_style: double_yellow  # NOT confirmed - same basis as the west leg.
+    source: >
+      ESTIMATE, AND NOT THE NUMBER THAT GETS DRAWN. Only the RIGHT kerb is traced here (4
+      points, 23-127 ft out); the left is not, so a perpendicular cut every 5 ft from station
+      20 to 130 returns ZERO paired readings and no width can be measured. The 40 ft is the
+      west leg's measured width carried across the junction - the two legs are one continuous
+      county route and the borough line is only 133 ft out, so there is no room for the street
+      to change character. The model does not use it: with one kerb traced it mirrors that
+      kerb about NJDOT's alignment and resolves this leg at 49.0 ft, which is 9 ft wider than
+      the block it continues and is the symmetry assumption talking, not a measurement. TRACE
+      THE LEFT KERB - that replaces both numbers with one, and it is the cheapest fix here.
+
+  n_elm_st_north:
+    sri: "11051003__"  # NJDOT records this SRI as "LAFAYETTE ST", not Elm - see the note below
+    bearing_deg: 341.1
+    street_name: "North Elm Street (north of E Broad St)"
+    curb_to_curb_ft: 28  # ESTIMATE - see source
+    width_provenance: estimated
+    confirmed: false
+    centerline_style: none   # NOT confirmed. Unstriped is normal for a 28 ft borough
+                              # residential street; stated rather than defaulted. Needs review.
+    source: >
+      ESTIMATE, and a weak one. No traced kerb on this leg (zero paired readings, stations
+      20-110), and no OSM crossing way here to cross-check against either. 28 ft is the mean
+      of the two comparable borough residential legs in this project that ARE traced - North
+      and South Lanning Avenue at sites/wbroad_lanning, measured at 26.5 and 28.8 ft off their
+      own kerbs. A typical-for-the-type figure, which is the definition of `estimated`. Do not
+      cost anything off it.
+
+      ON THE SRI: NJDOT names 11051003__ "LAFAYETTE ST" and there IS a separate Lafayette
+      Street in OSM, so the name looks like the wrong street until the geometry is checked.
+      It is not. The SRI is one continuous centreline from South Elm's south end
+      (-74.75251, 40.38942) through this junction and on to (-74.76167, 40.39100), which is
+      the west end of OSM's Lafayette Street ways 11642681 / 1180543655 - i.e. NJDOT carries
+      Elm St and Lafayette St as one route and names it after the far half. It passes 0 ft
+      from this junction's centre; the SRI NJDOT actually calls "ELM ST" (11051028__) is a
+      different centreline 477 ft away and does not touch this junction at all. Same class of
+      mismatch as sites/broad_st_greenwood's 11051089__ "COLUMBIA AVE".
+
+  s_elm_st_south:
+    sri: "11051003__"  # NJDOT records this SRI as "LAFAYETTE ST", not Elm - see the note below
+    bearing_deg: 162.8
+    street_name: "South Elm Street (south of E Broad St)"
+    curb_to_curb_ft: 28  # ESTIMATE - see source
+    width_provenance: estimated
+    confirmed: false
+    centerline_style: none   # NOT confirmed - same basis as North Elm.
+    source: >
+      ESTIMATE, same basis and same weakness as North Elm Street, and like e_broad_st_east it
+      is not the number drawn: the LEFT kerb here is traced (2 points, 29-31 ft out) with no
+      right kerb to pair it with, so the model mirrors it and resolves the leg at 32.5 ft.
+      Two signals exist that the north leg does not have, neither used yet: that mirrored
+      32.5 ft, and an OSM ladder-marked crossing on this leg (way 363310290) whose span would
+      bound the width. Measuring the crossing span is the cheapest improvement to this number.
+
+# NOT SIGNALIZED. OSM maps two highway=stop nodes, both direction=forward, and no
+# traffic_signals node:
+#   n_elm_st_north  - 35 ft out
+#   s_elm_st_south  - 40 ft out
+# Elm stops, Broad runs through. No `signals` block, which is what "not signalized" means
+# here (sites/README.md); the stop signs come from OSM via build_props.
+
+treatments:
+  existing_corner_radius_ft: 20  # ESTIMATE
+  existing_corner_radius_source: >
+    No survey, aerial measurement or field visit. 20 ft placeholder, the same value and the
+    same reasoning as every other Hopewell site. Replace once actually measured.

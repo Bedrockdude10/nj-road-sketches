@@ -1,4 +1,4 @@
-"""WHERE THE TRAVEL-LANE DIVIDER SITS once a two-way lane has taken one kerbside.
+"""WHERE THE TRAVEL-LANE DIVIDER SITS once a section has taken one kerbside for itself.
 
 ONE DEFINITION, because four things need it and they must agree: the two travel-lane checks in
 src/checks.py, the plan view's lane dimension label, and the centreline paint both views draw. The
@@ -10,16 +10,23 @@ reads the treatments a state ended up with, so it sits above them and not beside
 """
 from src.geometry.treatments.base import TARGET_LANE_WIDTH_FT
 from src.geometry.treatments.state import DesignState
-from src.geometry.treatments.bikeways.fit import divided_lane_width_ft, travel_lane_divider_shift_ft
-from src.geometry.treatments.bikeways.place import AddTwoWayBikeLane
+from src.geometry.treatments.bikeways.fit import divided_lane_width_ft
+from src.geometry.treatments.bikeways.place import AddBikeLane
 
 def divider_shift_toward_ft(state: DesignState, leg_name: str, side: str) -> float:
     """How far the travel-lane divider sits off the alignment, measured TOWARD `side`.
 
     Zero on every leg whose travel lanes straddle the alignment, which is all of them until a
-    two-way bike lane takes width out of one kerbside. Signed, because the two sides of a leg see
-    the same shift in opposite directions, and anything that ignores the sign is wrong on exactly
-    one of them.
+    section pinned to its own kerb takes width out of one kerbside. Signed, because the two sides
+    of a leg see the same shift in opposite directions, and anything that ignores the sign is
+    wrong on exactly one of them.
+
+    ASKED OF THE SECTION, and of EVERY bike lane rather than only the two-way ones. A two-way
+    lane was the first section to shift the travel way and for a while the only one, so this
+    looked up AddTwoWayBikeLane by name; NJ 35 NB shifts it with a one-way lane behind angled
+    parking, and while that lookup stood, the design was drawn shifted and CHECKED unshifted.
+    BikeLane.divider_shift_ft returns 0.0 for an unpinned section, so widening the lookup moves
+    nothing on the legs that were already covered.
 
     ONE DEFINITION, because four things need it and they must agree: the two travel-lane checks in
     src/checks.py, the plan view's lane dimension label, and the centreline paint both views draw.
@@ -28,10 +35,12 @@ def divider_shift_toward_ft(state: DesignState, leg_name: str, side: str) -> flo
     drawing is worse than a wrong drawing, because it is the number a reviewer takes away, and an
     11 ft lane is not negotiable with a county engineer.
     """
-    for treatment in state.treatments_of(AddTwoWayBikeLane):
+    for treatment in state.treatments_of(AddBikeLane):
         if treatment.target.leg != leg_name:
             continue
-        shift_ft = travel_lane_divider_shift_ft(treatment.section(state))
+        shift_ft = treatment.section(state).divider_shift_ft()
+        if not shift_ft:
+            continue    # an unpinned lane on this leg leaves the travel lanes straddling
         # The shift is defined as positive AWAY from the side carrying the lane.
         return -shift_ft if str(treatment.target.side) == str(side) else shift_ft
     return 0.0
@@ -45,7 +54,7 @@ def travel_lane_edge_ft(state: DesignState, leg_name: str, side: str) -> float:
     paint checks, and anything sizing a kerbside zone.
 
     TARGET_LANE_WIDTH_FT from the alignment on every leg whose two travel lanes straddle it, which
-    is every leg of every scenario until a two-way bike lane takes one kerbside. Then the sum is
+    is every leg of every scenario until a section pinned to its own kerb takes one kerbside. Then the sum is
     the DIVIDER's offset plus the lane's own width, and both terms move:
 
       * the divider is off the alignment by divider_shift_toward_ft, signed, so the two sides of
@@ -64,11 +73,14 @@ def travel_lane_edge_ft(state: DesignState, leg_name: str, side: str) -> float:
     Equivalent to the section's own `travel_lane_edge_ft` on the side carrying the lane, and this
     is the general form - checks.ZonesGiveWayAtAnOpening asks about both sides.
     """
-    for treatment in state.treatments_of(AddTwoWayBikeLane):
+    for treatment in state.treatments_of(AddBikeLane):
         if treatment.target.leg != leg_name:
             continue
+        section = treatment.section(state)
+        if not section.divider_shift_ft():
+            continue
         return (divider_shift_toward_ft(state, leg_name, side)
-                + divided_lane_width_ft(treatment.section(state)))
+                + divided_lane_width_ft(section))
     return TARGET_LANE_WIDTH_FT
 
 

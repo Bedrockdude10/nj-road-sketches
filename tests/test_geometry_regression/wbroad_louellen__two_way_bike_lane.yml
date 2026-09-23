@@ -6,12 +6,12 @@ channels:
     count: 34
     extent:
       max:
-      - 27.826
-      - 26.48
+      - 27.844
+      - 26.492
       min:
       - -32.92
       - -23.593
-    points: 92
+    points: 93
   bike_lane_edge_lines:
     count: 53
     extent:
@@ -41,17 +41,21 @@ channels:
       min:
       - -33.896
       - -24.491
-    points: 295
+    points: 296
   bike_lane_symbol_polygons:
     count: 4
     extent:
       max:
-      - 9.65
-      - 14.34
+      - 9.726
+      - 14.401
       min:
       - -21.004
       - -11.622
     points: 32
+  bike_lane_uncoloured_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
   corner_apron_polygons:
     count: 0
     extent: null
@@ -84,23 +88,27 @@ channels:
     count: 3
     extent:
       max:
-      - -7.695
-      - 7.645
+      - -8.92
+      - 6.905
       min:
       - -41.293
       - 5.361
-    points: 109
+    points: 87
   lane_narrowing_hatch_lines:
-    count: 13
+    count: 12
     extent:
       max:
-      - -10.564
+      - -13.031
       - 9.753
       min:
       - -40.984
-      - 5.554
-    points: 26
+      - 5.658
+    points: 24
   lane_narrowing_taper_lines:
+    count: 0
+    extent: null
+    points: 0
+  left_edge_lines:
     count: 0
     extent: null
     points: 0
@@ -112,10 +120,10 @@ channels:
       - -0.681
       min:
       - -41.782
-      - -31.974
+      - -31.948
     points: 159
   parking_buffer_hatch_lines:
-    count: 16
+    count: 18
     extent:
       max:
       - 2.255
@@ -123,7 +131,7 @@ channels:
       min:
       - -40.91
       - -31.53
-    points: 32
+    points: 36
   parking_buffer_taper_lines:
     count: 0
     extent: null
@@ -186,6 +194,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  shared_lane_symbol_polygons:
+    count: 0
+    extent: null
+    points: 0
   sidewalks_far:
     count: 10
     extent:
@@ -207,6 +219,14 @@ channels:
       - -12.386
     points: 355
   tree_points:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_edge_lines:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_surface_polygons:
     count: 0
     extent: null
     points: 0
@@ -235,13 +255,13 @@ legs:
     centerline_paint_m:
     - - - -18.777
         - 2.22
-      - - -20.167
+      - - -20.166
         - 2.282
       - - -20.167
         - 2.282
-      - - -23.212
+      - - -23.211
         - 2.424
-      - - -23.212
+      - - -23.211
         - 2.424
       - - -26.256
         - 2.574
@@ -249,13 +269,13 @@ legs:
         - 2.574
       - - -29.3
         - 2.731
-      - - -29.301
+      - - -29.3
         - 2.731
       - - -32.344
         - 2.896
       - - -35.388
         - 3.061
-      - - -38.432
+      - - -38.431
         - 3.224
       - - -41.474
         - 3.381
@@ -271,11 +291,11 @@ legs:
         - 2.831
       - - -32.339
         - 2.996
-      - - -35.383
+      - - -35.382
         - 3.161
-      - - -38.427
+      - - -38.426
         - 3.324
-      - - -38.427
+      - - -38.426
         - 3.324
       - - -41.469
         - 3.481
@@ -296,7 +316,7 @@ legs:
     crosswalk_skew_deg: -44.028
     crosswalk_style: continental
     far_m:
-    - -41.472
+    - -41.471
     - 3.431
     near_m:
     - -2.495
@@ -311,7 +331,7 @@ legs:
     stop_bar_offset_m: 16.965
     stop_bar_span_m: 3.353
     stop_bar_width_m: 6.706
-    width_m: 12.793
+    width_m: 12.837
   w_broad_st_northeast:
     centerline_paint_m:
     - - - 8.185
@@ -320,6 +340,8 @@ legs:
         - 6.563
       - - 8.696
         - 6.563
+      - - 9.215
+        - 6.859
       - - 9.734
         - 7.155
       - - 10.263
@@ -404,8 +426,6 @@ legs:
         - 19.381
       - - 28.81
         - 19.711
-      - - 29.308
-        - 20.041
       - - 29.806
         - 20.372
       - - 30.297
@@ -416,14 +436,14 @@ legs:
         - 21.354
       - - 31.794
         - 21.682
-      - - 32.293
-        - 22.011
       - - 32.792
         - 22.339
     - - - 8.235
         - 6.184
       - - 8.745
         - 6.476
+      - - 9.264
+        - 6.772
       - - 9.783
         - 7.068
       - - 9.784
@@ -514,8 +534,6 @@ legs:
         - 19.298
       - - 28.866
         - 19.628
-      - - 29.364
-        - 19.958
       - - 29.861
         - 20.288
       - - 30.352
@@ -524,8 +542,6 @@ legs:
         - 21.27
       - - 31.849
         - 21.599
-      - - 32.348
-        - 21.927
       - - 32.847
         - 22.255
     centerline_start_m: 10.376
@@ -536,9 +552,9 @@ legs:
     - 0.506
     crosswalk_bar_count: 11
     crosswalk_centre_m:
-    - 5.859
-    - 7.405
-    crosswalk_offset_m: 8.927
+    - 5.878
+    - 7.416
+    crosswalk_offset_m: 8.948
     crosswalk_offset_source: geometric_estimate
     crosswalk_reach_left_m: 4.648
     crosswalk_reach_right_m: 6.096
@@ -560,7 +576,7 @@ legs:
     stop_bar_offset_m: 10.376
     stop_bar_span_m: 3.077
     stop_bar_width_m: 1.763
-    width_m: 10.745
+    width_m: 10.76
   w_broad_st_southwest:
     centerline_paint_m:
     - - - -15.288
@@ -589,8 +605,6 @@ legs:
         - -17.058
       - - -18.494
         - -17.499
-      - - -18.897
-        - -17.94
       - - -19.704
         - -18.821
       - - -19.704
@@ -607,22 +621,28 @@ legs:
         - -21.014
       - - -22.147
         - -21.452
-      - - -22.961
-        - -22.326
+      - - -22.554
+        - -21.889
       - - -23.368
         - -22.764
       - - -23.775
         - -23.201
       - - -24.181
         - -23.637
+      - - -24.587
+        - -24.075
       - - -24.993
         - -24.513
+      - - -25.399
+        - -24.951
       - - -25.805
         - -25.389
       - - -26.207
         - -25.823
       - - -26.61
         - -26.264
+      - - -27.012
+        - -26.705
       - - -27.415
         - -27.146
       - - -27.818
@@ -647,8 +667,6 @@ legs:
         - -16.991
       - - -18.568
         - -17.432
-      - - -18.971
-        - -17.872
       - - -19.777
         - -18.754
       - - -20.186
@@ -661,8 +679,8 @@ legs:
         - -20.946
       - - -22.221
         - -21.384
-      - - -23.034
-        - -22.258
+      - - -22.628
+        - -21.821
       - - -23.441
         - -22.695
       - - -23.848
@@ -671,8 +689,12 @@ legs:
         - -23.569
       - - -24.254
         - -23.569
+      - - -24.66
+        - -24.007
       - - -25.067
         - -24.445
+      - - -25.473
+        - -24.883
       - - -25.879
         - -25.321
       - - -26.281
@@ -681,6 +703,8 @@ legs:
         - -25.755
       - - -26.684
         - -26.196
+      - - -27.086
+        - -26.638
       - - -27.489
         - -27.079
       - - -27.892
@@ -695,9 +719,9 @@ legs:
     - -0.753
     crosswalk_bar_count: 13
     crosswalk_centre_m:
-    - -8.362
-    - -4.569
-    crosswalk_offset_m: 8.927
+    - -8.376
+    - -4.585
+    crosswalk_offset_m: 8.948
     crosswalk_offset_source: geometric_estimate
     crosswalk_reach_left_m: 7.544
     crosswalk_reach_right_m: 5.867
@@ -719,9 +743,10 @@ legs:
     stop_bar_offset_m: 20.535
     stop_bar_span_m: 3.353
     stop_bar_width_m: 8.231
-    width_m: 13.424
+    width_m: 13.254
 name: Two-Way Bike Lane
 props:
+- bike_warning_sign@417970.90,565994.43
 - bollard@417947.37,565930.06
 - bollard@417952.83,565936.01
 - bollard@417958.27,565941.88
@@ -732,18 +757,18 @@ props:
 - bollard@417985.23,565971.22
 - bollard@417990.48,565977.15
 - bollard@417995.60,565983.04
-- bollard@418070.80,566042.85
-- bollard@418077.67,566046.81
-- bollard@418084.43,566050.90
-- bollard@418090.95,566055.17
-- bollard@418097.54,566059.71
-- bollard@418104.16,566064.23
-- bollard@418110.81,566068.74
-- bollard@418117.45,566073.20
-- bollard@418124.10,566077.67
-- bollard@418130.75,566082.11
-- bollard@418137.43,566086.54
-- bollard@418144.12,566090.96
+- bollard@418070.86,566042.89
+- bollard@418077.73,566046.84
+- bollard@418084.49,566050.93
+- bollard@418091.01,566055.21
+- bollard@418097.60,566059.75
+- bollard@418104.21,566064.27
+- bollard@418110.87,566068.78
+- bollard@418117.51,566073.24
+- bollard@418124.16,566077.71
+- bollard@418130.81,566082.15
+- bollard@418137.49,566086.58
+- bollard@418144.18,566091.00
 - fire_hydrant@418080.91,566067.60
 - pedestrian_signal_head@417978.75,565993.31
 - pedestrian_signal_head@418029.05,566040.40

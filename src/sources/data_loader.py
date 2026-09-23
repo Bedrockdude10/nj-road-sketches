@@ -1,4 +1,9 @@
-"""Data loading: NJDOT roadway network, Mercer County parcels, and intersection geocoding."""
+"""Data loading: a roadway network, a county's parcels, and intersection geocoding.
+
+The two file constants below are DEFAULTS for the county this project started in. Every
+site names its own layers in `data_sources:` (sites/README.md), so a junction in another
+county reads that county's parcels and MOD-IV rows without anything here changing.
+"""
 import json
 import os
 from pathlib import Path
@@ -13,7 +18,7 @@ from src.sources.schemas import ParcelsSchema, RoadNetworkSchema, validate_layer
 
 
 class OfflineCacheMiss(RuntimeError):
-    """HOPEWELL_OFFLINE is set and a fetch wasn't satisfied from the fixture cache."""
+    """ROAD_SKETCHES_OFFLINE is set and a fetch wasn't satisfied from the fixture cache."""
 
 
 class MissingSourceData(FileNotFoundError):
@@ -27,7 +32,7 @@ class MissingSourceData(FileNotFoundError):
     """
 
 class FixtureExtentExceeded(RuntimeError):
-    """A read reached outside the clipped fixture in HOPEWELL_DATA_DIR.
+    """A read reached outside the clipped fixture in ROAD_SKETCHES_DATA_DIR.
 
     The reason this is fatal rather than a warning: a bbox read that runs off the edge of a
     clip SUCCEEDS, with fewer features. Nothing downstream can tell "this junction has three
@@ -36,8 +41,33 @@ class FixtureExtentExceeded(RuntimeError):
     """
 
 
+# THE OLD ENV VAR NAMES, REFUSED RATHER THAN IGNORED. Every switch this project reads was
+# HOPEWELL_-prefixed while this was a one-town study. Renaming them silently would be the worst
+# available outcome: an unrecognised HOPEWELL_OFFLINE is not an error, it is a run that quietly
+# goes to the network; HOPEWELL_DATA_DIR is a run that quietly reads the full county download
+# instead of the clip; HOPEWELL_FRAME_SCALE is a sheet drawn at 1x while the shell says 2.5.
+# Each of those looks like a successful build. So a stale name raises, once, naming its
+# replacement - the whole cost is one error message the first time a shell or a script is stale.
+RENAMED_ENV = {f"HOPEWELL_{name}": f"ROAD_SKETCHES_{name}" for name in
+               ("OFFLINE", "DATA_DIR", "FRAME_SCALE", "OSM_CACHE", "RENDER_SCALE", "REFRESH_OSM")}
+
+
+def refuse_renamed_env(environ=None) -> None:
+    """Raise if a pre-rename environment variable is set. Called at import; see RENAMED_ENV."""
+    environ = os.environ if environ is None else environ
+    stale = {old: new for old, new in RENAMED_ENV.items() if old in environ}
+    if stale:
+        raise RuntimeError(
+            "these environment variables were renamed when this project stopped being about one "
+            "town, and the old names are no longer read - a run with one set would look normal "
+            "and silently ignore what it asks for:\n"
+            + "\n".join(f"  {old}={environ[old]!r}  ->  {new}" for old, new in sorted(stale.items())))
+
+
+refuse_renamed_env()
+
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"  # src/sources/data_loader.py -> repo root
-DATA_DIR_ENV = "HOPEWELL_DATA_DIR"
+DATA_DIR_ENV = "ROAD_SKETCHES_DATA_DIR"
 # Written by scripts/make_data_fixture.py beside the clipped layers; its presence is what marks
 # a directory as a clip rather than the real download, and it records how far the clip reaches.
 FIXTURE_MANIFEST_NAME = "FIXTURE.json"
@@ -91,13 +121,13 @@ def query_overpass(query: str, attempts_per_mirror: int = 4, timeout: int = 30) 
     Once a mirror answers, it is PINNED for the rest of the process, so every fetch sees
     the same snapshot. Retries are per-mirror before failover.
     """
-    if os.environ.get("HOPEWELL_OFFLINE"):
+    if os.environ.get("ROAD_SKETCHES_OFFLINE"):
         # The test suite runs against a committed fixture cache. If something reaches this
         # far it means the fixture is missing, and the honest outcome is a loud failure -
         # not a silent network call that makes the tests depend on Overpass's uptime and
         # current replication state.
         raise OfflineCacheMiss(
-            "HOPEWELL_OFFLINE is set and this query is not in the fixture cache. Add the "
+            "ROAD_SKETCHES_OFFLINE is set and this query is not in the fixture cache. Add the "
             "response to tests/fixtures/osm_cache (see tests/conftest.py) rather than "
             f"letting a test reach the network. Query was:\n{query.strip()[:400]}")
 
@@ -256,7 +286,7 @@ def _resolve_indexed_path(path: Path | str) -> Path:
 
 
 def data_dir() -> Path:
-    """Where the source layers are read from: data/, or HOPEWELL_DATA_DIR if that is set.
+    """Where the source layers are read from: data/, or ROAD_SKETCHES_DATA_DIR if that is set.
 
     Read at CALL time on purpose. An env var latched into a module constant at import is the
     failure conftest.py's docstring is about, and it would make the override depend on whether
@@ -343,7 +373,7 @@ def require_source_data(path: Path | str, what: str) -> Path:
         f"{what} is missing - {detail}.\n"
         "data/ is a large third-party download kept out of git; see README.md, section "
         "\"Data\", for what belongs there. Tests and CI read the committed clip instead - "
-        "point HOPEWELL_DATA_DIR at it, or rebuild it with scripts/make_data_fixture.py."
+        "point ROAD_SKETCHES_DATA_DIR at it, or rebuild it with scripts/make_data_fixture.py."
     )
 
 

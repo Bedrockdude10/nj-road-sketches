@@ -21,6 +21,9 @@ data_sources:
 
 intersection:
   name: "W Broad St & Louellen St, Hopewell Borough, NJ 08525"
+  # The town this junction is in, and the key a corridor decision is looked up by
+  # (src/geometry/treatments/corridor.py) - street names repeat between towns.
+  municipality: "Hopewell Borough"
   center_wgs84: [-74.7659448, 40.3870407]
   street1: "West Broad Street"
   street2: "Louellen Street"

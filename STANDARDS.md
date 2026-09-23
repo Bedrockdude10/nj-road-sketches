@@ -128,6 +128,72 @@ stalls this change appears to cost were never drawn. See
 
 ---
 
+## 1a. New Jersey administrative code — parking stall dimensions — *as cited*
+
+**N.J.A.C. 5:21-4.14 / 4.15** (Residential Site Improvement Standards, off-street parking) —
+*as cited*, meaning the 9 ft and 18 ft below are the ones this repo's comments carry and the rule
+text has not been opened here. The relations derived from them are checked against a published
+table — see below.
+
+| figure | value | constant | file |
+|---|---|---|---|
+| Parking stall width, measured ACROSS the stall | 9 ft | `ANGLED_STALL_WIDTH_FT` | `src/geometry/treatments/` |
+| Parking stall length, measured ALONG the stall | 18 ft | `ANGLED_STALL_LENGTH_FT` | `src/geometry/treatments/` |
+
+**Neither figure maps onto the parallel pair in section 3** (8 ft deep, 22 ft long), and reusing
+either across the two is the trap this row exists to close. A parallel stall's 22 ft is measured
+along the kerb and its 8 ft across; an angled stall's 9 and 18 are measured in the stall's own
+frame, at the stall's angle to the kerb, so **every figure that matters to a drawing is derived
+rather than declared** — see `angled_stall_depth_ft`, `angled_stall_pitch_ft`,
+`angled_stall_line_depth_ft`, `angled_stall_mouth_ft` and `angled_stall_skew_ft` in
+`src/geometry/model/stripes.py`:
+
+| what the drawing needs | relation | 9×18 at 60° | at 90° |
+|---|---|---|---|
+| how deep the bay is off the kerb | `L·sinθ + W·cosθ` | **20.09 ft** | 18.00 ft |
+| how much kerb one stall consumes | `W/sinθ` | **10.39 ft** | 9.00 ft |
+| how deep the PAINTED divider reaches | `L·sinθ` | **15.59 ft** | 18.00 ft |
+| the stall's unpainted MOUTH | `W·cosθ` | **4.50 ft** | 0.00 ft |
+| how far a divider's outer end leads its inner end | `L·cosθ`, i.e. `line depth/tanθ` | **9.00 ft** | 0.00 ft |
+
+θ is measured **from the kerb**, so 90° is head-in and the depth relation degenerates to the
+stall length exactly there. **Dropping the `W·cosθ` term is the plausible-looking mistake**: it
+is the near corner of the stall body reaching past the kerb-side end of the centre axis, and
+without it a 9×18 bay at 60° is understated by **4.50 ft** — a quarter of the bay, and enough
+to report a cross-section as fitting a street it overruns.
+
+The pitch is also **what a stall is counted on**, not the 18 ft: `src/metrics.py`
+`marked_stall_runs` divides a run's length by `parking.pitch_ft`, and `ParkingRun` carries the
+figure as `pitch_ft` for that reason. Counting on the length reports 6 stalls on a bay drawn
+with 12.
+
+**TWO OF THESE ARE CHECKED, AND CHECKING THEM CORRECTED A THIRD.** Kerrville TX's *Parking Lot
+Minimum Design Standards* (Figures 15–17) publish a dimension table by angle, and its `Skew Width
+(D)` — measured along the aisle in the figure — is this project's **pitch**: 10′-5″ at 60° against
+`W/sinθ = 10.39`, and 12′-9″ at 45° against 12.73. Its `Stall Depth (B)` matches `L·sinθ + W·cosθ`
+at **45° (19′-1″ against 19.09)** and at **90° (18′-0″ against 18.00)**. Its 60° depth row reads
+17′-0″, which is the same figure as that row's aisle width and contradicts the formula its own
+other two rows confirm — read as a transcription error, not as a competing standard, and *not*
+adopted. Two rows agreeing to the inch on two independent angles is a mechanism; one row
+disagreeing with its own table is a typo.
+
+**The painted line's length is NOT a published figure and this is the assumption to challenge
+first.** MUTCD §3B.19 and Figure 3B-21 cover parking space markings but illustrate only
+perpendicular stalls and give no angled dimension at all (checked). So the divider is drawn at the
+one length the standard does fix — **the stall's own 18 ft**, laid at the stall angle — which makes
+its reach `L·sinθ` and leaves `W·cosθ` bare. Drawn to the full bay depth instead it comes out
+**23.20 ft**, longer than the stall it divides, and paints across the opening a driver turns
+through; that is what it did until 2026-09-10. See `angled_stall_line_depth_ft` and
+`angled_stall_mouth_ft`.
+
+**Where it is used:** the 60° bays against both kerbs of Grand Central Ave at
+`sites/lavallette_reese`. The **angle there is a field observation** (Danny, 2026-09-10) and not
+a standard — OSM carries no `parking:*` tag anywhere on that street — while the 9×18 stall
+behind it is this row. See `existing_parking` in that site's config and `ExistingParking` in
+`src/site_schema.py`.
+
+---
+
 ## 2. MUTCD
 
 ### A DRIVEWAY IS NOT AN INTERSECTION, and which one a gap is decides the markings — **Verified 2026-08-17**
@@ -304,6 +370,160 @@ the paint only makes it visible; mid-block, the paint is what creates it. That i
 difference between the two, and it is why an unmarked intersection approach still carries a
 setback and an unmarked mid-block stretch does not.
 
+### The line between two lanes going the same way is WHITE — **Verified 2026-09-10**
+
+Opened: **MUTCD 11th Edition (December 2023), Part 3**
+([source](https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/part3.pdf)), §3A.04 and §3B.06.
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 3B.06 | 01 | **Standard** | "When used, lane line pavement markings delineating the separation of traffic lanes that have the same direction of travel **shall be white**." |
+| 3B.06 | 03 A | Guidance | lane line markings **should** be used "On all roadways that are intended to operate with **two or more adjacent traffic lanes in the same direction of travel**, except as otherwise required for reversible lanes." |
+| 3B.06 | 05 | **Standard** | where crossing the line with care is not discouraged or prohibited, "the lane line markings **shall consist of a normal width broken white line**." |
+| 3A.04 | 02 A | **Standard** | "Normal line—**4 to 6 inches** wide." |
+| 3A.04 | 06 | Guidance | "**Broken lines should consist of 10-foot line segments and 30-foot gaps**, or dimensions in a similar ratio of line segments to gaps as appropriate for traffic speeds and the need for delineation." |
+
+**What this project draws.** `single_white_dashed` in `VALID_CENTERLINE_STYLES`
+([`src/geometry/treatments/base.py`](src/geometry/treatments/base.py)), classified white by
+`CENTERLINE_IS_WHITE`, which both renderers read so the 2D view and the 3D render cannot pick
+different materials for one line. The geometry is `centerline_paint_ft`
+([`src/render/crosswalks.py`](src/render/crosswalks.py)) — the same dash loop the yellow dashed
+style uses, because ¶06 gives one ratio for every broken line and two loops would be two places
+for the views to break a line differently.
+
+> **Known divergence — the dash ratio, which is ours and not MUTCD's.** `CENTERLINE_DASH_FT` and
+> `CENTERLINE_GAP_FT` are both `1.0 / FT_TO_M` = **3.28 ft**, a 1:1 ratio, against ¶06's 10 ft
+> mark and 30 ft gap (1:3). At render scale a 40 ft period puts two or three marks on a 130 ft
+> leg and the line reads as debris rather than as a dashed line. This is a **Modelled** drawn-scale
+> choice inherited from the yellow dashed centreline, not a reading of the manual, and it predates
+> this row — recorded here because the row above now cites a ratio the code does not use. See
+> section 7.
+
+> **Why this is a "centerline style" at all.** The four values in `VALID_CENTERLINE_STYLES`
+> answer one question — what is painted down the middle of this leg — and on a one-way
+> carriageway the answer is a lane line rather than a centre line. Modelling it as a separate
+> `PaintKind` with its own channel was the other option and was rejected: the geometry is
+> identical (one line down the leg, shifted by `travel_lane_divider_shift` where a bikeway moves
+> the travel lanes), and a second derivation of one line is the defect
+> [`.claude/SKILLS.md`](.claude/SKILLS.md) §2 is about. The cost is that this line, like the
+> yellow centreline it shares a home with, travels per-leg as `centerline_paint_m` rather than in
+> a `CHANNELS` entry, so it carries no stroke width and `MarkingsDoNotCollide` cannot see it.
+
+---
+
+### The LEFT edge of a one-way roadway is YELLOW — **Verified 2026-09-10**
+
+Opened: **MUTCD 11th Edition (December 2023), Part 3**
+([source](https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/part3.pdf)), §3B.09.
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 3B.09 | 01 | **Standard** | "If used, edge line pavement markings **shall delineate the right or left edges of a roadway**." |
+| 3B.09 | 02 | **Standard** | "right edge line pavement markings, if used, **shall consist of a normal width solid white line** to delineate the right-hand edge of the roadway." |
+| 3B.09 | 03 | **Standard** | "If used on the roadways of divided highways or **one-way streets**, or on any ramp in the direction of travel, left edge line pavement markings **shall consist of a normal width solid yellow line** to delineate the left-hand edge of a roadway…" |
+| 3B.10 | 05 | Option | edge lines "**may be excluded**, based on engineering judgment, for reasons such as if the traveled way edges are delineated by **curbs, parking, or other markings**." |
+
+**What this project draws.** `LEFT_EDGE_LINE`
+([`src/geometry/markings.py`](src/geometry/markings.py)) — the same stripe as
+`PARKING_EDGE_LINE` and the same geometry (`parking_lane_edge_line_ft`), differing only in the
+channel it travels in, because in this repo **the channel decides the colour**
+([`.claude/SKILLS.md`](.claude/SKILLS.md) §3). Which kerb gets it is
+`is_left_edge_of_the_roadway`, and the answer is *not* `side == "left"`: both approaches of a
+street point outward from the junction, so one real kerb is `left` on one leg and `right` on the
+next.
+
+> **Which kerbs this reaches, and which it does not.** Only a kerb whose edge line this project
+> already draws — today that means a kerb with `MarkedParking` on it, which is where
+> `parking_lane_edge_line_ft` is called. A one-way leg with no bay against its left kerb gets no
+> edge line at all, yellow or white. That is ¶01's "if used" and 3B.10 ¶05's option rather than a
+> gap: NJ 35 NB's left edge is delineated by the parking, and the line at the mouth of that bay
+> **is** the roadway's left edge line. It would become a real omission on a one-way leg with a
+> bare left kerb, and there is none in this project.
+
+---
+
+### Where a two-way bikeway STARTS AND ENDS — **Verified 2026-09-15**
+
+Opened: **MUTCD 11th Edition (December 2023), Part 9**
+([source](https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/part9.pdf)), §§9B.18, 9C.06, 9C.07, 9E.03,
+9E.07, 9E.09 and 9E.11.
+
+**The question this answers**, because until 2026-09-15 this project had a 4,524 ft facility with
+no statement about either of its two ends. `BROAD_ST_TWO_WAY_BIKEWAY` runs on one kerb
+(`CORRIDOR_SIDE`), so it serves riders in both directions from the north side — but a rider
+arriving at the borough line is in the general travel lane on whichever side the rules of the road
+put them, and half of them are on the wrong one. **Getting a rider ACROSS the street and onto the
+facility is the terminus problem, and it has a standard answer rather than a local invention.**
+
+#### Getting ON: the two-stage bicycle turn box
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9E.11 | 01 | Support | two-stage turn boxes "allow bicyclists the opportunity to make turns at an intersection or crossing point **instead of requiring them to merge into traffic upstream or to dismount and use a crosswalk**" |
+| 9E.11 | 04 | **Standard** | the box "**shall** be located: A. In an area between the closest through bicycle or motor vehicle movement and the parallel crosswalk … D. In an area between the through bicycle movement and a pedestrian facility **for T-intersections**" |
+| 9E.11 | 05 | **Standard** | it "**shall** consist of at least one bicycle symbol pavement marking and at least one pavement marking arrow" |
+| 9E.11 | **06** | **Standard** | "a **through** arrow in the appropriate direction **shall** be used if a two-stage turn box is used **with a two-way bikeway**" — *a turn arrow is the one-way-lane case and is wrong here* |
+| 9E.11 | 07 | **Standard** | "**shall** be bounded on all sides by a solid white line" |
+| 9E.11 | 10 | Guidance | size by engineering judgment: intersection geometry, keeping queued bicycles away from moving traffic, peak-hour volume so the box does not overflow |
+| 9E.11 | 11–12 | Option / **Standard** | green "may" be used; if used it "**shall** encompass **all** of the two-stage turn box" |
+| 9E.11 | 13 | **Standard** | where a lawful turn on red would pass through the box, "a **full-time no-turn-on-red** prohibition **shall** be provided for the crossroad approach" |
+| 9B.18 | 04 | **Standard** | where riders are *required* to use the box, the R9-23/R9-23a advance sign **shall** be mounted in advance of the intersection **and** at least one R9-23b or R9-23c **shall** be used at the intersection |
+| 9B.18 | 05–06 | **Standard** | R9-23b at the **near** side, R9-23c at the **far** side |
+
+**Figure 9E-11 is titled "Example of a Two-Stage Turn Box Location at an Intersection with a
+Two-Way Bikeway"** — this is not a treatment borrowed from the one-way case and bent to fit; the
+manual draws our exact geometry.
+
+**Two readings of the above are OURS, both Modelled.** First, 9E.11(04) locates the box against a
+crosswalk and the manual has no case for a box at a *jurisdictional* terminus, where there is no
+crossing to sit beside and the ground past it is another town's. We put the box in the last
+`TURN_BOX_LENGTH_FT` of borough street — inside the line, never past it — which is what
+`src/geometry/treatments/bikeways/terminus.py:turn_box_span_ft` and `checks.PaintInsideTheMunicipality`
+enforce. Second, 9B.18(04)'s advance-plus-at-the-intersection pair is conditioned on riders being
+*required* to use the box; they are not required here, so one R9-23b at the box's near edge is what
+is drawn (¶05: near side), with the W9-5 as the only advance plate.
+
+#### Getting OFF: the lane ends and the rider merges
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9C.07 | 01–02 | Support / Option | the Bicycle Lane Ends (W9-5) sign alerts road users "that a bicycle lane is ending and that bicycles will share or occupy the travel lane after merging"; it **may** be used in advance of the end |
+| 9C.07 | 03 | Option | the Bicycles Merging (W9-5a) sign may be used where a merge might occur, **in addition to** W9-5 |
+| 9C.07 | 04 | Guidance | **should not** be used where a lane is dropped on an approach and resumes immediately after the intersection — i.e. not at every junction along the corridor, only at a real terminus |
+| 9C.07 | 05–06 | Option | R9-20 and/or shared-lane markings **may** be installed downstream of the merge area; a W16-2aP plaque may give the distance |
+| 9E.09 | **13** | Option | the shared-lane marking may be used "where the width of the roadway is insufficient to continue a bicycle lane or separated bikeway … or it is advantageous to **terminate the bicycle lane or separated bikeway in order to provide for a shared lane**" |
+
+#### Warning the crossroad, all the way along
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9C.06 | 01 | **Standard** | when used, the Two-Way Bicycle Cross Traffic (W16-21P) plaque "**shall** be installed below a STOP or YIELD sign" |
+| 9C.06 | 04 | Guidance | it **should** be used with a STOP or YIELD sign "when a **counter-flow or two-way bicycle facility** has an approach that is counter to the customary scanning behavior of a motorist at that location" |
+| 9E.07 | 12 | **Standard** | "Turns on red **shall be prohibited** across separated bicycle lanes while bicyclists are allowed to proceed through the intersection" |
+| 9E.07 | 02 / 09 | Support | physical separation introduces "the awareness of a potentially **unexpected** conflict point for turning motor vehicles"; a two-way separated lane on one side "can introduce additional challenges and conflict points" |
+
+¶04 of 9C.06 describes **every** side street on this corridor, not only the two ends: a motorist
+stopped on a side street looks left for traffic and the contraflow half of our bikeway arrives from
+the right. That is 16 cross-street locations (`corridor_report.py`), each one a W16-21P.
+
+#### Where shared-lane markings may NOT go, which constrains the terminus
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9E.09 | 04 | **Standard** | sharrows **shall not** be used in "B. Bicycle lanes or in designated extensions of bicycle lanes through intersections or driveways … **E. Two-stage turn boxes** … **H. Physically-separated bikeways**" |
+| 9E.09 | 05 | **Standard** | "**Green-colored pavement shall not be applied as a background to shared-lane markings**" |
+| 9E.09 | 03 | Guidance | should not be placed where the speed limit is **40 mph or greater** — Broad St is posted 25 |
+| 9E.09 | 07–08 | Guidance | centre **≥12 ft** from the kerb face beside parallel parking; **≥4 ft** where there is no parking and the outside lane is under 14 ft |
+| 9E.09 | 09–10 | Guidance | spaced **50–250 ft** apart away from intersections; the first one **within 50 ft** downstream of an intersection |
+| 9E.03 | 06 | **Standard** | "Shared-lane markings or chevron markings **shall not** be used in bicycle lanes or bicycle lane extensions" |
+
+Every one of those is a *local* rule — a clearance, a spacing, a speed — so none of them moves with
+the render frame. That is deliberate and it is the test `.claude/SKILLS.md` §0b asks of any new
+constant; a terminus sized off "the last N ft of the leg" would have failed it.
+
+
+---
+
 ### Other MUTCD figures — *as cited*
 
 | figure | value | constant | file |
@@ -329,6 +549,7 @@ setback and an unmarked mid-block stretch does not.
 | figure | value | constant | file |
 |---|---|---|---|
 | Bike lane design width (and the width to design to) | 5 ft | `AASHTO_MIN_BIKE_LANE_FT` | `src/geometry/treatments/` |
+| Width an EXISTING bike lane is drawn at when OSM records none | 5 ft | `ASSUMED_BIKE_LANE_FT` | `src/geometry/treatments/bikeways/observed.py` |
 | Bike lane hard floor, no curb face | 4 ft | `MIN_BIKE_LANE_FT` | `src/geometry/treatments/` |
 | Parallel parking lane depth | 8 ft | `PARKING_STALL_DEPTH_DEFAULT_FT` | `src/geometry/treatments/` |
 | Parallel parking stall length | 22 ft | `PARKING_STALL_LENGTH_DEFAULT_FT` | `src/geometry/treatments/` |
@@ -343,6 +564,17 @@ Two of these carry project decisions worth knowing:
 - **4 ft is a real floor and the buffer outranks the lane.** Where a kerb is a few inches short,
   the lane narrows toward 4 ft rather than the buffer being spent — a 4.5 ft lane with a post
   beside it beats a 5 ft lane with a truck beside it. See `widest_protected_lane_ft`.
+- **The third row is an ASSUMPTION STANDING IN FOR A MEASUREMENT, and is the only row here that
+  describes a street that already exists.** `cycleway:left|right=lane` says a bike lane is painted;
+  it does not say how wide. Where `cycleway:*:width` is absent — as it is on NJ 35 through
+  Lavallette — the existing lane is drawn at the design width, and `state.notes` says so on that
+  leg and names the tag that would replace the assumption with a survey. A mapped width is always
+  preferred; only the absence of one reaches this row.
+
+**And the two parking rows are PARALLEL parking only.** 8 ft is a depth off the kerb and 22 ft is
+a length along it, which is the geometry of a stall lying parallel to the street and nothing else.
+An angled bay's figures are in section 1a and are derived from a 9×18 stall at the bay's angle;
+neither pair converts into the other.
 - **Turn speed is labelled *modelled, not measured* wherever it is shown.** It is a comfort model
   of a vehicle tracking the curb face, not a design speed.
 
@@ -391,7 +623,7 @@ minimum being spent, not a NACTO width** — which leaves 10.09 ft travel lanes,
 
 **WHICH OTHER APPROACHES REACH IT DEPENDS ON HOW MUCH STREET THE SHEET SHOWS — measured
 2026-08-21.** A section is sized on the narrowest half-width anywhere along the leg that is drawn,
-and `HOPEWELL_FRAME_SCALE` decides how far that is, so a longer sheet can reach a pinch the short
+and `ROAD_SKETCHES_FRAME_SCALE` decides how far that is, so a longer sheet can reach a pinch the short
 one never shows. `w_broad_st_southwest` has one 318 ft out:
 
 | sheet | leg drawn | `w_broad_st_northeast` | `w_broad_st_southwest` |
@@ -917,6 +1149,13 @@ Listed so nobody goes looking for a standard behind them.
 | `TRACED_SECTION_START/END_FT` | 35 / 130 ft | `intersection.py` | the window a leg's *width* is a fact about |
 | `CROSSWALK_OFFSET_FROM_KERB_FT` | 8.3 ft | `model/context.py` | **not the statute** — measured, see below |
 | `MAX_CROSSWALK_FROM_MOUTH_FT` | 25 ft | `cross_streets.py` | how far outside a mouth a traced crossing is still that junction's |
+| `BICYCLE_LENGTH_FT` | 6 ft | `bikeways/terminus.py` | a bicycle, for sizing a queue — MUTCD 9E.11(10) gives no box dimension at all |
+| `TURN_BOX_QUEUE_BICYCLES` | 2 | `bikeways/terminus.py` | how deep the queue is allowed to get before its back is level with moving traffic — 9E.11(10) factor two, as a number |
+| `TURN_BOX_LENGTH_FT` | 12 ft | `bikeways/terminus.py` | the product of the two above, not a figure anyone publishes |
+| `SHARROW_INTERVAL_FT` | 150 ft | `bikeways/terminus.py` | the middle of MUTCD 9E.09(09)'s permitted 50–250 ft band, rather than either end of it |
+| `BIKE_LANE_ENDS_ADVANCE_FT` | 100 ft | `bikeways/terminus.py` | how far "in advance of" is for the W9-5 — 9C.07(01) requires the sign and gives no distance; ≈2 s of reading at 25 mph, rounded up |
+| `BOUNDARY_CONTEXT_RADIUS_M` | 130 m | `intersection/municipality.py` | not a design figure — the window the admin_level=8 boundary is looked for in, the same base every street-following layer uses |
+| `PAINT_PAST_MUNICIPALITY_TOLERANCE_FT` | 0.5 ft | `checks.py` | not a licence to spill over the line — the sub-foot noise between a surveyed boundary and a sampled centreline, which is what stationing the crossing of the two carries |
 
 > **Name clash — resolved 2026-08-17.** `CROSSWALK_SETBACK_FT` used to mean two things:
 >

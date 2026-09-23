@@ -16,7 +16,7 @@ from src.geometry.intersection import load_intersection_model
 from src.render.plan_view import (BUILDING_CONTEXT_RADIUS_M, draw_change_panel, legend_handles,
                                    plot_design_state)
 from src.site import DEFAULT_SCENARIO, add_scenario_arg, add_site_arg, load_site_scenarios, scenario_label, site_output_dir, run_scenario
-from src.geometry.treatments import DesignState
+from src.geometry.treatments import DesignState, existing_conditions
 from src.sources.osm_context import fetch_crossings
 
 
@@ -37,8 +37,11 @@ def main():
     crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
 
     fig, axes = plt.subplots(1, 2, figsize=(18, 10))
-    existing = plot_design_state(axes[0], model, baseline, "Existing Conditions (Phase 2 baseline)",
-                                  crossings=crossings)
+    # existing_conditions(model), not the baseline the scenario was built on: this panel is
+    # what the proposal is MEASURED AGAINST, so a bay that is already on the ground has to be
+    # in it or the comparison credits the proposal with parking it did not add.
+    existing = plot_design_state(axes[0], model, existing_conditions(model),
+                                  "Existing Conditions", crossings=crossings)
     proposed = plot_design_state(axes[1], model, scenario, f"Proposed Treatments ({args.scenario})",
                                   crossings=crossings)
     # What the proposal achieves, measured off the two panels above rather than recomputed -

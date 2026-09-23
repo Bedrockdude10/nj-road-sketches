@@ -9,7 +9,9 @@ file keeps both, because a caller that collapses them to one silently changes wh
 buildable - see MIN_BIKE_LANE_FT. Anything published from here belongs in STANDARDS.md too.
 """
 from dataclasses import dataclass
-from src.geometry.treatments.base import LANE_WIDTH_SLACK_FT, TARGET_LANE_WIDTH_FT
+from src.geometry.treatments.base import (ANGLED_STALL_WIDTH_FT, LANE_WIDTH_SLACK_FT,
+                                          PARKING_STALL_LENGTH_DEFAULT_FT,
+                                          TARGET_LANE_WIDTH_FT)
 
 # AASHTO gives two figures for an exclusive on-street bike lane and this project needs both, so
 # they are two constants rather than one that quietly changes meaning:
@@ -125,9 +127,14 @@ TWO_WAY_BIKE_LANE_BUFFER_FT = 3.0
 # kerb is "left" on one approach and "right" on the next.
 CORRIDOR_SIDE = "north"
 # Below this the two travel lanes are no longer lanes. NACTO's urban minimum is 10 ft, and
-# TARGET_LANE_WIDTH_FT (11) is what this project designs to; a corridor that cannot hold two
+# TARGET_LANE_WIDTH_FT (11) is what this project designs to; a street that cannot hold two
 # 10 ft lanes beside the section is reported rather than drawn.
-MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT = 10.0
+#
+# BESIDE ANY PINNED SECTION, not only beside a two-way lane, which is why the name no longer
+# says two-way. Every section that measures itself from its OWN kerb and leaves the travel way
+# the remainder has to be checked against this - see BikeLane.near_half_ft. Same figure and same
+# sentence either way; only the set of sections it guards got larger.
+MIN_SHIFTED_TRAVEL_LANE_FT = 10.0
 
 
 def _feet(value: float) -> str:
@@ -159,6 +166,39 @@ class BikeLane:
     buffer_ft: float = 0.0
     parking_ft: float = 0.0
     shy_ft: float = 0.0
+    #: The angle the marked parking leans off the kerb, or None for parallel parking.
+    #:
+    #: CARRIED ON THE SECTION rather than on the treatment that places it, because the angle is
+    #: a CROSS-SECTION fact before it is a marking one: `parking_ft` is the bay's DEPTH, and at
+    #: 60 degrees a 9x18 ft stall is 20.09 ft deep against the 8 ft a parallel one takes. A
+    #: caller that set the angle on the paint alone would draw angled ticks inside a bay sized
+    #: for parallel parking, which is the two-derivations-of-one-fact shape SKILLS 0a is a list
+    #: of. The depth itself stays the caller's number - angled_stall_depth_ft computes it - so
+    #: that a bay measured in the field can be declared as measured.
+    #:
+    #: What the angle then decides here is the PITCH along the kerb (a stall no longer occupies
+    #: its own length) and the SKEW between a divider's two ends (it is no longer a cross-section
+    #: of the lane). Both are asked of this section, never recomputed by a renderer.
+    parking_angle_deg: float | None = None
+    #: The stall's width across the car, which is what the pitch divides. Only read when
+    #: `parking_angle_deg` is set: a parallel stall's footprint along the kerb is its LENGTH.
+    parking_stall_width_ft: float = ANGLED_STALL_WIDTH_FT
+    #: The distance from the alignment to the kerb THIS section is on, and to the opposite one,
+    #: both at the leg's narrowest traced point (governing_half_widths_ft). Zero means "not
+    #: asked", which is every section whose travel lanes straddle the alignment.
+    #:
+    #: GIVING THEM PINS THE SECTION TO ITS OWN KERB and hands the travel way whatever is left,
+    #: which is the only way an asymmetric cross-section is drawable here. TwoWayBikeLane
+    #: documents the trick and used to own it; it is on the base class because it is not about
+    #: two-way riding at all. NJ 35 NB needs it for the ordinary reason: 60-degree angled parking
+    #: on BOTH kerbs spends 40.18 ft of a 69.55 ft street, so a bike lane and its buffer fit only
+    #: out of the travel lanes' surplus - and that surplus is all on one side of the alignment,
+    #: because only one kerb is getting a bike lane. Split down the middle the same section is
+    #: 4.07 ft too wide and reads as refused, which is what it wrongly reported.
+    #:
+    #: They are not interchangeable and the asymmetry is the point, so they are two fields.
+    near_half_ft: float = 0.0
+    far_half_ft: float = 0.0
     # Where this side's section BEGINS, as a distance from the alignment. Normally the travel
     # lane's own width, because the two travel lanes straddle the alignment symmetrically. A
     # two-way lane on one side does not leave them straddling it - see TwoWayBikeLane - so the
@@ -173,6 +213,21 @@ class BikeLane:
                 f"(AASHTO's minimum where no curb face eats into the lane; {AASHTO_MIN_BIKE_LANE_FT:.0f} ft "
                 f"is the width to design to). Draw no lane rather than one that fails the standard "
                 f"it is meant to meet.")
+        if self.near_half_ft and self.far_half_ft:
+            # THE FIT CHECK FOR A PINNED SECTION, and it has moved from the near kerb's room to
+            # the travel lanes, because pinning is what makes the near kerb's room moot: the
+            # section fits its own kerb by construction, so the only thing left that can fail is
+            # the traffic between them. Same figure and same sentence TwoWayBikeLane raises - see
+            # MIN_SHIFTED_TRAVEL_LANE_FT and the note on LANE_WIDTH_SLACK_FT there.
+            travel_way_ft = self.near_half_ft + self.far_half_ft - self.section_ft
+            if travel_way_ft / 2 < MIN_SHIFTED_TRAVEL_LANE_FT - LANE_WIDTH_SLACK_FT:
+                raise ValueError(
+                    f"This section spends {self.section_ft:.2f} ft of the "
+                    f"{self.near_half_ft + self.far_half_ft:.2f} ft this leg has between its "
+                    f"kerbs at its narrowest, leaving {travel_way_ft:.2f} ft for traffic - "
+                    f"{travel_way_ft / 2:.2f} ft per travel lane, under the "
+                    f"{MIN_SHIFTED_TRAVEL_LANE_FT:.0f} ft floor. Narrow the lane, narrow the "
+                    f"buffer, or take less kerb for parking.")
         if self.buffer_ft and self.buffer_ft < min_bike_lane_buffer_ft():
             raise ValueError(
                 f"A {self.buffer_ft:.2f} ft buffer cannot hold the two {_lane_line_ft():.2f} ft "
@@ -209,6 +264,63 @@ class BikeLane:
         """Everything this side needs, travel lane and stripes included."""
         return self.offsets_from_centerline_ft()["outer_ft"] + self.shy_ft
 
+    @property
+    def section_ft(self) -> float:
+        """What this side spends OUTBOARD of the travel lane - the width taken out of the road.
+
+        NOT `total_ft`, which is measured from the alignment and therefore already contains the
+        travel lane. This is what the travel lanes have to be fitted around, and it is summed
+        straight from the widths rather than read out of offsets_from_centerline_ft because that
+        dict is built FROM the travel edge, which is built from this.
+        """
+        line_ft = _lane_line_ft()
+        return ((self.buffer_ft if self.buffer_ft else line_ft) + self.width_ft
+                + (line_ft if self.has_outer_line else 0.0) + self.parking_ft + self.shy_ft)
+
+    def travel_edge_from_centerline_ft(self) -> float:
+        """Where this side's section starts, resolving the three ways that can be decided.
+
+        In precedence order: a `travel_edge_ft` stated outright, then the near kerb less the
+        section where both half-widths are known (the pinned case - see near_half_ft), then
+        TARGET_LANE_WIDTH_FT, which is every leg whose two travel lanes straddle the alignment.
+        ONE place, because the offsets, the divider and the checks all have to agree about it.
+        """
+        if self.travel_edge_ft is not None:
+            return self.travel_edge_ft
+        if self.near_half_ft:
+            return self.near_half_ft - self.section_ft
+        return TARGET_LANE_WIDTH_FT
+
+    def kerbside_inner_offset_ft(self, nominal_half_ft: float) -> float:
+        """The kerbside zone's inner edge, re-expressed on the NOMINAL half-width datum.
+
+        THE TWO DATUMS, SKILLS section 2, in one line: the section is measured from the alignment
+        against the TRACED kerb, and ctx.anchors wants the same boundary as an offset the nominal
+        half-width can be read against. So it is the nominal half less what this section spends
+        OUTBOARD of the travel lane - which is total_ft less the travel edge, taken from the
+        offsets rather than re-summed, because the ordering across the road differs per subclass
+        and the offsets are the only thing that knows it.
+
+        Identical to the `nominal_half - total_ft + TARGET_LANE_WIDTH_FT` this replaced on every
+        unpinned section, which is every section drawn before angled parking existed.
+        """
+        return nominal_half_ft - (self.total_ft - self.travel_edge_from_centerline_ft())
+
+    def divider_shift_ft(self) -> float:
+        """How far the travel-lane divider sits off the alignment, positive AWAY from this side.
+
+        Zero unless the section is pinned to its own kerb, which is the thing that moves the
+        travel way. Delegated to fit.travel_lane_divider_shift_ft, the one home for the figure:
+        the divider sits one lane width in from the near travel edge, and that single expression
+        covers both the street that holds two target-width lanes and the street that splits what
+        it has. Local import - fit.py reads this module.
+        """
+        if not self.near_half_ft:
+            return 0.0
+        from src.geometry.treatments.bikeways.fit import travel_lane_divider_shift_ft
+
+        return travel_lane_divider_shift_ft(self)
+
     def offsets_from_centerline_ft(self) -> dict[str, float]:
         """Where each boundary sits, as a distance from the centerline.
 
@@ -218,7 +330,7 @@ class BikeLane:
         width behind it stays whole.
         """
         line_ft = _lane_line_ft()
-        travel_edge = TARGET_LANE_WIDTH_FT if self.travel_edge_ft is None else self.travel_edge_ft
+        travel_edge = self.travel_edge_from_centerline_ft()
         # With a buffer the two stripes bounding it come out of the buffer's own width; without
         # one there is a single stripe and it comes out of nothing but itself.
         bike_inner = travel_edge + (self.buffer_ft if self.buffer_ft else line_ft)
@@ -226,12 +338,116 @@ class BikeLane:
         parking_inner = bike_outer + (line_ft if self.has_outer_line else 0.0)
         return {"travel_lane_edge_ft": travel_edge,
                 "inner_line_ft": travel_edge + line_ft / 2,
+                # None here and a real offset on KerbsideBikeLane: with the buffer against the
+                # travel lane its inner line IS inner_line_ft, so a second key would be a second
+                # name for one stripe. With the buffer out beside the parking it is a stripe of
+                # its own that nothing else names.
+                "buffer_inner_line_ft": None,
                 "buffer_outer_line_ft": bike_inner - line_ft / 2 if self.buffer_ft else None,
                 "bike_inner_ft": bike_inner,
                 "bike_outer_ft": bike_outer,
                 "outer_line_ft": bike_outer + line_ft / 2 if self.has_outer_line else None,
+                "parking_inner_ft": parking_inner,
                 "parking_outer_ft": parking_inner + self.parking_ft,
                 "outer_ft": parking_inner + self.parking_ft}
+
+    def buffer_band_from_centerline_ft(self) -> tuple[float, float]:
+        """The buffer's inner and outer offsets - the strip a flex post may stand in.
+
+        A HOOK, because the buffer is not bounded by the same two things on both orderings and a
+        caller cannot tell which pair to take. On this ordering nothing sits between the travel
+        lane and the bike lane, so the buffer is exactly that gap; on KerbsideBikeLane the
+        parking does, and the buffer lies between the parking and the lane.
+
+        AddBikeLaneBollards used to centre its row on (travel_lane_edge_ft + bike_inner_ft) / 2,
+        which is this pair open-coded, and on the swapped ordering that midpoint - 18.41 ft on
+        Grand Central Ave - falls inside the 11.82-19.82 ft parking band: a row of flex posts
+        down the middle of the parking stalls. That module's own docstring says a post's offset
+        is read from the section rather than re-derived; reading two keys out of the section and
+        doing the arithmetic at the call site IS re-deriving it, and it is the same defect that
+        once put 30 posts inside a bike lane.
+        """
+        offsets = self.offsets_from_centerline_ft()
+        return (offsets["travel_lane_edge_ft"], offsets["bike_inner_ft"])
+
+    def parking_pitch_ft(self) -> float:
+        """How much kerb ONE marked stall occupies - the figure a run of kerb divides by.
+
+        The stall's own length while the parking is parallel, and `width / sin(theta)` once it is
+        angled, which is a different number in the same role. Asked of the section by everything
+        that counts or lays out stalls, so a count in the summary panel cannot come from a
+        divisor the ticks were not drawn on.
+        """
+        if self.parking_angle_deg is None:
+            return PARKING_STALL_LENGTH_DEFAULT_FT
+        return _angled_stall_pitch_ft(self.parking_stall_width_ft, self.parking_angle_deg)
+
+    def parking_line_depth_ft(self) -> float:
+        """How deep off the kerb a DIVIDER is painted, which is not how deep this bay is.
+
+        `parking_ft` is the asphalt the parked cars take. The painted divider is the stall's own
+        side laid at the stall angle and reaches `parking_ft` less the stall's MOUTH - the
+        4.50 ft a driver turns through on a 9 ft stall at 60 degrees, which has to stay
+        unpainted because paint across it is paint across the way in. Derived from the DECLARED
+        bay depth rather than re-multiplied out of a stall length this class does not carry, so
+        the divider cannot end up sized for a bay that is not the one in the cross-section.
+        """
+        if self.parking_angle_deg is None:
+            return self.parking_ft
+        return max(self.parking_ft - self.parking_mouth_ft(), 0.5)
+
+    def parking_mouth_ft(self) -> float:
+        """The bare gap between the divider's inboard end and the rest of the section."""
+        if self.parking_angle_deg is None:
+            return 0.0
+        return _angled_stall_mouth_ft(self.parking_stall_width_ft, self.parking_angle_deg)
+
+    def parking_skew_ft(self, runs_outward: bool = True) -> float:
+        """How far along the leg a divider's KERB end sits from its travel-lane end, SIGNED.
+
+        Zero for parallel parking, where a divider is a cross-section of the lane and both ends
+        share a station. Otherwise `depth / tan(theta)`, signed by which way traffic runs: a
+        driver enters a front-in stall by turning across their own path, so the bay leans
+        DOWNSTREAM, and downstream is increasing station only on a leg whose traffic travels
+        outward. Getting that sign wrong draws a bay that can only be entered by reversing into
+        the travel lane, which is the one thing a marking must never invite.
+        """
+        if self.parking_angle_deg is None:
+            return 0.0
+        # THE LINE'S DEPTH, NOT THE BAY'S. The skew has to match the divider that is actually
+        # drawn - fed the bay depth it comes out 11.60 ft against a line spanning 9.00, so the
+        # lean and the length disagree and the stall stops being a rectangle.
+        skew = _angled_stall_skew_ft(self.parking_line_depth_ft(), self.parking_angle_deg)
+        return skew if runs_outward else -skew
+
+    def parking_band_from_centerline_ft(self, half_ft: float) -> tuple[float, float]:
+        """(inner, outer) offsets of this section's marked parking, from the ALIGNMENT.
+
+        A method rather than two more keys in offsets_from_centerline_ft because the two
+        orderings measure it from opposite ends. Here the stalls are the outermost thing in the
+        section, so they are read back from the kerb - `half_ft` less the shy strip - and that is
+        deliberately the arithmetic AddBikeLane used inline, moved rather than changed.
+        KerbsideBikeLane puts them inboard of the lane and measures them from the alignment
+        instead. One question, one answer per section, which is what stops a stall being drawn
+        against a stripe that is somewhere else (SKILLS 0a).
+        """
+        return (max(half_ft - self.shy_ft - self.parking_ft, 0.5),
+                max(half_ft - self.shy_ft, 0.5))
+
+    def parking_curb_offset_ft(self, half_ft: float) -> float:
+        """How far the stall ticks stop short of the kerb."""
+        return self.shy_ft
+
+    @property
+    def parking_is_outermost(self) -> bool:
+        """Whether the marked PARKING, rather than the bike lane, is what meets the kerb.
+
+        Decides two things that would otherwise be read off `parking_ft` being non-zero, which
+        is the wrong question the moment a second ordering exists: whether there is any kerbside
+        leftover left to hatch, and whose buffer that leftover belongs to. True here, False on
+        KerbsideBikeLane.
+        """
+        return True
 
     @property
     def hugs_kerb(self) -> bool:
@@ -281,11 +497,41 @@ class BikeLane:
         bike_inner = bike_outer + self.width_ft
         return {"kerb_hatch_ft": self.shy_ft,
                 "parking_outer_ft": self.shy_ft,
+                "parking_inner_ft": self.shy_ft + self.parking_ft,
                 "outer_line_ft": (self.shy_ft + self.parking_ft + line_ft / 2
                                    if self.has_outer_line else None),
                 "bike_outer_ft": bike_outer,
                 "bike_inner_ft": bike_inner,
+                # BOTH DIRECTIONS MUST CARRY THE SAME KEYS. AddBikeLane looks each stripe up in
+                # whichever dict the section's `hugs_kerb` selects, so a key present in one and
+                # absent from the other is a KeyError on exactly the sections that hug - which is
+                # how the two-way lane broke the moment this stripe was added to the other dict.
+                # None, not missing: this ordering's buffer is bounded by inner_line_ft.
+                "buffer_inner_line_ft": None,
                 "buffer_outer_line_ft": bike_inner + line_ft / 2 if self.buffer_ft else None}
+
+
+def _angled_stall_pitch_ft(stall_width_ft: float, angle_deg: float) -> float:
+    """The pitch, from its home in src/geometry/model/stripes.py. Local import for the reason
+    _lane_line_ft gives: this module is the leaf of the bikeways package."""
+    from src.geometry.model import angled_stall_pitch_ft
+
+    return angled_stall_pitch_ft(stall_width_ft, angle_deg)
+
+
+def _angled_stall_skew_ft(depth_ft: float, angle_deg: float) -> float:
+    """The skew, from its home in src/geometry/model/stripes.py - see _angled_stall_pitch_ft."""
+    from src.geometry.model import angled_stall_skew_ft
+
+    return angled_stall_skew_ft(depth_ft, angle_deg)
+
+
+def _angled_stall_mouth_ft(stall_width_ft: float, angle_deg: float) -> float:
+    """The stall mouth, from its home in src/geometry/model/stripes.py - see
+    _angled_stall_pitch_ft for why the import is local."""
+    from src.geometry.model import angled_stall_mouth_ft
+
+    return angled_stall_mouth_ft(stall_width_ft, angle_deg)
 
 
 def _lane_line_ft() -> float:
@@ -329,6 +575,122 @@ NJDOT_TWO_WAY_OBJECTION = (
     "STANDARDS.md 4."
 )
 
+
+
+@dataclass(frozen=True)
+class KerbsideBikeLane(BikeLane):
+    """A one-way bike lane AGAINST THE KERB, with the marked parking outboard of the travel
+    lane and inboard of the lane - the parking-protected ordering.
+
+    THE ORDERING IS THE WHOLE DIFFERENCE, and it is the opposite of BikeLane's. Across the road
+    on this side: the travel lane, its edge line, `parking_ft` of marked parking, `buffer_ft` of
+    painted buffer, `width_ft` of bike lane, then `shy_ft` of spare asphalt to the kerb. The
+    parked cars therefore stand BETWEEN the moving traffic and the rider, which is what makes
+    the lane protected; BikeLane's `parking_ft` puts them on the far side of the rider, against
+    the kerb, so the rider is the thing between the traffic and the parked cars. Both are real
+    designs and they are not variants of one - see BikeLane, whose own docstring calls its
+    arrangement the protected one and is wrong about which side of the rider the cars are on.
+
+    WHY THIS IS DRAWABLE AND THE README SAID IT WAS NOT. The recorded objection was that a
+    parking-protected lane "would mean shifting the travel lanes off the NJDOT alignment - a
+    real design, but not one this pipeline can draw, since the alignment is the datum every
+    offset, stop bar and crossing is measured from". `travel_edge_ft` is what dissolved it, for
+    TwoWayBikeLane first: the alignment does not move, the SECTION starts further out on this
+    side, and every offset is still measured from the same datum. Nothing here moves the
+    alignment either.
+
+    THE BUFFER IS A DOOR ZONE, not a shy line, and that is why it is between the parking and the
+    lane rather than against the travel lane. A driver's door opens into it; AddBikeLaneBollards
+    stands its posts in it, where they separate the rider from the parked cars rather than from
+    moving traffic - the correct side for THIS ordering, and the same rule as BikeLane's ("the
+    posts go on the side a rider needs protecting from") reading out differently because the
+    section is mirrored.
+    """
+
+    def offsets_from_centerline_ft(self) -> dict[str, float]:
+        """Where each boundary sits, as a distance from the alignment.
+
+        Four stripes, not three: travel/parking, parking/buffer, buffer/lane, and lane/kerb.
+        BikeLane needs only three because its buffer is against the travel lane, so the buffer's
+        inner line and the travel lane's edge line are one stripe.
+        """
+        line_ft = _lane_line_ft()
+        travel_edge = self.travel_edge_from_centerline_ft()
+        parking_inner = travel_edge + line_ft
+        parking_outer = parking_inner + self.parking_ft
+        # Without a buffer the lane takes a single stripe against the parking, exactly as
+        # BikeLane takes one against the travel lane where it has no buffer.
+        bike_inner = parking_outer + (self.buffer_ft if self.buffer_ft else line_ft)
+        bike_outer = bike_inner + self.width_ft
+        return {"travel_lane_edge_ft": travel_edge,
+                "inner_line_ft": travel_edge + line_ft / 2,
+                "parking_inner_ft": parking_inner,
+                "parking_outer_ft": parking_outer,
+                "buffer_inner_line_ft": parking_outer + line_ft / 2 if self.buffer_ft else None,
+                "buffer_outer_line_ft": bike_inner - line_ft / 2 if self.buffer_ft else None,
+                "bike_inner_ft": bike_inner,
+                "bike_outer_ft": bike_outer,
+                # ALWAYS painted, even hard against the kerb: `shy_ft` is hatched leftover and
+                # the stripe is what says the lane's width is a standard and the leftover is not
+                # part of it - see BikeLane.has_outer_line, which is the same argument.
+                "outer_line_ft": bike_outer + line_ft / 2,
+                # THE OUTER FACE OF THE OUTER STRIPE, not the lane's own edge - the kerbside
+                # hatching starts here, and starting it at `bike_outer` puts the whole of that
+                # stripe inside the zone it is supposed to bound. markings_collide reported
+                # exactly that, 100% of a 0.82 ft stroke over 127.7 sq ft of bike_buffer_fill.
+                # BikeLane reaches the same convention by a different route: its `parking_inner`
+                # already steps out past the stripe before the parking is added.
+                "outer_ft": bike_outer + line_ft}
+
+    def buffer_band_from_centerline_ft(self) -> tuple[float, float]:
+        """Between the PARKING and the lane - on this ordering that gap is the door zone."""
+        offsets = self.offsets_from_centerline_ft()
+        return (offsets["parking_outer_ft"], offsets["bike_inner_ft"])
+
+    def parking_band_from_centerline_ft(self, half_ft: float) -> tuple[float, float]:
+        """Inboard of the lane, and measured from the ALIGNMENT rather than back from the kerb.
+
+        BikeLane reads its stalls back from `half_ft` because they are the outermost part of its
+        section and the kerb is where they end. Here they are the INNERMOST part after the travel
+        lane, so the alignment is what fixes them and the kerb is free to wander - which it does
+        by 0.6 ft over Grand Central Ave's traced run. Reading these back from the kerb would
+        hand that wander to the stall ticks while the lane's own stripes stayed put.
+        """
+        bounds = self.offsets_from_centerline_ft()
+        return (bounds["parking_inner_ft"], bounds["parking_outer_ft"])
+
+    def parking_curb_offset_ft(self, half_ft: float) -> float:
+        """Everything outboard of the stalls: the buffer, the lane, and the shy strip."""
+        return max(half_ft - self.offsets_from_centerline_ft()["parking_outer_ft"], 0.0)
+
+    @property
+    def parking_is_outermost(self) -> bool:
+        """No: the bike lane is. So the spare asphalt against the kerb is the BIKEWAY's own
+        separation from it and hatches in the bike buffer's channel, and - unlike BikeLane with
+        parking, where the stalls run to the kerb and there is nothing left over - there is a
+        leftover here whenever the section does not exactly fill the leg."""
+        return False
+
+    def offsets_from_kerb_ft(self) -> dict[str, float]:
+        """The same section read from the kerb inward.
+
+        Unused while `hugs_kerb` is False - AddBikeLane asks for it unconditionally and reads it
+        only in the hugging branches - but written correctly rather than inherited, because an
+        inherited version here describes BikeLane's ordering and would be wrong the day something
+        does read it. A method that is wrong and unread is worse than one that is absent.
+        """
+        line_ft = _lane_line_ft()
+        bike_outer = self.shy_ft + line_ft
+        bike_inner = bike_outer + self.width_ft
+        parking_outer = bike_inner + (self.buffer_ft if self.buffer_ft else line_ft)
+        return {"kerb_hatch_ft": self.shy_ft,
+                "bike_outer_ft": bike_outer,
+                "bike_inner_ft": bike_inner,
+                "outer_line_ft": self.shy_ft + line_ft / 2,
+                "buffer_outer_line_ft": bike_inner + line_ft / 2 if self.buffer_ft else None,
+                "buffer_inner_line_ft": parking_outer - line_ft / 2 if self.buffer_ft else None,
+                "parking_outer_ft": parking_outer,
+                "parking_inner_ft": parking_outer + self.parking_ft}
 
 @dataclass(frozen=True)
 class TwoWayBikeLane(BikeLane):
@@ -381,13 +743,13 @@ class TwoWayBikeLane(BikeLane):
         # station of 169 - short of the floor by four THOUSANDTHS of a foot - and that refusal
         # denied a protected bikeway over the whole 335 ft approach. Refusing at that margin is
         # false precision about a measurement, not fidelity to NACTO.
-        if travel_way_ft / 2 < MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT - LANE_WIDTH_SLACK_FT:
+        if travel_way_ft / 2 < MIN_SHIFTED_TRAVEL_LANE_FT - LANE_WIDTH_SLACK_FT:
             raise ValueError(
                 f"A {self.width_ft:.1f} ft lane and a {self.buffer_ft:.1f} ft buffer spend "
                 f"{self.section_ft:.2f} ft of the {self.near_half_ft + self.far_half_ft:.2f} ft "
                 f"this leg has between its kerbs at its narrowest, leaving {travel_way_ft:.2f} ft "
                 f"for traffic - {travel_way_ft / 2:.2f} ft per travel lane, under the "
-                f"{MIN_TRAVEL_LANE_BESIDE_TWO_WAY_FT:.0f} ft floor. Narrow the lane, drop the "
+                f"{MIN_SHIFTED_TRAVEL_LANE_FT:.0f} ft floor. Narrow the lane, drop the "
                 f"buffer, or put a conventional pair of one-way lanes on this leg instead.")
 
     @property
@@ -408,6 +770,19 @@ class TwoWayBikeLane(BikeLane):
         12 ft, at any frame scale.
         """
         return True
+
+    def kerbside_inner_offset_ft(self, nominal_half_ft: float) -> float:
+        """The arithmetic this class has always used, kept verbatim rather than inherited.
+
+        DELIBERATELY NOT the general form BikeLane now gives, and the difference is a real 0.82 ft
+        - one lane line - because `section_ft` here excludes the stripe on the travel-lane side
+        while the general form counts everything outboard of the travel edge. Which of the two is
+        right for a two-way lane is a live question and NOT settled here: every corridor sheet
+        this project has published was drawn on this expression, so changing it is a geometry
+        change to six legs and belongs in its own change with its own goldens, not as a
+        side-effect of adding angled parking to a different site.
+        """
+        return nominal_half_ft - self.total_ft + TARGET_LANE_WIDTH_FT
 
     @property
     def section_ft(self) -> float:

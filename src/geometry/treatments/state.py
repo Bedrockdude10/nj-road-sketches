@@ -58,6 +58,18 @@ class DesignState:
     # OSM's overtaking=no. What a PROPOSAL paints is a SetCenterlineStyle; ask
     # centerline_style() for the resolved answer or a proposal's change is invisible.
     existing_centerline_styles: dict = field(default_factory=dict)
+    # leg name -> the compass direction ALL traffic on that leg runs, where the carriageway is
+    # one-way; absent/None means two-way, which is the ordinary case. The same standing as the
+    # styles above: an OBSERVED FACT seeded in from_model from config.yaml, not a treatment's
+    # parameter, so every scenario of a junction gets the same answer - including the one the
+    # pipeline labels "Existing Conditions" and builds without asking a site anything.
+    #
+    # HERE AND NOT ON Leg, though it is just as much a fact about the street, because a Leg is
+    # REBUILT five times during load (fitting.py re-centres it on the traced kerbs, and each
+    # rebuild carries its fields across by hand) - a sixth field would be dropped by whichever
+    # of those the next change forgot, silently and only at a site whose kerbs are traced.
+    # Read through traffic_runs_outward; nothing should dig it out of config a second time.
+    traffic_heads_toward: dict = field(default_factory=dict)
     # (leg name, "left"|"right") -> [KerbOpening]. Where OSM says the kerb is DROPPED for a
     # vehicle to cross - a driveway or yard entrance. Seeded in from_model from the traced kerbs'
     # kerb=lowered / kerb=flush tags; read by src/geometry/paint/ to break the kerbside
@@ -71,6 +83,10 @@ class DesignState:
     #: the two above. R.S. 39:4-138(e) applies at every intersection, not only the one the
     #: drawing is about, and a leg drawn 374 ft crosses several - see src/geometry/cross_streets.
     cross_streets: dict = field(default_factory=dict)
+    #: {leg name: station in feet where the leg leaves this municipality}, absent where it does
+    #: not. Observed like the three above, and the one thing on this state that bounds what may
+    #: be BUILT rather than what is there - see src/geometry/intersection/municipality.py.
+    municipal_limits_ft: dict = field(default_factory=dict)
     # Every Treatment applied to this design, in order (see apply) - the design as a list of
     # decisions. Every renderer reads its parameters from here, through treatment_for /
     # treatments_of / every_treatment, and provenance is written from it.
@@ -145,9 +161,14 @@ class DesignState:
                 centerline_styles[name] = DEFAULT_CENTERLINE_STYLE
         return cls(legs=deepcopy(model.legs), corner_fillets=deepcopy(model.corner_fillets),
                    existing_centerline_styles=centerline_styles,
+                   traffic_heads_toward={name: leg_cfg.get("traffic_heads_toward")
+                                          for name, leg_cfg in model.config["legs"].items()},
                    kerb_openings=kerb_openings_from_model(model),
                    parking_restrictions=_parking_restrictions_from_model(model),
-                   cross_streets=cross_streets_from_model(model))
+                   cross_streets=cross_streets_from_model(model),
+                   # getattr, like scene.py reads surveyed_leg_lengths: the synthetic models
+                   # in tests are hand-built and carry only the fields their case is about.
+                   municipal_limits_ft=dict(getattr(model, "municipal_limits_ft", None) or {}))
 
     def clone(self) -> "DesignState":
         return deepcopy(self)
@@ -180,24 +201,31 @@ class DesignState:
         lanes are different widths.
         """
         # Same reason as centerline_style above - bikeways is layered above state.
-        from src.geometry.treatments.bikeways import AddTwoWayBikeLane, divider_shift_toward_ft
+        from src.geometry.treatments.bikeways import divider_shift_toward_ft
 
-        for treatment in self.treatments_of(AddTwoWayBikeLane):
-            if treatment.target.leg != leg_name:
-                continue
-            # CANONICAL FORM: a NON-NEGATIVE distance paired with the side it is actually on.
-            # The sign is resolved here, once, rather than travelling alongside a side that can
-            # contradict it - a consumer taking abs() of a signed shift draws the paint on the
-            # wrong side of the alignment.
-            #
-            # The divider is NOT always on the far side. It is wherever a target-width lane from
-            # the section's inner edge lands, and on a wide leg (broad_st_west) that is still
-            # short of the alignment, i.e. the shift is toward the lane's own side.
-            toward_left_ft = divider_shift_toward_ft(self, leg_name, Side.LEFT)
-            if toward_left_ft >= 0:
-                return toward_left_ft, str(Side.LEFT)
-            return -toward_left_ft, str(Side.RIGHT)
-        return None
+        # ASKED OF divider_shift_toward_ft AND OF NOTHING ELSE, which is the whole point: this
+        # used to loop over AddTwoWayBikeLane by name first and consult that function only for
+        # the legs it found, so a section pinned by a ONE-WAY lane shifted the travel way, the
+        # checks measured the shift (they ask the function), and the PAINT stayed on the
+        # alignment. NJ 35 NB is that case - a 5 ft lane behind a 20 ft angled bay, pinned - and
+        # it came out with a lane line 3.70 ft off the middle of its own travel way, which is
+        # two northbound lanes 3.70 ft different in width. The lookup was the second derivation
+        # of one fact; see .claude/SKILLS.md section 2.
+        #
+        # CANONICAL FORM: a NON-NEGATIVE distance paired with the side it is actually on. The
+        # sign is resolved here, once, rather than travelling alongside a side that can
+        # contradict it - a consumer taking abs() of a signed shift draws the paint on the wrong
+        # side of the alignment.
+        #
+        # The divider is NOT always on the far side. It is wherever a target-width lane from the
+        # section's inner edge lands, and on a wide leg (broad_st_west) that is still short of
+        # the alignment, i.e. the shift is toward the lane's own side.
+        toward_left_ft = divider_shift_toward_ft(self, leg_name, Side.LEFT)
+        if not toward_left_ft:
+            return None    # nothing moved it - the alignment IS the divider
+        if toward_left_ft > 0:
+            return toward_left_ft, str(Side.LEFT)
+        return -toward_left_ft, str(Side.RIGHT)
 
     def treatment_for(self, kind, target) -> Treatment | None:
         """The treatment of `kind` applied at `target`, or None if there is none.

@@ -41,6 +41,22 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
     from src.geometry.intersection.junction import IntersectionModel
 
 
+def municipality_of(model: "IntersectionModel") -> str | None:
+    """Which town this junction is in, as its config states it, or None if it does not.
+
+    THE SECOND HALF OF A ROUTE'S KEY. A street name alone does not identify a street: nearly
+    every New Jersey borough has a Broad Street, so a decision matched on name alone would draw
+    one town's bikeway down another town's road the day a second town is modelled - and it would
+    draw it correctly-shaped and confidently labelled, which is the expensive kind of wrong.
+
+    None means a PARTIAL MODEL, not a junction in no town: src/site_schema.py requires
+    `intersection.municipality`, so every real config has one and only the deliberately partial
+    test doubles do not. Those keep matching, because refusing them would say "this street is in
+    no town" about an object that simply is not a site.
+    """
+    return (model.config.get("intersection") or {}).get("municipality")
+
+
 def legs_on_road(model: "IntersectionModel", road: str) -> list[str]:
     """One junction's approaches that lie on a named route, in a stable order.
 
@@ -56,6 +72,31 @@ def legs_on_road(model: "IntersectionModel", road: str) -> list[str]:
     return sorted(name for name, cfg in legs_cfg.items()
                   if name in model.legs
                   and _street_name(cfg.get("street_name", "")) == road)
+
+
+def same_municipality(one: str, other: str) -> bool:
+    """Whether two configs mean the same town. Case and surrounding space only.
+
+    NOT _street_name, which is for STREETS: it strips the type off the end of a name, so
+    "Hopewell Township" and "Hopewell" would compare equal to it and a township's junction would
+    take the borough's route decisions. Two towns whose names differ by punctuation are a real
+    possibility and are deliberately NOT reconciled here - a name is a join key, and the honest
+    fix for a mismatch is to spell it the same way in both places.
+    """
+    return one.strip().casefold() == other.strip().casefold()
+
+
+def _legs_on_route(model: "IntersectionModel", road: str, municipality: str) -> list[str]:
+    """`legs_on_road`, refusing a junction in a DIFFERENT town.
+
+    Both route decisions share it, and both mean the same thing by an empty list: this route does
+    not reach this junction, so leave its cross-sections alone. A junction whose config names no
+    town (a partial test double) is not refused - see municipality_of.
+    """
+    here = municipality_of(model)
+    if here is not None and not same_municipality(here, municipality):
+        return []
+    return legs_on_road(model, road)
 
 
 @dataclass(frozen=True)
@@ -85,13 +126,15 @@ class CorridorFacility:
     is in its own frame: the same physical kerb is "left" on one approach and "right" on the next.
     """
     road: str
+    #: The town this route runs through - the other half of the key, see municipality_of.
+    municipality: str
     side: str
     sections: tuple[Section, ...]
     bollard_spacing_ft: float = BIKE_LANE_BOLLARD_SPACING_FT
 
     def legs_on(self, model: "IntersectionModel") -> list[str]:
         """This junction's approaches that lie on this route, in a stable order."""
-        return legs_on_road(model, self.road)
+        return _legs_on_route(model, self.road, self.municipality)
 
     def apply_to(self, state: DesignState, model: "IntersectionModel", quiet: bool = False) -> DesignState:
         """Place the facility on every approach of this junction that is on the route.
@@ -426,6 +469,7 @@ class CorridorFacility:
 #: every rung here keeps the full buffer, which is what makes that safe.
 BROAD_ST_TWO_WAY_BIKEWAY = CorridorFacility(
     road="Broad Street",
+    municipality="Hopewell Borough",
     side=CORRIDOR_SIDE,
     # Every rung keeps the full buffer; only the width steps down. See above.
     sections=(Section(MIN_TWO_WAY_BIKE_LANE_FT, TWO_WAY_BIKE_LANE_BUFFER_FT),
@@ -456,10 +500,12 @@ class CorridorCalming:
     decides the CROSS-SECTION pass and nothing else.
     """
     road: str
+    #: The town this route runs through - the other half of the key, see municipality_of.
+    municipality: str
 
     def legs_on(self, model: "IntersectionModel") -> list[str]:
         """This junction's approaches that lie on this route, in a stable order."""
-        return legs_on_road(model, self.road)
+        return _legs_on_route(model, self.road, self.municipality)
 
     def apply_to(self, state: DesignState, model: "IntersectionModel" = None,
                  quiet: bool = False) -> DesignState:
@@ -507,7 +553,8 @@ class CorridorCalming:
 #: stem: that site's scenarios paint EVERY kerb, E Broad's included, so the stem is already calmed
 #: by that pass. Applying this on top would put a second LaneNarrowing and MarkedParking on the
 #: same kerb - DesignState.apply has no duplicate guard.
-PRINCETON_AVE_CALMING = CorridorCalming(road="Princeton Avenue")
+PRINCETON_AVE_CALMING = CorridorCalming(road="Princeton Avenue",
+                                        municipality="Hopewell Borough")
 
 
 #: EVERY ROUTE-LEVEL DECISION THIS PROJECT HAS MADE, so "what is proposed along this street" is a
@@ -519,16 +566,25 @@ PRINCETON_AVE_CALMING = CorridorCalming(road="Princeton Avenue")
 ROUTE_DECISIONS: tuple = (BROAD_ST_TWO_WAY_BIKEWAY, PRINCETON_AVE_CALMING)
 
 
-def route_decision_for(road: str):
-    """What this project proposes along a named street, or None if it has decided nothing.
+def route_decision_for(road: str, municipality: str):
+    """What this project proposes along a named street IN A NAMED TOWN, or None if nothing.
 
     Matched through the same _street_name normalisation legs_on_road uses, so a corridor named
     off its legs ("East Broad Street", "W Broad St") finds the one Broad St decision. A street
     with no row here is not an error - it is a street this project has not yet decided about, and
     the caller is expected to say so rather than to borrow another street's proposal.
+
+    THE TOWN IS PART OF THE KEY AND IS REQUIRED, because the failure it prevents is silent and
+    plausible: Broad Street is the commonest street name in New Jersey, so the day a second
+    municipality is modelled a name-only lookup hands its Broad Street this borough's two-way
+    bikeway - correct-looking geometry answering a question about a different street, which is
+    the one thing scripts/corridor_render.py's own docstring says a drawing may not do. A caller
+    that genuinely does not know its town has a partial model, not a wildcard; it should say so
+    rather than be given a decision.
     """
     want = _street_name(road)
     for decision in ROUTE_DECISIONS:
-        if _street_name(decision.road) == want:
+        if _street_name(decision.road) == want and same_municipality(decision.municipality,
+                                                                      municipality):
             return decision
     return None

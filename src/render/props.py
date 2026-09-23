@@ -692,9 +692,22 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState, center_f
         if same_pole:
             ped_pos, ped_heading = pole_pos, pole_heading
         else:
+            # STEPPED CLEAR OF THE ROADWAY LIKE THE POLE ABOVE, and it was not. The vehicle pole
+            # goes through _step_outward_clear; its separate pedestrian post was placed by
+            # sliding PED_HEAD_POLE_OFFSET_FT ALONG the kerb from it and drawn wherever that
+            # landed. On a tight corner that is inside the carriageway, and the tangent is no
+            # help - sliding further along a kerb that curves into the junction goes deeper in,
+            # not out. So the offset is applied first and the OUTWARD bisector is what clears it.
+            # Fatal at NJ 35 & Reese, where furniture_in_roadway refused the whole export.
             tangent = np.array([-outward[1], outward[0]])
-            ped_pos = (pole_pos[0] + tangent[0] * PED_HEAD_POLE_OFFSET_FT,
-                       pole_pos[1] + tangent[1] * PED_HEAD_POLE_OFFSET_FT)
+            ped_base = np.array(pole_pos) + tangent * PED_HEAD_POLE_OFFSET_FT
+            placed_ped = _step_outward_clear(ped_base, outward, 0.0, pavement)
+            if placed_ped is None:
+                print(f"  NOTE: the separate pedestrian-signal post for corner {leg_a}/{leg_b} "
+                      f"can't be placed clear of the modelled roadway. Not drawn - the vehicle "
+                      f"signal above stands, so the corner is not left bare.")
+                continue
+            ped_pos = tuple(placed_ped)
             ped_heading = pole_heading
         props.append({
             "type": "pedestrian_signal_head", "position_ft": ped_pos, "heading_deg": ped_heading,
@@ -780,6 +793,25 @@ def _extra_props_from_config(model: IntersectionModel, state: DesignState, offse
                            source="user-specified in site config.yaml (props.extra): "
                                   f"{entry.get('note') or 'no note given'}")
               for entry in model.config.get("props", {}).get("extra", []))
+    return [p for p in placed if p is not None]
+
+
+def _bikeway_sign_props(state: DesignState, offsets_ft: dict, pavement=None) -> list[dict]:
+    """The MUTCD signing a two-way bikeway's ends and its crossroads need.
+
+    WHICH sign and WHY is decided in src/geometry/treatments/bikeways/terminus.py, beside the
+    standards rows for it; this places the entries it returns with the one placer every other
+    sign in this file goes through. A plaque that names no side gets the approaching driver's
+    right - the same kerb the STOP it hangs under stands on, read from one constant so the two
+    cannot drift apart.
+    """
+    from src.geometry.treatments.bikeways.terminus import bikeway_sign_entries
+
+    placed = (_extra_prop(state, {"side": APPROACHING_DRIVER_RIGHT, **entry}, offsets_ft,
+                           pavement=pavement,
+                           source="required signing for a two-way bikeway, placed by the "
+                                  f"terminus treatment (not site config): {entry['note']}")
+              for entry in bikeway_sign_entries(state))
     return [p for p in placed if p is not None]
 
 
@@ -996,6 +1028,7 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, 
         + _no_turn_on_red_props(model, state, offsets_ft, pavement)
         + _extra_props_from_config(model, state, offsets_ft, pavement)
         + _extra_props_from_state(state, offsets_ft, pavement)
+        + _bikeway_sign_props(state, offsets_ft, pavement)
         + _bollard_props(state)
         + _parking_buffer_bollard_props(state)
     )

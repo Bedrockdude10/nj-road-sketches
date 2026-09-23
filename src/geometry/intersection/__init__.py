@@ -21,6 +21,9 @@ from src.geometry.intersection.junction import (DRAWN_WIDTH_FT, DRIVEWAY_DRAWN_W
                                                 PavedSurface,
                                                 ROOT_DIR,
                                                 RoadSpan,
+                                                CYCLEWAY_IS_A_MARKED_LANE,
+                                                cycleway_by_side,
+                                                cycleway_width_by_side,
                                                 parking_is_restricted,
                                                 parking_restriction_by_side)
 from src.geometry.intersection.kerb_sources import (KERB_ALONG_LEG_TOLERANCE_FT,
@@ -55,6 +58,7 @@ from src.geometry.intersection.load import (load_intersection_model)
 __all__ = [
                                                 "CENTRE_SAMPLE_FT",
                                                 "CENTRE_SMOOTH_FT",
+                                                "CYCLEWAY_IS_A_MARKED_LANE",
                                                 "DRAWN_WIDTH_FT",
                                                 "DRIVEWAY_CONTEXT_RADIUS_M",
                                                 "DRIVEWAY_DRAWN_WIDTH_FT",
@@ -91,6 +95,8 @@ __all__ = [
                                                 "PavedKind",
                                                 "PavedSurface",
                                                 "RoadSpan",
+                                                "cycleway_by_side",
+                                                "cycleway_width_by_side",
                                                 "drawn_kerb_radius_ft",
                                                 "kerb_lines_with_tags_ft",
                                                 "load_intersection_model",

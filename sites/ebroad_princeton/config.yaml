@@ -19,6 +19,9 @@ data_sources:
 
 intersection:
   name: "E Broad St (CR 518) & Princeton Ave (CR 569), Hopewell Borough, NJ 08525"
+  # The town this junction is in, and the key a corridor decision is looked up by
+  # (src/geometry/treatments/corridor.py) - street names repeat between towns.
+  municipality: "Hopewell Borough"
   center_wgs84: [-74.7583397, 40.3902329]
   street1: "East Broad Street"
   street2: "Princeton Avenue"

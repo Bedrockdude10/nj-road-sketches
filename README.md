@@ -38,7 +38,7 @@ It writes the same files the phase scripts do, runs sites in parallel (`--jobs`)
                          OSM cache: 1 layer(s), oldest 3 days old (--refresh-osm to re-pull)
 ```
 
-`--refresh-osm` re-pulls the whole borough in **one** request before the worker pool starts, rather than 20-24 fanned out across four workers against shared volunteer infrastructure. It is ignored under `HOPEWELL_OFFLINE`, so it can never make the test suite reach the network.
+`--refresh-osm` re-pulls the whole borough in **one** request before the worker pool starts, rather than 20-24 fanned out across four workers against shared volunteer infrastructure. It is ignored under `ROAD_SKETCHES_OFFLINE`, so it can never make the test suite reach the network.
 
 Two more scripts read a whole corridor rather than one junction: `scripts/corridor_report.py` answers the corridor questions with the coverage of each answer beside it, and `scripts/corridor_render.py` draws a straightened strip plan of a whole street on stacked panels - of that street's OWN route decision, looked up by name, so Broad St gets its bikeway and Princeton Ave gets its calming.
 
@@ -55,7 +55,7 @@ The test tooling (`ruff`, `pytest-regressions`, `hypothesis`) is in `requirement
 Facts worth knowing before a failure surprises you:
 
 - **Order is shuffled every run** (pytest-randomly), which is how you find out whether the session-scoped `site_models` fixture is as read-only as it claims. The header prints `Using --randomly-seed=N` and `./scripts/test.sh --randomly-seed=N` replays it. (`pytest.ini` sets `-q`, which hides that header — CI runs without it for this reason.)
-- **No network.** The suite runs against a committed snapshot of the OSM responses in `tests/fixtures/osm_cache/`, and `HOPEWELL_OFFLINE=1` makes any un-snapshotted fetch fail loudly. That snapshot is **separate from the build cache and does not update itself**: after editing OSM, `cp output/.cache/borough_*.json tests/fixtures/osm_cache/` as well as `--refresh-osm`.
+- **No network.** The suite runs against a committed snapshot of the OSM responses in `tests/fixtures/osm_cache/`, and `ROAD_SKETCHES_OFFLINE=1` makes any un-snapshotted fetch fail loudly. That snapshot is **separate from the build cache and does not update itself**: after editing OSM, `cp output/.cache/borough_*.json tests/fixtures/osm_cache/` as well as `--refresh-osm`.
 - **CI has no `data/`**, so every test that builds a real junction skips there — *including the golden geometry comparison*. A green tick means the code is sound, not that the renders are. The goldens are a local guard.
 - **`tests/test_lint.py`** runs `ruff` (per `ruff.toml`) over every `.py` file, reporting undefined names separately because they are a guaranteed crash, and `import-linter` (`.importlinter`) over the import *graph* for three rules no single file can show you: `scripts/blender/*` must not import this project or its venv; reading a `config.yaml` must not drag in shapely; and geometry must not import the output stages. Every `ignore` and every contract carries the argument for it.
 - **`tests/test_geometry_regression.py`** is a golden-file test over every site's scenarios. **A failure is not automatically a bug** — read the diff, confirm every moved number is one you meant to move, then `./scripts/test.sh tests/test_geometry_regression.py --force-regen` and commit the regenerated goldens *in the same commit as the change that moved them*.
@@ -98,128 +98,17 @@ Four things here used to be conventions spread across modules, and each generate
 
 All violations are collected and reported together, each carrying coordinates so the plan view can ring them in red. A violation at a *surveyed* OSM position (a fire hydrant inside our modelled roadway) is reported as a source conflict rather than a failure: one of the two sources is wrong, but no edit to this repo fixes it.
 
-## Repo structure
-
-Every module's own docstring says what it is for and why it is shaped that way. This tree is the index.
-
-```
-sites/
-  README.md                Config schema every site's config.yaml must follow
-  <site>/config.yaml       Per-leg widths/bearings, corner radius, crosswalks, signals, extra props
-  <site>/scenarios.py      This site's baseline + proposal builders
-src/                       General-purpose library - NO data specific to any one intersection
-  site.py                  Site discovery/loading (config.yaml + dynamic import of scenarios.py)
-  site_schema.py           What a config.yaml must contain, as pydantic models - sites/README.md is its prose
-  config.py                Generic YAML loader (no knowledge of sites)
-  checks.py                Scene invariants, checked on both the 2D and 3D paths
-  metrics.py               What a design ACHIEVES, measured off the geometry it drew
-  provenance.py            How well-sourced a number is, and which source wins when two disagree
-  geometry/                Pure geometry, no I/O
-    intersection/          Building an IntersectionModel from config + OSM + NJDOT
-      load.py              load_intersection_model() - THE entry point every phase script uses
-      junction.py          What a junction IS once built: the model every phase reads
-      fitting.py           Fitting the legs to the traced kerbs - the heaviest thing here
-      kerb_sources.py      Traced kerb out of OSM and into state-plane feet
-      osm_roads.py         Tying our legs to NJDOT SRI centrelines and OSM ways
-      paved.py             Driveways, parking aisles and lots
-    model/                 The measurement primitives
-      crs.py               Projections, and the operations only valid in one
-      leg_frame.py         (station along the centreline, lateral offset from it)
-      corners.py           Corner fillets and the pavement polygon they close
-      traced_kerbs.py      A surveyor's traced kerb, as geometry to measure against
-      stripes.py           The geometry of paint itself: strips, tapers, stall lines, post rows, hatching
-      context.py           Measurements about the surroundings rather than the carriageway
-    treatments/            What a proposal DECIDES - one module per family
-      state.py             DesignState: the thing every treatment transforms
-      base.py              The Treatment ABC, shared value objects, shared constants
-      corners.py           Corner radius, curb extensions, aprons, corner hatching
-      bikeways/            Bike-lane cross-sections, the treatments that place them, their paint
-        sections.py        What a bikeway IS in cross-section, and the figures that size one
-        fit.py             Whether a section fits this kerb, and what it leaves for the rest
-        place.py           The treatments that place a bikeway, and all the paint one puts down
-        divider.py         Where the travel-lane divider sits once a two-way lane has a kerbside
-        bollards.py        The flex posts that make a painted lane a protected one
-        symbols.py         The bike symbol and the contraflow dash: how a lane says what it is
-        through_junction.py  Carrying a lane across the junction: the crossbike, and the gap
-      crossings.py         Refuge islands, raised crossings, crosswalk markings, crosswalk shifts
-      parking.py           Marked stalls, their buffer, and the borough's parking tags
-      lanes.py             Lane narrowing and the flex posts that hold it
-      corridor.py          A route decision declared once and applied at every junction on it:
-                           a new cross-section where it fits, or calming where none does
-      extras.py            Scenario-specific props, and the sidewalk band
-    targets.py             What a treatment is applied TO: a leg, one kerb of a leg, a corner
-    markings.py            Every marking kind and every renderer channel, declared once
-    paint/                 Every piece of curbside paint a DesignState calls for, built once
-      pieces.py            What a painted piece IS: one marking, its kind, how wide it is painted
-      anchors.py           Where on a leg-side a treatment may paint, and what is too small to draw
-      openings.py          Where the kerb opens for a vehicle, and what a marking does across it
-      context.py           The machinery every treatment paints through, and the one call that runs it
-    kerbs.py               Whether a kerb is raised, and where it is dropped for a vehicle
-    daylighting.py         Where a car may legally park near these junctions; the rest is marked clear
-    cross_streets.py       Where a leg crosses ANOTHER street, and what that costs the kerb
-    context_roads.py       The streets around the junction, built from the kerb actually traced
-    surveyed.py            Every crossing the surveyor traced inside the frame, drawn as traced
-    coverage.py            Does the drawing contain every surveyed feature inside its own frame?
-    network/               A STREET as one object, with continuous stationing across junctions
-      road.py              One street through ONE junction: two through legs joined head-to-head
-      kerb.py              Where the kerb is TRACED along a road, and where it is a corner instead
-      corridor.py          A chain of roads, bridged along the NJDOT alignment they were cut from
-      facts.py             What is actually there - driveways, crossings, parking - stationed once
-    corridor_paint.py      The facility painted along a ROAD, not along a leg
-  sources/                 External data - real-world inputs, nothing rendering-specific
-    data_loader.py         NJDOT network + parcels, Overpass retry, intersection geocoding
-    osm_context.py         The cached borough snapshot every OSM layer is a view over
-    assessor.py            MOD-IV tax records joined to OSM footprints (building heights)
-    schemas.py             What this project requires of each external layer, as pandera schemas
-  render/                  Everything that turns a DesignState into a picture
-    scene.py               SceneGeometry: every marking position, resolved ONCE and shared
-    frame.py               The one piece of ground both views are pointed at
-    plan_view.py           matplotlib plan-view rendering (Phase 2/3)
-    crosswalks.py          Matches OSM crossings to legs; resolves crosswalk/stop-bar/centreline paint
-    props.py               Street-furniture placement: WHERE + WHY, not drawing
-    labels.py              Where a label goes, and where prose goes instead, so no panel covers its own design
-    export.py              Orchestrator: DesignState + theme -> local-meters JSON for Blender
-    coords.py              WGS84 / state-plane / local-meter conversions
-    assets.py              Poly Haven texture/model fetch + disk cache
-    theme.py               Which texture/model slugs this project uses
-    mesh_utils.py          trimesh building-mesh decimation
-scripts/
-  phase1_audit.py          Resolve + audit the road network for a site (or a new one via --street1/2/--anchor)
-  phase2_geometry.py       Build + plot curb-line/corner geometry
-  phase3_treatments.py     Apply a scenario, plot before/after
-  phase4_export_geometry.py  Export-only (no Blender) - useful for debugging the JSON
-  phase4_render_3d.py      Fetch theme + export + shell out to Blender
-  build_all.py             Every site, every scenario, in parallel
-  verify.py                The whole loop in one command: export, diff, suite, reported NEW / KNOWN / FIXED
-  jobs.py                  How many jobs this machine runs at once - in one place, because it had three
-  export_all_scenarios.py  Every scenario through export_scenario, into a directory
-  diff_exports.py          Diff two such directories key by key - says WHAT changed
-  measure_drawn.py         What was actually DRAWN, stationed against each leg's centreline;
-                           --all adds the section, limiter, gap, lane-width and continuity reports
-  whatis.py                What is this symbol? Signature, docstring line, and how callers actually use it
-  corridor_report.py       The corridor questions, with the coverage of every answer beside them
-  corridor_render.py       A straightened strip plan of one corridor, on stacked panels,
-                           drawing whichever route decision that street carries
-  convert_road_network.py  Build + verify a spatially-indexed copy of a roadway network file
-  make_data_fixture.py     Clip data/ down to the features the sites read, as a committed test fixture
-  check_prose_only.py      Prove a commit changed only comments and docstrings
-  test.sh                  Run the suite under .venv/bin/python, activated or not
-  blender/                 Runs INSIDE Blender's own Python (no network, no venv)
-    blender_scene.py       Entry point + scene assembly; imports the four siblings below
-    blender_materials.py   Flat-color and PBR-textured materials
-    blender_geometry.py    Generic mesh helpers: extrude a ring, build from verts/faces, stripe rects
-    blender_crosswalks.py  The painted crosswalk styles + centrelines and stop bars
-    blender_props.py       Street furniture DRAWING, dispatched by add_prop()
-```
-
 ## Adding a new site (intersection)
 
 Everything specific to one intersection lives under `sites/<name>/`; `src/` has no hardcoded site data. To add one:
 
 1. `python scripts/phase1_audit.py --street1 "Main St" --street2 "Oak Ave" --anchor "Main St, Sometown, NJ"` — resolves the intersection point via OSM and prints what the road network records there.
-2. Create `sites/<name>/config.yaml` (copy `sites/broad_st_greenwood/config.yaml`) — `center_wgs84` from step 1, `data_sources`, and one `legs` entry per approach with a `bearing_deg` (compass, 0=N/90=E/clockwise, from the intersection outward). That bearing is the **only** thing that has to be geometrically accurate for `src/geometry/intersection/` to tell the legs apart; nothing assumes 4 legs or perpendicular roads, so 3-way/5-way/skewed junctions all work the same way. `sites/README.md` documents every key.
-3. Create `sites/<name>/scenarios.py` exposing `build_demo_scenario(baseline) -> DesignState`.
-4. Run the Quick start commands with `--site <name>`.
+2. If the site is in a town this project has no OSM snapshot of, add one line to `sites/osm_areas.yaml` — a bbox with margin for the context radius. One download, and nothing already cached moves. (`SiteOutsideSnapshotError` names this file if you skip it.)
+3. Create `sites/<name>/config.yaml` (copy `sites/broad_st_greenwood/config.yaml`) — `center_wgs84` from step 1, `data_sources`, and one `legs` entry per approach with a `bearing_deg` (compass, 0=N/90=E/clockwise, from the intersection outward). That bearing is the **only** thing that has to be geometrically accurate for `src/geometry/intersection/` to tell the legs apart; nothing assumes 4 legs or perpendicular roads, so 3-way/5-way/skewed junctions all work the same way. `sites/README.md` documents every key.
+4. Create `sites/<name>/scenarios.py` exposing `build_demo_scenario(baseline) -> DesignState`.
+5. Run the Quick start commands with `--site <name>`.
+
+A site in another **county** needs no code either: `data_sources:` names that county's parcels and MOD-IV tax list (statewide NJDOT roads are already shared), and `scripts/make_data_fixture.py` clips whatever files the configured sites name, so a two-county fixture is the normal case. A site in another **town** needs `intersection.municipality`, which is half the key a route-level proposal is looked up by — `route_decision_for(street, town)`. A street with no decision for that town gets none, rather than borrowing the neighbouring town's.
 
 Editing a `config.yaml` means rerunning from Phase 2 onward; Phase 1 does not depend on it. Phase 4 shells out to Blender (its own bundled Python, no network, none of this project's packages) — needs Blender on `PATH`, or set `BLENDER_BIN`; defaults to `/Applications/Blender.app/Contents/MacOS/Blender` on Mac.
 

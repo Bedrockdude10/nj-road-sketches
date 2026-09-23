@@ -172,13 +172,20 @@ def add_stop_bar(name: str, near, u, n, width_m: float, material, offset_m: floa
                   span_m: float | None = None, lateral_offset_m: float | None = None):
     """Stop bar: a single transverse line telling drivers where to stop for the
     signal, drawn just behind (intersection side of) the leg's crosswalk.
-    Spans only the entering half of the road - `n` is the leg's own 'left'
-    direction relative to its outward centerline direction (see
-    src/render/props.py's left/right convention), which is the entering driver's
-    right-hand side under US right-hand traffic (they travel the *opposite*
-    way along the leg, so the sides swap) - a real stop bar never crosses
-    into the opposing/receiving lanes, unlike a crosswalk line which spans
-    the full width."""
+    Spans the ENTERING LANES - `n` is the leg's own 'left' direction relative
+    to its outward centerline direction (see src/render/props.py's left/right
+    convention), which is the entering driver's right-hand side under US
+    right-hand traffic (they travel the *opposite* way along the leg, so the
+    sides swap) - a real stop bar never crosses into the opposing lanes,
+    unlike a crosswalk line which spans the full width.
+
+    WHICH IS NOT THE SAME AS HALF THE ROAD, and the `else` branch below is the
+    version that thinks it is. On a ONE-WAY carriageway there are no opposing
+    lanes, so the bar runs kerb to kerb: NJ 35 NB is two northbound lanes and
+    half the roadway left its left lane with nothing to stop at.
+    src/render/crosswalks.py:stop_bar_ends_ft decides, and hands the answer
+    over as `span_m`/`lateral_offset_m` - which the export always writes, so
+    the fallback is reached only by a geometry JSON older than that field."""
     centre = near + u * offset_m
     u_s, n_s, span_factor = _skewed_axes(u, n, skew_deg)
     if span_m is not None and lateral_offset_m is not None:

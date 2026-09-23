@@ -15,9 +15,10 @@ from src.render.coords import FT_TO_M, wgs84_to_state_plane
 from src.geometry.model import (crosswalk_estimate_ft, inset_line_ft, leg_clearance_ft,
                                 station_offset_many)
 from src.geometry.targets import Everywhere, LegSide, LegTarget, Side
-from src.geometry.treatments import (AddBikeLane, DesignState, LaneNarrowing, MarkedParking,
+from src.geometry.treatments import (CENTERLINE_IS_DASHED, VALID_CENTERLINE_STYLES,
+                                     AddBikeLane, DesignState, LaneNarrowing, MarkedParking,
                                      ShiftCrosswalk, UpgradeCrosswalkMarkings,
-                                     divider_shift_toward_ft)
+                                     carriageway_is_one_way, divider_shift_toward_ft)
 
 # OSM crossing:markings values -> our 3 rendered styles. "lines" (two simple
 # transverse boundary lines) is the least visible; FHWA/NACTO guidance treats
@@ -76,10 +77,10 @@ STOP_BAR_PLAN_DEPTH_FT = 1.5
 MIN_SKEW_COSINE = 0.2
 
 
-def stop_bar_band_geometry_ft(width_ft: float, edge_is_kerb: bool = True,
-                               inner_ft: float = 0.0,
+def stop_bar_band_geometry_ft(outer_ft: float, inner_ft: float = 0.0,
                                skew_deg: float = 0.0) -> tuple[float, float]:
-    """(span_ft, lateral_offset_ft) for a stop bar on a roadway `width_ft` wide.
+    """(span_ft, lateral_offset_ft) for a stop bar running between the ends stop_bar_ends_ft
+    resolved.
 
     THE TWO NUMBERS ARE IN DIFFERENT FRAMES AND THAT IS DELIBERATE, so read this before using
     either. `span_ft` is measured PERPENDICULAR to the leg; every renderer stretches it by
@@ -94,25 +95,11 @@ def stop_bar_band_geometry_ft(width_ft: float, edge_is_kerb: bool = True,
     stood 2.15 ft the wrong side of the centreline, straight through the opposing lanes. Both
     ends live in one rotated frame, so one function resolves both.
 
-    The bar spans the entering half, from the road centerline out to the edge of the lane the
-    stopped vehicle is in, toward the leg's own 'left' side (see
-    blender_crosswalks.add_stop_bar for why that is the entering driver's side under
-    right-hand traffic).
-
-    It STARTS AT THE CENTERLINE, with no clearance there: MUTCD's stop line runs across the
-    approach lanes and at the centerline it meets the centerline. A bar standing off it leaves a
-    gap with nothing on the other side, which reads as a striping error. Only the far end is held
-    back, and only when that end is the KERB, because paint does not run into the gutter. Where a
-    treatment has narrowed the lane the far end is a painted edge line instead, and a bar stopping
-    short of its own edge line is the same error - so `edge_is_kerb` is False there.
+    PURE GEOMETRY BETWEEN TWO GIVEN ENDS. It used to take a roadway width and halve it, which
+    hid the assumption that the far end of a stop bar is the middle of the street - true only
+    where traffic comes the other way. The ends are stop_bar_ends_ft's to decide.
     """
     clearance_ft = STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
-    outer_ft = width_ft / 2 - (clearance_ft if edge_is_kerb else 0.0)
-    # IT STARTS AT THE PAINTED CENTRELINE, WHICH IS NOT ALWAYS THE ALIGNMENT. `inner_ft` is where
-    # that line actually is - zero while the two travel lanes straddle the alignment, and the
-    # divider's own offset where a two-way bike lane has shifted them (see
-    # treatments.divider_shift_toward_ft). Starting at the alignment regardless paints the stop
-    # line across the opposing lanes.
     span_ft = max(outer_ft - inner_ft, clearance_ft)
     # The offset carries the same 1/cos the span gets downstream - see the docstring. Reaching a
     # line `inner_ft` perpendicular from the alignment means travelling inner_ft/cos along the
@@ -168,9 +155,56 @@ def entering_lane_width_ft(state: DesignState, leg_name: str) -> float | None:
     return travel_lane_edge_ft(state, leg_name, Side.LEFT)
 
 
+def stop_bar_ends_ft(state: DesignState, leg_name: str) -> tuple[float, float]:
+    """(outer_ft, inner_ft): where an approach's stop bar ENDS and where it BEGINS, as offsets
+    from the leg's alignment signed toward its own LEFT.
+
+    The single home for how far a stop bar reaches, because a bar that stops in the wrong place
+    is always a disagreement about which ground the approaching driver occupies:
+
+      * THE OUTER END is the driver's own kerb, or whatever paint stands inside it -
+        travel_lane_edge_ft, held back from a bare kerb by STOP_BAR_CURB_CLEARANCE_M because
+        paint does not run into the gutter, and meeting a painted edge line flush because a bar
+        stopping short of its own line reads as a striping error.
+
+      * THE INNER END DEPENDS ON WHETHER ANYONE IS COMING THE OTHER WAY. On a two-way street it
+        is the painted centreline - the bar rests against it and never crosses, because the far
+        lanes are not this driver's to stop across. ON A ONE-WAY CARRIAGEWAY THERE ARE NO SUCH
+        LANES: every lane between the two kerbs is an approach lane, the bar runs the full width
+        of the roadway, and the inner end is the OTHER kerb's edge, measured the same way as the
+        outer one. Sizing that leg's bar off half the roadway painted it across the right-hand
+        lane only and left NJ 35 NB's left lane with nothing to stop at.
+
+    So "the entering half" was never the rule; it is what the rule reduces to when the street is
+    two-way, which every site here was until Lavallette. Asked of the design and not of a site,
+    for the reason treatments.carriageway_is_one_way gives.
+    """
+    clearance_ft = STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
+    half_ft = state.legs[leg_name].curb_to_curb_ft / 2
+
+    def edge_ft(side: Side) -> float:
+        painted = travel_lane_edge_ft(state, leg_name, side)
+        return half_ft - clearance_ft if painted is None else painted
+
+    outer_ft = edge_ft(Side.LEFT)
+    if carriageway_is_one_way(state, state.legs[leg_name]):
+        return outer_ft, -edge_ft(Side.RIGHT)
+    # IT STARTS AT THE PAINTED CENTRELINE, WHICH IS NOT ALWAYS THE ALIGNMENT - zero while the two
+    # travel lanes straddle it, and the divider's own offset where a two-way bike lane has shifted
+    # them (see treatments.divider_shift_toward_ft). Starting at the alignment regardless paints
+    # the stop line across the opposing lanes.
+    return outer_ft, divider_shift_toward_ft(state, leg_name, Side.LEFT)
+
+
 def stop_bar_width_ft(state: DesignState, leg_name: str) -> float:
-    """Full roadway width the stop bar is sized against (twice the entering lane width
-    where a treatment narrowed it, else the leg's own curb-to-curb width)."""
+    """Full roadway width the stop bar is sized against - twice the entering lane width where a
+    treatment narrowed it, else the leg's own curb-to-curb width.
+
+    NOT WHERE THE BAR IS DRAWN; stop_bar_ends_ft is. This is exported as `stop_bar_width_m` for
+    blender_crosswalks.add_stop_bar's fallback arithmetic, which halves it - the fallback only
+    runs where the JSON carries no resolved span, and export.py writes one for every leg that has
+    a bar, so both renderers take the resolved figure and this describes the roadway.
+    """
     entering_ft = entering_lane_width_ft(state, leg_name)
     return 2 * entering_ft if entering_ft is not None else state.legs[leg_name].curb_to_curb_ft
 
@@ -497,12 +531,27 @@ def resolve_stop_bar_offsets(state: DesignState, crosswalk_offsets: dict[str, tu
     clamped to leg_clearance_ft() so a short leg or tight corner never pushes the bar back
     into the curb return.
     """
+    from src.geometry.treatments import traffic_runs_outward
+
     surveyed = match_stop_lines_to_legs(state.legs, stop_lines or [])
     out = {}
     for leg_name, (crosswalk_offset_ft, _source) in crosswalk_offsets.items():
         min_offset_ft = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
         line = surveyed.get(leg_name)
         if line is None:
+            # NOTHING STOPS ON A LEG TRAFFIC LEAVES BY. The derivation below hangs a bar off
+            # every leg that has a crosswalk, which is right on a two-way street because every
+            # leg there is an approach - and wrong on a ONE-WAY carriageway, where half the legs
+            # are exits. NJ 35 NB runs north through Reese Ave, so its NORTH leg is the departure
+            # and Danny traced three bars for four legs; the fourth was ours, not the street's.
+            #
+            # Only where nobody traced one. A surveyed bar on a leg this rule calls a departure
+            # is evidence about the rule, not about the street, and it is drawn where it is
+            # painted - the same precedence the clamp below gives a real position.
+            leg = state.legs.get(leg_name)
+            if leg is not None and carriageway_is_one_way(state, leg) \
+                    and traffic_runs_outward(state, leg, "right"):
+                continue
             # Derived: clamp, because nothing here knows where the bar really is and the
             # corner return is the one place it certainly isn't.
             out[leg_name] = max(crosswalk_offset_ft - STOP_BAR_SETBACK_FT, min_offset_ft)
@@ -596,6 +645,16 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
         return [line for line in
                 (painted.offset_curve(sign * DOUBLE_YELLOW_GAP_FT / 2) for sign in (1, -1))
                 if line.geom_type == "LineString" and not line.is_empty]
+    if style not in CENTERLINE_IS_DASHED:
+        # THE FALLTHROUGH USED TO BE THE DASHED BRANCH, so a style this function had never heard
+        # of was drawn as a yellow dashed centre line - the most confident wrong answer available,
+        # and one nothing downstream could see. Both renderers pick their colour off the same
+        # style, so an unknown one has no colour either.
+        raise ValueError(f"unknown centerline style {style!r} - expected one of "
+                         f"{sorted(VALID_CENTERLINE_STYLES)}")
+    # ONE PATTERN FOR BOTH DASHED STYLES. A broken white lane line and a broken yellow centre line
+    # differ in what they mean and in their colour, not in how they are cut - MUTCD 11th ed.
+    # 3A.04 P6 gives one broken-line ratio for both. See STANDARDS.md for the ratio drawn here.
     period_ft = CENTERLINE_DASH_FT + CENTERLINE_GAP_FT
     dashes = []
     at_ft = 0.0
@@ -882,14 +941,12 @@ def stop_bar_bands_ft(state: DesignState, stop_bar_offsets: dict, skews: dict) -
         # This used to apply its own 1/cos here while export.py applied none, which is the
         # 2D/3D split stop_bar_band_geometry_ft now owns - see its docstring. crosswalk_band_ft
         # still stretches the SPAN, which is why span_ft is handed over unstretched.
-        span_ft, lateral_ft = stop_bar_band_geometry_ft(
-            stop_bar_width_ft(state, name), entering_lane_width_ft(state, name) is None,
-            inner_ft=divider_shift_toward_ft(state, name, Side.LEFT),
-            skew_deg=skews.get(name, 0.0))
+        outer_ft, inner_ft = stop_bar_ends_ft(state, name)
+        span_ft, lateral_ft = stop_bar_band_geometry_ft(outer_ft, inner_ft,
+                                                        skew_deg=skews.get(name, 0.0))
         band = crosswalk_band_ft(leg, offset_ft, STOP_BAR_PLAN_DEPTH_FT, skews.get(name, 0.0),
                                   span_ft=span_ft, lateral_offset_ft=lateral_ft)
-        bands[name] = _trim_to_the_entering_side(
-            leg, band, divider_shift_toward_ft(state, name, Side.LEFT))
+        bands[name] = _trim_to_the_entering_side(leg, band, inner_ft)
     return bands
 
 
@@ -902,17 +959,19 @@ TRIM_STOP_BAR_BEYOND_FT = 0.05
 
 
 def _trim_to_the_entering_side(leg, band, divider_ft: float):
-    """Cut `band` back so none of it lies past the painted centreline.
+    """Cut `band` back so none of it lies past its own inner end.
 
-    A stop bar RESTS AGAINST that line; it never crosses it (MUTCD - the bar covers the entering
-    approach only). Sizing alone cannot guarantee that: the bar is a straight quadrilateral and
-    the line it stops at follows a centreline that bends, so on a curving leg the bar's inner
-    corner falls the wrong side of it however carefully the span is computed. So the shape is
-    trimmed to the region it is allowed to occupy, which is the one construction that cannot be
-    defeated by curvature.
+    A stop bar RESTS AGAINST the line it stops at; it never crosses it (MUTCD - the bar covers
+    the approach lanes only). Sizing alone cannot guarantee that: the bar is a straight
+    quadrilateral and the line follows a centreline that bends, so on a curving leg the bar's
+    inner corner falls the wrong side of it however carefully the span is computed. So the shape
+    is trimmed to the region it is allowed to occupy, which is the one construction that cannot
+    be defeated by curvature.
 
-    `divider_ft` is where that line sits, signed toward the entering (LEFT) side - normally zero,
-    and the two-way bike lane's divider offset where the travel lanes have been shifted.
+    `divider_ft` is stop_bar_ends_ft's inner end, signed toward the entering (LEFT) side: zero on
+    an ordinary two-way street, the divider's offset where a two-way bike lane has shifted the
+    travel lanes, and NEGATIVE - the far kerb - on a one-way carriageway, where the bar is
+    entitled to the whole roadway and only curvature past that kerb is trimmed.
     """
     if band is None or band.is_empty:
         return band

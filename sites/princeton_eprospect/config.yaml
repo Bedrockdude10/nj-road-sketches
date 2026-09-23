@@ -30,6 +30,9 @@ data_sources:
 
 intersection:
   name: "Princeton Ave (CR 569) & East Prospect St, Hopewell Borough, NJ 08525"
+  # The town this junction is in, and the key a corridor decision is looked up by
+  # (src/geometry/treatments/corridor.py) - street names repeat between towns.
+  municipality: "Hopewell Borough"
   center_wgs84: [-74.7572458, 40.3882413]
   street1: "Princeton Avenue"
   street2: "East Prospect Street"

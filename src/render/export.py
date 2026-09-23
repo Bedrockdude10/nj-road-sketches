@@ -16,8 +16,9 @@ from src.render.coords import (FT_TO_M, building_footprint_ft, dumps_for_export,
 from src.render.crosswalks import (CROSSWALK_DEPTH_M, STOP_BAR_CURB_CLEARANCE_M,
                                    centerline_paint_ft, continental_bar_count, crosswalk_axes,
                                    centerline_start_ft,
-                                   entering_lane_width_ft, resolve_crosswalk_style,
-                                   stop_bar_band_geometry_ft, stop_bar_width_ft)
+                                   resolve_crosswalk_style,
+                                   stop_bar_band_geometry_ft, stop_bar_ends_ft,
+                                   stop_bar_width_ft)
 from src.geometry.model import hatch_lines_ft
 from src.geometry.intersection import (IntersectionModel, drawn_kerb_radius_ft,
                                        kerb_lines_with_tags_ft)
@@ -32,9 +33,8 @@ from src.sources.assessor import (BuildingHeight, assessor_path, describe_buildi
 from src.sources.osm_context import (fetch_buildings, fetch_crossings, fetch_kerbs,
                                      fetch_street_furniture, fetch_traffic_control)
 from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
-from src.geometry.targets import Side
 from src.geometry.treatments import (DesignState, RaiseCrossing, RefugeIsland,
-                                      build_sidewalk_pieces, divider_shift_toward_ft)
+                                      build_sidewalk_pieces)
 
 BUILDING_CONTEXT_RADIUS_M = 130
 KERB_RADIUS_M = 120
@@ -100,9 +100,8 @@ def _stop_bar_span_m(state: DesignState, leg_name: str, has_bar: bool,
     """
     if not has_bar:
         return {}
-    span_ft, lateral_ft = stop_bar_band_geometry_ft(
-        stop_bar_width_ft(state, leg_name), entering_lane_width_ft(state, leg_name) is None,
-        inner_ft=divider_shift_toward_ft(state, leg_name, Side.LEFT), skew_deg=skew_deg)
+    span_ft, lateral_ft = stop_bar_band_geometry_ft(*stop_bar_ends_ft(state, leg_name),
+                                                    skew_deg=skew_deg)
     return {"stop_bar_span_m": span_ft * FT_TO_M,
             "stop_bar_lateral_offset_m": lateral_ft * FT_TO_M}
 
@@ -155,7 +154,10 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     if traffic_control is None:
         traffic_control = fetch_traffic_control(model.center_wgs84, radius_m=TRAFFIC_CONTROL_RADIUS_M)
     if street_furniture is None:
-        street_furniture = fetch_street_furniture(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+        # The same context_m as the buildings and crossings above: street furniture fills the
+        # picture too, and a bench that exists in one view and not the other is the seam this
+        # project keeps finding bugs in.
+        street_furniture = fetch_street_furniture(model.center_wgs84, radius_m=context_m)
 
     # Every marking position this scenario implies, resolved once (src/render/scene.py) and
     # shared with the plan view and the invariants. Crosswalks outrank every other marking,
@@ -387,11 +389,12 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                     if leg_name in crosswalk_reaches else None,
                 # None (not drawn) unless this site's intersection is signalized (see stop_bar_offsets above).
                 "stop_bar_offset_m": stop_bar_offsets[leg_name] * FT_TO_M if leg_name in stop_bar_offsets else None,
-                # A stop bar only ever belongs across the real entering travel lane, not the full
-                # curb-to-curb half (which can include a painted no-parking buffer or a marked-parking
-                # lane next to the curb that a stopped vehicle would never actually occupy) - see
-                # src/render/crosswalks.py:entering_lane_width_ft, shared with the 2D plan view,
-                # i.e. unchanged behavior for any leg that hasn't been narrowed on its entering side.
+                # A stop bar only ever belongs across the real travel lanes, not the full
+                # curb-to-curb width (which can include a painted no-parking buffer or a
+                # marked-parking lane next to the curb that a stopped vehicle would never actually
+                # occupy). This is only the FALLBACK's sizing input - where the bar really begins
+                # and ends is src/render/crosswalks.py:stop_bar_ends_ft, resolved just below and
+                # shared with the 2D plan view.
                 "stop_bar_width_m": stop_bar_width_ft(state, leg_name) * FT_TO_M,
                 # ...and the resolved span and lateral offset that width produces, so
                 # blender_crosswalks.add_stop_bar draws the bar this module measured rather than

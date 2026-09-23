@@ -18,7 +18,7 @@ from src.render.theme import _portable, build_default_theme
 
 # output/.textures is gitignored, so a fresh clone has no assets to resolve and
 # build_default_theme returns None for every entry (correctly - it never fetches under
-# HOPEWELL_OFFLINE). The _portable tests below need nothing on disk and always run.
+# ROAD_SKETCHES_OFFLINE). The _portable tests below need nothing on disk and always run.
 needs_textures = pytest.mark.skipif(not CACHE_DIR.exists(),
                                     reason=f"no {CACHE_DIR.relative_to(REPO_ROOT)} - "
                                            "fetched on demand by src/render/theme.py")

@@ -52,6 +52,10 @@ channels:
       - -13.073
       - -1.033
     points: 48
+  bike_lane_uncoloured_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
   corner_apron_polygons:
     count: 0
     extent: null
@@ -101,6 +105,10 @@ channels:
       - -34.545
     points: 76
   lane_narrowing_taper_lines:
+    count: 0
+    extent: null
+    points: 0
+  left_edge_lines:
     count: 0
     extent: null
     points: 0
@@ -186,6 +194,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  shared_lane_symbol_polygons:
+    count: 0
+    extent: null
+    points: 0
   sidewalks_far:
     count: 15
     extent:
@@ -207,6 +219,14 @@ channels:
       - -15.747
     points: 1555
   tree_points:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_edge_lines:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_surface_polygons:
     count: 0
     extent: null
     points: 0
@@ -912,6 +932,8 @@ legs:
     width_m: 9.518
 name: Two-Way Bike Lane
 props:
+- bike_warning_sign@419116.50,566827.47
+- bike_warning_sign@419199.13,566747.65
 - bollard@419048.88,566727.67
 - bollard@419055.45,566732.15
 - bollard@419062.06,566736.66

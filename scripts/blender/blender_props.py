@@ -19,6 +19,11 @@ STOP_SIGN_RED = (0.55, 0.03, 0.03)
 SCHOOL_ZONE_YELLOW_GREEN = (0.75, 0.85, 0.05)
 SIGN_POST_GRAY = (0.35, 0.35, 0.37)
 NO_TURN_ON_RED_WHITE = (0.92, 0.92, 0.9)
+# MUTCD warning yellow, for the W-series plates a bikeway terminus needs (W9-5, W16-21P).
+# Distinct from SCHOOL_ZONE_YELLOW_GREEN, which is the fluorescent yellow-GREEN reserved for
+# school and pedestrian/bicycle crossing warnings - a W9-5 is ordinary yellow and reading the
+# two as one colour would draw the wrong sign.
+WARNING_SIGN_YELLOW = (0.85, 0.72, 0.02)
 SIGNAL_HOUSING_DARK = (0.08, 0.08, 0.08)
 PED_SIGNAL_HOUSING_DARK = (0.1, 0.1, 0.1)
 VEHICLE_SIGNAL_LENS_COLORS = [
@@ -152,6 +157,31 @@ def add_school_zone_sign(name: str, position: tuple, heading_deg: float, post_ma
                            plate_color=SCHOOL_ZONE_YELLOW_GREEN, post_mat=post_mat)
 
 
+def add_bike_warning_sign(name: str, position: tuple, heading_deg: float, post_mat):
+    """A yellow DIAMOND warning plate on a post - the MUTCD W-series shape, used here for
+    W9-5 (BIKE LANE ENDS) and the W16-21P two-way-bicycle-cross-traffic plaque.
+
+    n_sides=4 on a cylinder puts vertices on the local axes, so once _add_post_sign stands the
+    plate up one vertex is straight up: a diamond, not a square. Legend text is not modelled at
+    this scale on any sign here - shape and colour are what the render can honestly carry."""
+    return _add_post_sign(name, position, heading_deg, n_sides=4, plate_radius=0.38,
+                           plate_color=WARNING_SIGN_YELLOW, post_mat=post_mat)
+
+
+def add_yield_sign(name: str, position: tuple, heading_deg: float, post_mat):
+    """A downward-pointing white/red TRIANGLE - MUTCD R1-2, which OSM's highway=give_way nodes
+    produce. It had a plan-view marker and no builder here, so a yielding approach appeared in
+    2D and vanished in 3D; the two views draw the same street or neither is trustworthy.
+
+    n_sides=3 gives an UPWARD point, so the plate is rolled 180 degrees about its own facing
+    axis - that roll is what makes it a yield sign rather than a nameless triangle."""
+    post = _add_post_sign(name, position, heading_deg, n_sides=3, plate_radius=0.38,
+                           plate_color=STOP_SIGN_RED, post_mat=post_mat)
+    plate = bpy.data.objects[f"{name}_plate"]
+    plate.rotation_euler = (math.radians(90), math.radians(180), math.radians(heading_deg))
+    return post
+
+
 def add_vehicle_signal_head(name: str, position: tuple, heading_deg: float, housing_mat):
     """Procedural 3-section vehicle signal head: a dark housing box with 3
     stacked red/yellow/green lenses on the face pointed at `heading_deg` -
@@ -261,6 +291,15 @@ def add_no_turn_on_red_sign(name: str, position: tuple, heading_deg: float, post
     plate_mat = make_material(f"{name}_plate_mat", NO_TURN_ON_RED_WHITE, roughness=0.35)
     plate.data.materials.append(plate_mat)
     return post
+
+
+def add_bike_regulatory_sign(name: str, position: tuple, heading_deg: float, post_mat):
+    """A white rectangular R-series regulatory plate - here the R9-23 series that tells a rider
+    where the two-stage turn box is and how to use it (MUTCD 9B.18). Same plate geometry as the
+    NO TURN ON RED sign, which is the other rectangular white regulatory sign modelled; kept as
+    its own builder because the two are placed for different reasons and a shared one would
+    make a bikeway sign silently inherit a change meant for the NTOR plate."""
+    return add_no_turn_on_red_sign(name, position, heading_deg, post_mat)
 
 
 def add_rrfb(name: str, position: tuple, heading_deg: float, post_mat):
@@ -462,6 +501,12 @@ def add_prop(name: str, prop: dict, streetlight_template, pole_mat, signal_housi
         add_stop_sign(name, pos, heading, pole_mat)
     elif ptype == "school_zone_sign":
         add_school_zone_sign(name, pos, heading, pole_mat)
+    elif ptype == "yield_sign":
+        add_yield_sign(name, pos, heading, pole_mat)
+    elif ptype == "bike_warning_sign":
+        add_bike_warning_sign(name, pos, heading, pole_mat)
+    elif ptype == "bike_regulatory_sign":
+        add_bike_regulatory_sign(name, pos, heading, pole_mat)
     elif ptype == "traffic_signal_pole":
         add_traffic_signal_pole(name, pos, heading, pole_mat, signal_housing_mat,
                                  arm_heading_deg=prop.get("arm_heading_deg"),
@@ -483,11 +528,11 @@ def add_prop(name: str, prop: dict, streetlight_template, pole_mat, signal_housi
     elif ptype == "fire_hydrant":
         add_fire_hydrant(name, pos)
     else:
-        # Placement upstream (src/render/props.py) can emit a type this renderer has no
-        # builder for - e.g. yield_sign, which OSM's highway=give_way nodes produce but
-        # nothing here draws yet. Say so rather than silently dropping it: a prop visible
-        # in the 2D plan view but missing from the render is exactly the kind of
-        # disagreement between the two views this project keeps having to chase down.
+        # Nothing src/render/props.py can emit should reach here - a prop drawn in one view
+        # and not the other is a disagreement between the two views this project keeps having
+        # to chase down, so tests/test_props.py:test_every_prop_type_is_drawn_in_both_views
+        # scans this dispatch and the plan view's marker table against the emitters and fails
+        # on a type missing from either. This branch is the runtime half of that guard.
         print(f"WARNING: no Blender builder for prop type {ptype!r} ({name}) - not drawn.")
 
 

@@ -11,7 +11,8 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from src.geometry.targets import Target
-from src.geometry.model import (narrowest_half_width_ft)
+from src.geometry.model import (angled_stall_depth_ft, leg_heads_toward,
+                                narrowest_half_width_ft)
 
 if TYPE_CHECKING:                       # DesignState is layered above this module;
     from src.geometry.treatments.state import DesignState   # the annotation is a string
@@ -82,10 +83,24 @@ def kerbside_allowance_ft(leg, side: str) -> float:
     return narrowest_half_width_ft(leg, side) - TARGET_LANE_WIDTH_FT
 
 # What is painted down the middle of a leg TODAY: a dashed yellow line (the ordinary two-way
-# marking), a solid double yellow (no-passing), or none at all. Read from a site's config.yaml
-# per leg (see sites/README.md), street-view confirmed like the `signals` block.
+# marking), a solid double yellow (no-passing), a broken WHITE lane line, or none at all. Read
+# from a site's config.yaml per leg (see sites/README.md), street-view confirmed like the
+# `signals` block.
+#
+# THE COLOUR IS THE MEANING, NOT A DRAWING PREFERENCE, and that is why single_white_dashed is a
+# style here rather than a rendering flag: yellow separates OPPOSING directions and white
+# separates lanes going the SAME way (MUTCD 11th ed. 3B.06 P1 and 3B.01 P1 - see STANDARDS.md).
+# A one-way carriageway with two lanes has a line down its middle and it is not a centre line;
+# drawing it yellow would tell a driver there is oncoming traffic in the next lane, and drawing
+# nothing - which is what this vocabulary forced until now - tells them there is one lane.
 DEFAULT_CENTERLINE_STYLE = "single_yellow_dashed"
-VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "none")
+VALID_CENTERLINE_STYLES = ("single_yellow_dashed", "double_yellow", "single_white_dashed", "none")
+
+#: The styles that are painted as a broken line, and the colour each renderer draws them in. One
+#: table rather than a branch per view: the plan view and the 3D render each used to hardcode
+#: yellow at their own call site, so a new style was two edits with nothing to catch the second.
+CENTERLINE_IS_DASHED = ("single_yellow_dashed", "single_white_dashed")
+CENTERLINE_IS_WHITE = ("single_white_dashed",)
 
 # Float slack when comparing a requested width against the room a leg has. The widths
 # themselves are specified to a tenth of a foot; this only absorbs the arithmetic.
@@ -139,6 +154,75 @@ def _parking_restrictions_from_model(model: "IntersectionModel") -> dict:
     for key in out:
         out[key].sort(key=lambda r: r.start_ft)
     return out
+
+
+def carriageway_is_one_way(state, leg) -> bool:
+    """Does this leg's carriageway carry traffic in ONE direction only?
+
+    The single reader of "is `traffic_heads_toward` set", so that the three questions that turn
+    on it - which way a bay leans, which edge line is yellow, and how far a stop bar reaches -
+    cannot come to differ about what a missing key means. Absent is TWO-WAY, which is the
+    ordinary case and the one a site says nothing about.
+    """
+    return state.traffic_heads_toward.get(leg.name) is not None
+
+
+def traffic_runs_outward(state, leg, side: str) -> bool:
+    """Does the traffic beside this kerb travel OUTWARD along the leg, away from the junction?
+
+    Two things need this and both get it wrong the same way if they guess: which way an angled
+    bay leans (a bay leaning against the traffic can only be entered by reversing into the
+    travel lane) and which way a with-traffic bike lane's arrow points.
+
+    THE ORDINARY ANSWER IS THE SIDE, AND ON A ONE-WAY STREET IT IS THE COMPASS. On a two-way
+    street a leg's right-hand kerb carries outbound traffic and its left carries inbound, so the
+    side alone answers it. On a one-way carriageway BOTH kerbs carry the same compass direction,
+    and no leg's own frame knows which: both legs of a street point outward from the junction by
+    construction, so NJ 35 NB's northern approach runs north outward and its southern approach
+    runs north inward. That is what `legs.<leg>.traffic_heads_toward` records and the only thing
+    it is for - see leg_heads_toward, and site_schema.Leg for why the corridor block could not
+    hold it.
+
+    ASKED OF THE RESOLVED DESIGN, NOT OF THE CONFIG. It used to dig
+    `config["legs"][name]["traffic_heads_toward"]` out of the model on every call, which put a
+    second reader of that key one layer below DesignState.from_model - and left the paint
+    builder, which holds a state and no model, unable to ask at all. from_model seeds
+    `state.traffic_heads_toward` once, and carriageway_is_one_way above is the only thing that
+    asks whether it is set.
+
+    Here beside _parking_restrictions_from_model rather than in src/geometry/model/ because it
+    reads a fact SEEDED from config and not the geometry, and because its callers - a bay, a
+    bikeway and the roadway's own left edge line - are all treatments. Asked of the design
+    rather than written into a site's scenarios.py for the reason section 5 of
+    .claude/SKILLS.md gives: which way the street runs is a fact about the street, so every
+    scenario of that junction has to get the same answer, including the one the pipeline labels
+    "Existing Conditions" and builds without asking a site anything.
+    """
+    if not carriageway_is_one_way(state, leg):
+        return str(side) == "right"
+    return leg_heads_toward(leg, state.traffic_heads_toward[leg.name])
+
+
+def is_left_edge_of_the_roadway(state, leg, side: str) -> bool:
+    """Is this kerb the LEFT-HAND EDGE of a ONE-WAY roadway, in the direction of travel?
+
+    Which is the whole of what decides an edge line's colour: MUTCD 11th ed. 3B.09 P3 makes the
+    left edge line of a one-way street a solid YELLOW line, against P2's white on the right, and
+    P2 governs both edges of an ordinary two-way street. See STANDARDS.md.
+
+    NOT THE SAME QUESTION AS `side == "left"`, and that is the trap this exists to close. A
+    leg's frame is its own - both approaches of a street point OUTWARD from the junction - so on
+    NJ 35 NB the one west kerb is `left` on the northern approach and `right` on the southern.
+    Asking the side alone would paint the yellow line down the west kerb of one leg and the east
+    kerb of the next, on one continuous carriageway.
+
+    False on a two-way street whatever the side, because there is no left edge to a roadway that
+    carries traffic both ways - the yellow there is the CENTRE line, which is a different
+    marking with a different home (DesignState.centerline_style).
+    """
+    if not carriageway_is_one_way(state, leg):
+        return False
+    return (str(side) == "left") == traffic_runs_outward(state, leg, side)
 
 
 @dataclass(frozen=True)
@@ -238,10 +322,61 @@ VALID_CROSSWALK_STYLES = ("lines", "continental", "ladder")
 
 PARKING_STALL_DEPTH_DEFAULT_FT = 8.0  # AASHTO/NACTO typical parallel-parking lane depth (curb to travel-lane edge)
 PARKING_STALL_LENGTH_DEFAULT_FT = 22.0  # AASHTO/NACTO typical parallel-parking stall length
+# THE ANGLED STALL, which is a different pair of figures from the parallel one above and not a
+# rearrangement of it: 9 ft is measured ACROSS the stall (kerb to kerb between its dividers,
+# perpendicular to the car) and 18 ft ALONG it (bumper to bumper), so neither maps onto
+# PARKING_STALL_DEPTH_DEFAULT_FT or PARKING_STALL_LENGTH_DEFAULT_FT. What the bay costs across
+# the street and what it costs along the kerb are both functions of the angle - see
+# model/stripes.py:angled_stall_depth_ft and angled_stall_pitch_ft, which are the one home for
+# those three formulas.
+#
+# NJ Residential Site Improvement Standards, N.J.A.C. 5:21-4.14/4.15 (9 x 18 ft). Cited, not
+# opened - STANDARDS.md carries the row and the tier.
+ANGLED_STALL_WIDTH_FT = 9.0
+ANGLED_STALL_LENGTH_FT = 18.0
 # NJSA 39:4-138: no stopping/standing/parking within 25 ft of a marked crosswalk at an
 # intersection. A legal minimum, not a rendering choice - marked parking starts at whichever of
 # this and leg_clearance_ft's past-the-corner-curve point is farther from the intersection.
 LEGAL_PARKING_SETBACK_FT = 25.0
+
+
+@dataclass(frozen=True)
+class ObservedBay:
+    """The kerbside parking a surveyor recorded on one leg, resolved to the figures a treatment
+    needs. `sides` is which kerbs carry it; `depth_ft` is the angle's consequence, never a lane
+    width anybody chose.
+
+    A record and not a treatment, because TWO treatments place it: MarkedParking on an ordinary
+    kerb, and AddBikeLane's own section on a kerb that also carries a bike lane (one rigid
+    section places all of a rigid cross-section - SKILLS 0a). Resolving `angle_deg` and the
+    stall's dimensions in each of them is the two-derivations-of-one-fact shape, and it would
+    have gone wrong in the usual quiet way: the second copy would have dropped the second term
+    of angled_stall_depth_ft and understated the bay by 4.50 ft.
+    """
+    sides: tuple
+    depth_ft: float
+    stall_length_ft: float
+    stall_width_ft: float
+    angle_deg: float | None
+
+
+def observed_bay(model: "IntersectionModel", leg_name: str) -> "ObservedBay | None":
+    """What config `legs.<leg>.existing_parking` records for this leg, or None where nothing was
+    recorded - which is UNRECORDED and not "no parking", see site_schema.ExistingParking."""
+    observed = model.config["legs"].get(leg_name, {}).get("existing_parking")
+    if not observed:
+        return None
+    angle_deg = observed.get("angle_deg")
+    width_ft = observed.get("stall_width_ft") or ANGLED_STALL_WIDTH_FT
+    length_ft = observed.get("stall_length_ft") or (
+        ANGLED_STALL_LENGTH_FT if angle_deg else PARKING_STALL_LENGTH_DEFAULT_FT)
+    # THE BAY'S DEPTH IS THE ANGLE'S CONSEQUENCE, not a lane width anybody chose: 20.09 ft
+    # at 60 degrees against the 8 ft a parallel lane takes. Parallel parking keeps the
+    # project's parallel depth, which IS a design figure.
+    depth_ft = (angled_stall_depth_ft(length_ft, width_ft, angle_deg) if angle_deg
+                else PARKING_STALL_DEPTH_DEFAULT_FT)
+    return ObservedBay(sides=tuple(observed["sides"]), depth_ft=depth_ft,
+                       stall_length_ft=length_ft, stall_width_ft=width_ft, angle_deg=angle_deg)
 
 
 BOLLARD_DEFAULT_SPACING_FT = 10.0  # typical flex-post delineator spacing for a channelized buffer

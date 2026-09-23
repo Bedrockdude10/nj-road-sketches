@@ -14,6 +14,7 @@ MINIMAL = {
     "data_sources": {"road_network": "data/net.geojson", "parcels": "data/parcels.shp"},
     "intersection": {
         "name": "Test St & Other St",
+        "municipality": "Test Borough",
         "center_wgs84": [-74.76, 40.39],
         "street1": "Test St",
         "street2": "Other St",
@@ -133,6 +134,17 @@ def test_an_empty_source_is_rejected():
         validate_site_config(broken)
 
 
+def test_a_site_that_names_no_municipality_is_rejected():
+    """The town is half the key a route-level proposal is looked up by
+    (src/geometry/treatments/corridor.py:route_decision_for), and street names repeat between
+    towns - so a config that omits it must fail here rather than reach a lookup that would
+    either find nothing or, worse, find the neighbouring town's design for the same name."""
+    missing = config()
+    del missing["intersection"]["municipality"]
+    with pytest.raises(SiteConfigError, match="municipality"):
+        validate_site_config(missing)
+
+
 def test_an_off_globe_center_is_rejected():
     """center_wgs84 is [lon, lat], and a swap is the obvious mistake - but only a detectable
     one when a longitude lands in the latitude slot and blows the +/-90 bound."""
@@ -177,6 +189,37 @@ def test_an_unknown_centerline_style_is_rejected():
     broken["legs"]["test_st_west"]["centerline_style"] = "dotted_purple"
     with pytest.raises(SiteConfigError, match="centerline_style"):
         validate_site_config(broken)
+
+
+def test_traffic_directions_match_the_compass():
+    """Same mirroring as the centerline styles, and the same reason to pin it.
+
+    site_schema cannot import src.geometry.model without dragging shapely onto the config-read
+    path, so the four compass words are copied. A fifth word here, or a rename there, and a leg
+    would validate on a direction leg_heads_toward then refuses at build time.
+    """
+    from src.geometry.model.leg_frame import _COMPASS_AXES
+    from src.site_schema import VALID_TRAFFIC_DIRECTIONS
+
+    assert set(VALID_TRAFFIC_DIRECTIONS) == set(_COMPASS_AXES)
+
+
+def test_a_direction_of_travel_that_is_not_a_compass_point_is_rejected():
+    """"northbound" and "outbound" both read as directions and neither is one HERE.
+
+    The value is the compass direction the traffic runs, which is what makes it sayable once for
+    a street whose two approaches point opposite ways - see traffic_runs_outward. A leg-relative
+    word would be the thing this key exists to replace.
+    """
+    broken = config()
+    broken["legs"]["test_st_west"]["traffic_heads_toward"] = "northbound"
+    with pytest.raises(SiteConfigError, match="traffic_heads_toward"):
+        validate_site_config(broken)
+
+
+def test_a_two_way_leg_says_nothing_about_a_direction_of_travel():
+    """Absent is the default and it means TWO-WAY, which is four of the five sites here."""
+    assert validate_site_config(config()).legs["test_st_west"].traffic_heads_toward is None
 
 
 def test_a_negative_width_is_rejected():

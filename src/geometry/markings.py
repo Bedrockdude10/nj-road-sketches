@@ -122,6 +122,12 @@ LANE_NARROWING_TAPER_LINES = Channel("lane_narrowing_taper_lines", Role.LINE, NA
 LANE_NARROWING_HATCH_LINES = Channel("lane_narrowing_hatch_lines", Role.FILL, NARROW_LINE_WIDTH_M)
 CORNER_HATCHING_LINES = Channel("corner_hatching_lines", Role.FILL, NARROW_LINE_WIDTH_M)
 PARKING_EDGE_LINES = Channel("parking_edge_lines", Role.LINE, EDGE_LINE_WIDTH_M)
+# The YELLOW left edge line of a one-way roadway (MUTCD 3B.09 P3). Its own channel and not more
+# PARKING_EDGE_LINES for the reason BIKE_LANE_CONTRAFLOW_LINES has one: the channel decides the
+# colour at the far end, and blender_scene.py draws every edge-line channel in the white marking
+# material. Routed there, this stripe would come out yellow in the plan view and white in 3D,
+# with nothing in the project able to see the difference.
+LEFT_EDGE_LINES = Channel("left_edge_lines", Role.LINE, EDGE_LINE_WIDTH_M)
 PARKING_STALL_DIVIDER_LINES = Channel("parking_stall_divider_lines", Role.LINE, NARROW_LINE_WIDTH_M)
 # The daylight zones (R.S. 39:4-138 - see src/geometry/daylighting.py) share the parking
 # buffer's channels, because on a real street they are the same white hatching and the same
@@ -136,6 +142,18 @@ BIKE_LANE_HATCH_LINES = Channel("bike_lane_hatch_lines", Role.FILL, NARROW_LINE_
 # The lane's own asphalt, painted green. Travels to the render as the polygon it is, so both
 # views agree about what the proposal looks like.
 BIKE_LANE_SURFACE_POLYGONS = Channel("bike_lane_surface_polygons", Role.COLOUR)
+# THE SAME FOOTPRINT WITH NO GREEN ON IT - a conventional bike lane, which is white stripes and a
+# symbol on the road's own asphalt. Its own channel and not a flag on the piece, for the reason
+# YELLOW_CHANNELS exists: the channel is what decides the colour at the far end, and the two
+# renderers are written against this declaration rather than against each other.
+#
+# It is here because NJ 35 through Lavallette ALREADY HAS a bike lane, and green coloured
+# pavement is something a proposal DOES. Painted green on the sheet labelled Existing Conditions
+# the drawing claims a treatment the street has not had, and the before/after then credits the
+# proposal with nothing for applying it. Drawn as nothing in 3D - bare asphalt is what the
+# carriageway already renders as - which is why NOT_DRAWN_IN_3D has to name it out loud.
+BIKE_LANE_UNCOLOURED_SURFACE_POLYGONS = Channel("bike_lane_uncoloured_surface_polygons",
+                                                Role.COLOUR)
 # The YELLOW centre stripe of a two-way bike lane, separating opposing riders. Its own channel
 # rather than more BIKE_LANE_EDGE_LINES, because the channel decides the colour at the far end:
 # blender_scene.py draws every edge-line channel in the white marking material.
@@ -145,15 +163,51 @@ BIKE_LANE_CONTRAFLOW_LINES = Channel("bike_lane_contraflow_lines", Role.LINE, NA
 # The footprint is a schematic arrow, not a drawn bicycle: this pipeline positions paint, it does
 # not draw glyph art. The legend says so, so the drawing does not overclaim.
 BIKE_LANE_SYMBOL_POLYGONS = Channel("bike_lane_symbol_polygons", Role.COLOUR)
+# THE TWO-STAGE BICYCLE TURN BOX (MUTCD 11th ed. 9E.11), which is how a rider gets ACROSS the
+# street and onto a bikeway that runs up the far kerb. Two channels because it is two paints on
+# one patch of ground: a coloured area and the solid white line 9E.11(07) requires round all four
+# sides of it. NOT routed through BIKE_LANE_SURFACE_POLYGONS even though both are green - that
+# channel is the answer to "where is the bikeway", read by BikewayReachesTheEndOfItsKerb and by
+# bollard_in_the_bike_lane through BIKE_LANE_SURFACE_KINDS, and a queue box is not lane.
+TURN_BOX_SURFACE_POLYGONS = Channel("turn_box_surface_polygons", Role.COLOUR)
+TURN_BOX_EDGE_LINES = Channel("turn_box_edge_lines", Role.LINE, EDGE_LINE_WIDTH_M)
+# THE SHARED-LANE MARKING (MUTCD 11th ed. 9E.09), laid downstream of where a bikeway ends and its
+# riders rejoin the travelled way. Its own channel rather than more BIKE_LANE_SYMBOL_POLYGONS,
+# because 9E.09(05) is a Standard that these two symbols must not be drawn the same way:
+# "green-colored pavement shall not be applied as a background to shared-lane markings", while
+# the bike lane symbol's whole habitat is green. One channel for both would make that rule
+# unstateable at the seam where colour is decided.
+SHARED_LANE_SYMBOL_POLYGONS = Channel("shared_lane_symbol_polygons", Role.COLOUR)
 CORNER_APRON_POLYGONS = Channel("corner_apron_polygons", Role.SURFACE)
+
+#: THE CHANNELS PAINTED YELLOW. Declared as data here, beside the channels themselves, because
+#: section 3 of .claude/SKILLS.md records the one way this project gets a marking's colour wrong:
+#: blender_scene.py draws every edge-line channel in the white material, so a yellow marking
+#: routed through one comes out yellow in the plan view and white in 3D with nothing able to see
+#: the difference. Both renderers are written against this list and a test pins each to it.
+#:
+#: Yellow says THE SAME THING in both entries - do not cross to the other side of this line.
+#: LEFT_EDGE_LINES is the left edge of a one-way roadway (MUTCD 3B.09 P3);
+#: BIKE_LANE_CONTRAFLOW_LINES divides riders travelling opposite ways.
+YELLOW_CHANNELS: tuple[Channel, ...] = (LEFT_EDGE_LINES, BIKE_LANE_CONTRAFLOW_LINES)
 
 CHANNELS: tuple[Channel, ...] = (
     LANE_NARROWING_EDGE_LINES, LANE_NARROWING_TAPER_LINES, LANE_NARROWING_HATCH_LINES,
-    CORNER_HATCHING_LINES, PARKING_EDGE_LINES, PARKING_STALL_DIVIDER_LINES,
+    CORNER_HATCHING_LINES, PARKING_EDGE_LINES, LEFT_EDGE_LINES, PARKING_STALL_DIVIDER_LINES,
     PARKING_BUFFER_HATCH_LINES, PARKING_BUFFER_EDGE_LINES, PARKING_BUFFER_TAPER_LINES,
     BIKE_LANE_EDGE_LINES, BIKE_LANE_HATCH_LINES, BIKE_LANE_SURFACE_POLYGONS,
-    BIKE_LANE_CONTRAFLOW_LINES, BIKE_LANE_SYMBOL_POLYGONS, CORNER_APRON_POLYGONS,
+    BIKE_LANE_UNCOLOURED_SURFACE_POLYGONS, BIKE_LANE_CONTRAFLOW_LINES, BIKE_LANE_SYMBOL_POLYGONS,
+    TURN_BOX_SURFACE_POLYGONS, TURN_BOX_EDGE_LINES, SHARED_LANE_SYMBOL_POLYGONS,
+    CORNER_APRON_POLYGONS,
 )
+
+#: THE CHANNELS THE 3D RENDER DELIBERATELY DRAWS NOTHING FOR. Declared because the Blender seam
+#: is the project's one unguarded one (README) - a channel silently missing from blender_scene.py
+#: is a marking that ships in 2D and not in 3D, so "not drawn" has to be a decision recorded here
+#: rather than an omission. One entry: an UNCOLOURED bike lane surface is the road's own asphalt,
+#: and the road is already asphalt. The plan view still draws it, faintly, because a reader of a
+#: 2D sheet needs to see where the lane runs.
+NOT_DRAWN_IN_3D: tuple[Channel, ...] = (BIKE_LANE_UNCOLOURED_SURFACE_POLYGONS,)
 
 
 # --------------------------------------------------------------------------------------
@@ -197,6 +251,19 @@ TAPER_FILL = _kind("taper_fill", Role.FILL, LANE_NARROWING_HATCH_LINES)
 CORNER_HATCH_FILL = _kind("corner_hatch_fill", Role.FILL, CORNER_HATCHING_LINES)
 # Marked curbside parking: the lane's edge line and its stall ticks.
 PARKING_EDGE_LINE = _kind("parking_edge_line", Role.LINE, PARKING_EDGE_LINES)
+# THE SAME STRIPE, PAINTED YELLOW BECAUSE OF WHERE IT IS. MUTCD 3B.09 P3 makes the left edge
+# line of a one-way roadway a solid yellow line, against P2's white on the right - so on NJ 35
+# NB the line at the mouth of the west bay is yellow and the identical line on the east bay is
+# white. Two PaintKinds for one real marking, because a kind names exactly one channel and the
+# channel is what carries the colour; see is_left_edge_of_the_roadway for which kerb gets it.
+#
+# ANYTHING ASKING "IS THIS THE LINE IN FRONT OF A PARKING BAY" MUST READ BAY_EDGE_LINES BELOW,
+# never PARKING_EDGE_LINE alone - metrics.py counts stalls between consecutive pieces of it, and
+# reading only the white kind would have counted the east kerb's stalls and none of the west's.
+LEFT_EDGE_LINE = _kind("left_edge_line", Role.LINE, LEFT_EDGE_LINES)
+#: Every kind that draws THE LINE AT THE MOUTH OF A KERBSIDE PARKING BAY. Two of them, for the
+#: colour reason above and for no other; a reader that cares where the bay starts wants both.
+BAY_EDGE_LINES: tuple[PaintKind, ...] = (PARKING_EDGE_LINE, LEFT_EDGE_LINE)
 STALL_DIVIDER = _kind("stall_divider", Role.LINE, PARKING_STALL_DIVIDER_LINES)
 # The hatched strip between a kerbside zone and the kerb, and the lines that bound it.
 BUFFER_FILL = _kind("buffer_fill", Role.FILL, PARKING_BUFFER_HATCH_LINES)
@@ -218,6 +285,16 @@ BIKE_BUFFER_FILL = _kind("bike_buffer_fill", Role.FILL, BIKE_LANE_HATCH_LINES)
 # The green a bike lane's asphalt is painted, between its two edge stripes - the lane itself
 # rather than anything beside it.
 BIKE_LANE_SURFACE = _kind("bike_lane_surface", Role.COLOUR, BIKE_LANE_SURFACE_POLYGONS)
+# The lane an EXISTING conventional bike lane gives a rider: the same footprint, unpainted.
+BIKE_LANE_UNCOLOURED_SURFACE = _kind("bike_lane_uncoloured_surface", Role.COLOUR,
+                                      BIKE_LANE_UNCOLOURED_SURFACE_POLYGONS)
+#: WHERE A BIKEWAY IS, in the one place that answers for it. Two invariants measure a facility
+#: through its drawn surface on purpose - BikewayReachesTheEndOfItsKerb and
+#: bollard_in_the_bike_lane - because the treatment's own idea of its extent is the arithmetic
+#: they exist not to trust (.claude/SKILLS.md section 0). Green or not is a question about PAINT;
+#: both kinds are the same ground, so a reader asking "is there a lane here" reads this tuple and
+#: cannot come to depend on which of the two a leg happens to carry.
+BIKE_LANE_SURFACE_KINDS: tuple[PaintKind, ...] = (BIKE_LANE_SURFACE, BIKE_LANE_UNCOLOURED_SURFACE)
 # The centre stripe of a TWO-WAY bike lane. Yellow and broken, following MUTCD's rule for a
 # two-way bikeway: yellow because it divides opposing traffic (the same meaning it carries on
 # the roadway), broken because passing is permitted where sight distance allows.
@@ -226,6 +303,19 @@ BIKE_CONTRAFLOW_DIVIDER = _kind("bike_contraflow_divider", Role.LINE, BIKE_LANE_
 #: every 500 ft along a bidirectional lane; MUTCD Fig 9E-1 is the marking. See
 #: src/geometry/treatments/bikeways.py:bike_symbol_stations_ft for the placement rule.
 BIKE_LANE_SYMBOL = _kind("bike_lane_symbol", Role.COLOUR, BIKE_LANE_SYMBOL_POLYGONS)
+#: THE ARROW BESIDE THE BIKE SYMBOL, and on a two-way bikeway it is a THROUGH arrow. MUTCD
+#: 9E.11(06) is a Standard and it is specific: "a turn arrow in the appropriate direction shall be
+#: used if a two-stage turn box is used with a one-way bicycle lane, and a THROUGH arrow in the
+#: appropriate direction shall be used if a two-stage turn box is used with a two-way bikeway".
+#: 9E.07(11) requires the arrow in the lane itself too, placed downstream of the symbol.
+#: Same channel as the symbol it accompanies: both are white paint on the lane's own ground, and
+#: the channel decides the colour (.claude/SKILLS.md section 3).
+BIKE_THROUGH_ARROW = _kind("bike_through_arrow", Role.COLOUR, BIKE_LANE_SYMBOL_POLYGONS)
+# The two-stage turn box: the ground a queuing rider stands on, and the line round it.
+TURN_BOX_SURFACE = _kind("turn_box_surface", Role.COLOUR, TURN_BOX_SURFACE_POLYGONS)
+TURN_BOX_EDGE_LINE = _kind("turn_box_edge_line", Role.LINE, TURN_BOX_EDGE_LINES)
+# The sharrow laid where the facility has ended and the rider is back in the travel lane.
+SHARED_LANE_MARKING = _kind("shared_lane_marking", Role.COLOUR, SHARED_LANE_SYMBOL_POLYGONS)
 # Built ground rather than paint: a flush, drivable corner surface.
 APRON = _kind("apron", Role.SURFACE, CORNER_APRON_POLYGONS)
 # A flex-post delineator. Paint draws the plan view's marker; the render needs a prop.
@@ -389,6 +479,12 @@ AT_AN_OPENING: dict[PaintKind, OpeningRule] = {
     DAYLIGHT_EDGE_LINE: _ZONE,
     ZONE_END_LINE: _ZONE,
     BIKE_BUFFER_FILL: _ZONE,
+    LEFT_EDGE_LINE: OpeningRule(
+        AtAnOpening.CARRIED, AtAnOpening.STOPPED,
+        why="The same stripe as PARKING_EDGE_LINE below and therefore the same rule - only its "
+            "colour differs (MUTCD 3B.09 P3). Stated as its own row rather than aliased so that "
+            "a kind with no row still fails the completeness check that AT_AN_OPENING exists "
+            "for."),
     PARKING_EDGE_LINE: OpeningRule(
         AtAnOpening.CARRIED, AtAnOpening.STOPPED,
         why="MUTCD 3B.11(09) then (08), the pair this table exists for. Behind a parking edge "
@@ -414,6 +510,12 @@ AT_AN_OPENING: dict[PaintKind, OpeningRule] = {
         why="The green is the lane, so it breaks where the lane's lines break and resumes as "
             "the same dashes - one marking seen three ways, which is why the phase is taken "
             "once off this surface and handed to the other two (PaintContext.dash_phase)."),
+    BIKE_LANE_UNCOLOURED_SURFACE: OpeningRule(
+        AtAnOpening.DOTTED, AtAnOpening.DOTTED, dotted_as=BIKE_LANE_UNCOLOURED_SURFACE,
+        why="The row above, for the same footprint without the green on it. Same answer and not "
+            "CARRIED, because what breaks at an entrance is THE LANE - a rider crossing a "
+            "driveway mouth is crossed there whether or not the asphalt under them is painted, "
+            "and the edge lines beside this surface are dotted across on that reasoning."),
     BIKE_CONTRAFLOW_DIVIDER: OpeningRule(
         AtAnOpening.CARRIED, AtAnOpening.CARRIED,
         why="MUTCD 11th ed. 9E.04(02) and 9E.06(15), and NACTO's Urban Bikeway Design Guide for "
@@ -433,6 +535,29 @@ AT_AN_OPENING: dict[PaintKind, OpeningRule] = {
         AtAnOpening.CARRIED, AtAnOpening.CARRIED,
         why="This IS the extension - the marking laid inside an opening by the rules above. It "
             "is never cut against the opening it exists to cross."),
+    BIKE_THROUGH_ARROW: OpeningRule(
+        AtAnOpening.CARRIED, AtAnOpening.CARRIED,
+        why="BIKE_LANE_SYMBOL's row, for the marking placed beside it: a discrete mark at a "
+            "station rather than a run of paint an entrance crosses, and placed clear of a mouth "
+            "by the same rule. 9E.01(04) and 9E.07(11) put the arrow downstream of the symbol, so "
+            "wherever the symbol is legal the arrow a few feet later is too."),
+    TURN_BOX_SURFACE: OpeningRule(
+        AtAnOpening.CARRIED, AtAnOpening.CARRIED,
+        why="A turn box is not laid along a kerb, so no opening runs through it: 9E.11(04) puts "
+            "it between the through movement and the parallel crosswalk, which is inside the "
+            "junction and clear of every driveway. CARRIED rather than STOPPED because a box "
+            "trimmed by an opening would be a box the standard's four-sided white line no longer "
+            "bounds, and 9E.11(07) is a Standard."),
+    TURN_BOX_EDGE_LINE: OpeningRule(
+        AtAnOpening.CARRIED, AtAnOpening.CARRIED,
+        why="The line 9E.11(07) requires on all four sides of the box above, and therefore the "
+            "same answer: it is the outline of that box and follows it, per _ZONE's reasoning "
+            "about a boundary line belonging to the thing it bounds."),
+    SHARED_LANE_MARKING: OpeningRule(
+        AtAnOpening.CARRIED, AtAnOpening.CARRIED,
+        why="A sharrow is a discrete symbol in the middle of a travel lane, not paint along a "
+            "kerb that an entrance interrupts - a driveway mouth crosses the kerbside, and this "
+            "marking is 4 to 12 ft off it (9E.09(07)-(08)). Nothing to cut."),
     APRON: OpeningRule(
         AtAnOpening.CARRIED, AtAnOpening.CARRIED,
         why="Built ground, not paint. A mountable apron is a surface every marking stops at "
@@ -513,12 +638,53 @@ def require_every_kind(table: dict, what: str, skip: tuple = (Role.OBJECT,)) -> 
 # that genuinely is a layer has to say so here.
 MAY_LIE_ON = frozenset({
     (BIKE_LANE_SYMBOL, BIKE_LANE_SURFACE),
+    # The symbol is painted ON the lane whether or not the lane is green - MUTCD Fig 9E-1 is the
+    # marking that makes a conventional bike lane a bike lane, so this pair is if anything the
+    # more ordinary of the two.
+    (BIKE_LANE_SYMBOL, BIKE_LANE_UNCOLOURED_SURFACE),
     # The two-way lane's yellow centre stripe runs the length of the green BY DESIGN: the green
     # is the facility and the stripe divides the two directions inside it. Every other line on
     # the green bounds it from outside, half a stripe clear - which is what makes this one worth
     # declaring rather than inferring from the fact that it currently overlaps.
     (BIKE_CONTRAFLOW_DIVIDER, BIKE_LANE_SURFACE),
+    # The turn box is three paints on one patch of ground BY STANDARD, not by accident:
+    # 9E.11(07) puts a solid white line round all four sides of it, and (05) puts at least one
+    # bicycle symbol and at least one arrow inside it. (12) then says that if green is used it
+    # "shall encompass ALL of the two-stage turn box" - so the coloured area is under every one
+    # of them by instruction, and the three pairs below are that sentence made checkable.
+    # AND THE BOX'S GREEN LIES ON THE BIKEWAY'S OWN, because the box is INSIDE the facility: it
+    # takes the last TURN_BOX_LENGTH_FT of it so that it falls inside the municipal line rather
+    # than past it (bikeways/terminus.py). Same instruction, read the other way - (12)'s green
+    # "shall encompass ALL of the two-stage turn box", and the green already under it is the same
+    # green, one coat either way. Undeclared, the box was not double-painted but DELETED: add()
+    # cuts an incoming fill clear of the fills already down, so the box arrived, was cut against
+    # the lane it sits in, came out empty and left a white boundary line round no green at all.
+    (TURN_BOX_SURFACE, BIKE_LANE_SURFACE),
+    (TURN_BOX_SURFACE, BIKE_LANE_UNCOLOURED_SURFACE),
+    (TURN_BOX_EDGE_LINE, TURN_BOX_SURFACE),
+    (BIKE_LANE_SYMBOL, TURN_BOX_SURFACE),
+    (BIKE_THROUGH_ARROW, TURN_BOX_SURFACE),
+    # AND THE SIDE THAT ABUTS THE BIKEWAY IS STILL ONE OF THE FOUR. "All sides" (07) includes
+    # the one the box shares with the lane it feeds, and a stripe on a shared boundary lies half
+    # on each side of it by construction - there is no offset that puts it clear of both. This
+    # is the ordinary case at a terminus rather than an edge case, so it is declared: the
+    # alternative, leaving that side unstriped, would draw a box open on the side a rider is
+    # meant to leave by.
+    (TURN_BOX_EDGE_LINE, BIKE_LANE_SURFACE),
+    (TURN_BOX_EDGE_LINE, BIKE_LANE_UNCOLOURED_SURFACE),
+    # The arrow beside the symbol, on the lane it marks - 9E.01(04), 9E.07(11).
+    (BIKE_THROUGH_ARROW, BIKE_LANE_SURFACE),
+    (BIKE_THROUGH_ARROW, BIKE_LANE_UNCOLOURED_SURFACE),
 })
+
+#: WHAT IS DELIBERATELY ABSENT FROM MAY_LIE_ON, because the absence is a rule rather than an
+#: oversight. MUTCD 9E.09(05) is a Standard: "green-colored pavement shall not be applied as a
+#: background to shared-lane markings", and (04) forbids a sharrow in a bicycle lane, in a lane
+#: extension, in a two-stage turn box or in a physically-separated bikeway at all. So
+#: (SHARED_LANE_MARKING, BIKE_LANE_SURFACE) and (SHARED_LANE_MARKING, TURN_BOX_SURFACE) are left
+#: out on purpose, and MarkingsDoNotCollide - which forbids any undeclared overlap between two
+#: area-covering markings - is what enforces them. A sharrow drawn on the green is a fatal
+#: violation of the export, which is exactly the force the manual gives it.
 
 
 def lies_legitimately_on(a: PaintKind, b: PaintKind) -> bool:

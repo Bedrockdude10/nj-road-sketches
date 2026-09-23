@@ -305,10 +305,39 @@ def curb_station_span(leg: "Leg", side: str,
     return (lo, hi) if hi > lo else None
 
 
-# How close to due north-south a leg must run before it has no meaningful compass side. sin(12
-# deg): the perpendicular's northing component is then under a fifth of the leg's length, which
-# is the point at which a slight survey lean could flip the answer.
+# How close to due north-south a leg must run before it has no meaningful NORTH or SOUTH side -
+# and, read on the other axis, how close to due east-west before it has no EAST or WEST one.
+# sin(12 deg): the perpendicular's component along the asked-for axis is then under a fifth of
+# the leg's length, which is the point at which a slight survey lean could flip the answer.
 NORTH_SOUTH_LEG_TOLERANCE = 0.2
+
+#: For each compass word, the pair (component of the LEFT side's normal along that axis, the
+#: word the left side faces when that component is positive). The left side is 90 deg
+#: anticlockwise of the heading (dx, dy), i.e. (-dy, dx): its northing component is dx and its
+#: easting component is -dy. One table rather than two branches, because the two axes are the
+#: same question asked of different components and a second branch is where they drift apart.
+_COMPASS_AXES = {"north": ("northing", "south"), "south": ("northing", "south"),
+                 "east": ("easting", "west"), "west": ("easting", "west")}
+
+
+def _midpoint_heading(leg: "Leg") -> tuple[float, float, float]:
+    """(dx, dy, length) of the leg's heading AT ITS MIDPOINT, which is the datum both compass
+    questions are answered from.
+
+    Taken from the centerline's own geometry rather than from config's bearing_deg: the bearing is
+    the outward direction, but the centerline is what offsets are actually measured from, and on a
+    leg with a kink the two differ. Measured at the midpoint, where a lateral offset is least
+    affected by either end.
+
+    One home, because side_facing and leg_heads_toward ask the same question of different
+    components of this one vector - the perpendicular's and the heading's - and two copies of the
+    sampling would be two answers to where the leg points.
+    """
+    line = leg.centerline
+    ahead = line.interpolate(min(line.length * 0.55, line.length))
+    behind = line.interpolate(max(line.length * 0.45, 0.0))
+    dx, dy = ahead.x - behind.x, ahead.y - behind.y
+    return dx, dy, float(np.hypot(dx, dy)) or 1.0
 
 
 def side_facing(leg: "Leg", compass: str) -> str:
@@ -319,11 +348,6 @@ def side_facing(leg: "Leg", compass: str) -> str:
     on the other. Any decision about a real side of a real street therefore has to be
     translated per leg, and doing it by hand is how a corridor treatment ends up on the north
     kerb of one leg and the south kerb of the next.
-
-    Taken from the centerline's own geometry rather than from config's bearing_deg: the bearing
-    is the outward direction, but the centerline is what offsets are actually measured from, and
-    on a leg with a kink the two differ. Measured at the leg's midpoint, where a lateral offset
-    is least affected by either end.
 
     REFUSES ONLY A LEG RUNNING NEARLY DUE NORTH-SOUTH, which is the case that genuinely has no
     answer: its sides face east and west, and a compass side would come from whichever way its
@@ -337,23 +361,58 @@ def side_facing(leg: "Leg", compass: str) -> str:
     cut, whose south side is entirely unambiguous. That dropped the corridor bike lane from one
     of the two Broad St legs at Louellen and left the treatment stopping inside the junction.
     """
-    if compass not in ("north", "south"):
-        raise ValueError(f"side_facing takes 'north' or 'south', not {compass!r}")
-    line = leg.centerline
-    ahead = line.interpolate(min(line.length * 0.55, line.length))
-    behind = line.interpolate(max(line.length * 0.45, 0.0))
-    dx, dy = ahead.x - behind.x, ahead.y - behind.y
-    length = float(np.hypot(dx, dy)) or 1.0
-    if abs(dx) / length < NORTH_SOUTH_LEG_TOLERANCE:
+    if compass not in _COMPASS_AXES:
+        raise ValueError(f"side_facing takes one of {sorted(_COMPASS_AXES)}, not {compass!r}")
+    dx, dy, length = _midpoint_heading(leg)
+    # The left side is the +offset side, 90 degrees anticlockwise of the heading: (-dy, dx). Its
+    # NORTHING component is dx, so the left side faces north exactly when the leg heads east; its
+    # EASTING component is -dy, so the left side faces east exactly when the leg heads south.
+    axis, negative_word = _COMPASS_AXES[compass]
+    component, blind_axis = ((dx, "north-south") if axis == "northing"
+                             else (-dy, "east-west"))
+    if abs(component) / length < NORTH_SOUTH_LEG_TOLERANCE:
         raise ValueError(
             f"Leg {leg.name!r} runs within "
-            f"{float(np.degrees(np.arcsin(NORTH_SOUTH_LEG_TOLERANCE))):.0f} deg of due north-south "
+            f"{float(np.degrees(np.arcsin(NORTH_SOUTH_LEG_TOLERANCE))):.0f} deg of due {blind_axis} "
             f"(its midpoint heading moves {dx:+.1f} ft east for {dy:+.1f} ft north), so its sides "
-            f"face east and west and it has no 'north side' to speak of.")
-    # The left side is the +offset side, 90 degrees anticlockwise of the heading: (-dy, dx). Its
-    # northing component is dx, so the left side faces north exactly when the leg heads east.
-    left_faces = "north" if dx > 0 else "south"
+            f"face the other two compass points and it has no {compass!r} side to speak of.")
+    left_faces = ("north" if axis == "northing" else "east") if component > 0 else negative_word
     return "left" if left_faces == compass else "right"
+
+
+def leg_heads_toward(leg: "Leg", compass: str) -> bool:
+    """Whether this leg's OUTWARD direction points `compass` ("north"/"south"/"east"/"west").
+
+    side_facing asks the compass question of the leg's PERPENDICULAR; this asks it of the
+    heading, and the two together are what let a corridor decision be stated once in real-world
+    terms and translated per leg. A one-way street's traffic runs one compass way along the
+    whole corridor, so on the leg that leaves the junction in that direction it runs OUTWARD and
+    on the opposite leg it runs INWARD - and nothing in a leg's own frame knows the difference,
+    because both legs' bearings point outward by construction.
+
+    That is exactly the mistake this was written for: a with-traffic bike lane on NJ 35 NB drew
+    its arrow outward on both approaches, so the southern one pointed at the oncoming rider.
+
+    Refuses a leg running within NORTH_SOUTH_LEG_TOLERANCE of perpendicular to the axis asked
+    about, on the same reasoning as side_facing - there the answer would come from whichever way
+    a slight survey lean happened to fall.
+    """
+    if compass not in _COMPASS_AXES:
+        raise ValueError(f"leg_heads_toward takes one of {sorted(_COMPASS_AXES)}, "
+                         f"not {compass!r}")
+    dx, dy, length = _midpoint_heading(leg)
+    # The heading's own components, where side_facing takes the perpendicular's: northing is dy
+    # and easting is dx, rather than dx and -dy.
+    axis, _negative_word = _COMPASS_AXES[compass]
+    component, blind_axis = ((dy, "east-west") if axis == "northing"
+                             else (dx, "north-south"))
+    if abs(component) / length < NORTH_SOUTH_LEG_TOLERANCE:
+        raise ValueError(
+            f"Leg {leg.name!r} runs within "
+            f"{float(np.degrees(np.arcsin(NORTH_SOUTH_LEG_TOLERANCE))):.0f} deg of due "
+            f"{blind_axis} (its midpoint heading moves {dx:+.1f} ft east for {dy:+.1f} ft "
+            f"north), so it heads neither {compass!r} nor its opposite to speak of.")
+    return component > 0 if compass in ("north", "east") else component < 0
 
 
 def narrowest_half_width_ft(leg: "Leg", side: str, from_ft: float = 0.0,

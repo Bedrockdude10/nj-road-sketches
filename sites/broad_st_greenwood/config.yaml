@@ -16,6 +16,9 @@ data_sources:
 
 intersection:
   name: "Broad St (CR 518) & Greenwood Ave, Hopewell Borough, NJ 08525"
+  # The town this junction is in, and the key a corridor decision is looked up by
+  # (src/geometry/treatments/corridor.py) - street names repeat between towns.
+  municipality: "Hopewell Borough"
   center_wgs84: [-74.7619598, 40.389179]
   # street1/street2/anchor_query are what scripts/phase1_audit.py used to
   # resolve center_wgs84 in the first place (src/sources/data_loader.py:geocode_intersection)

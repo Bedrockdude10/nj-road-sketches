@@ -22,6 +22,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  bike_lane_uncoloured_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
   corner_apron_polygons:
     count: 0
     extent: null
@@ -62,6 +66,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  left_edge_lines:
+    count: 0
+    extent: null
+    points: 0
   parking_buffer_edge_lines:
     count: 0
     extent: null
@@ -91,7 +99,7 @@ channels:
       min:
       - -117.845
       - -126.098
-    points: 517
+    points: 518
   pavement_far:
     count: 4
     extent:
@@ -101,7 +109,7 @@ channels:
       min:
       - -43.522
       - -45.682
-    points: 64
+    points: 66
   pavement_near:
     count: 1
     extent:
@@ -120,6 +128,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  shared_lane_symbol_polygons:
+    count: 0
+    extent: null
+    points: 0
   sidewalks_far:
     count: 12
     extent:
@@ -129,7 +141,7 @@ channels:
       min:
       - -44.092
       - -46.376
-    points: 108
+    points: 111
   sidewalks_near:
     count: 12
     extent:
@@ -144,6 +156,14 @@ channels:
     count: 0
     extent: null
     points: 0
+  turn_box_edge_lines:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
 existing_marked_crosswalks:
 - columbia_ave_east
 - columbia_ave_west
@@ -153,8 +173,8 @@ facilities: {}
 frame:
   center_m:
   - -1.99
-  - -0.086
-  radius_m: 46.104
+  - -0.056
+  radius_m: 46.067
 legs:
   columbia_ave_east:
     centerline_paint_m: []
@@ -238,18 +258,20 @@ legs:
         - 16.827
       - - -7.168
         - 16.827
-      - - -8.312
-        - 19.652
-      - - -9.456
-        - 22.477
-      - - -11.742
-        - 28.128
-      - - -12.887
-        - 30.953
-      - - -14.035
-        - 33.777
-      - - -15.184
-        - 36.6
+      - - -8.313
+        - 19.651
+      - - -9.46
+        - 22.476
+      - - -10.609
+        - 25.298
+      - - -11.762
+        - 28.12
+      - - -12.917
+        - 30.94
+      - - -14.074
+        - 33.76
+      - - -15.234
+        - 36.579
     - - - -3.527
         - 8.477
       - - -4.117
@@ -266,16 +288,22 @@ legs:
         - 16.864
       - - -8.22
         - 19.689
-      - - -9.363
-        - 22.515
-      - - -11.649
-        - 28.166
-      - - -12.795
-        - 30.991
-      - - -13.942
-        - 33.814
-      - - -15.092
-        - 36.637
+      - - -9.367
+        - 22.513
+      - - -9.367
+        - 22.513
+      - - -10.517
+        - 25.336
+      - - -10.517
+        - 25.336
+      - - -11.67
+        - 28.158
+      - - -12.825
+        - 30.978
+      - - -13.982
+        - 33.798
+      - - -15.141
+        - 36.617
     centerline_start_m: 9.181
     centerline_style: double_yellow
     confirmed: false
@@ -293,8 +321,8 @@ legs:
     crosswalk_skew_deg: -5.151
     crosswalk_style: lines
     far_m:
-    - -15.138
-    - 36.618
+    - -15.187
+    - 36.598
     near_m:
     - 0.025
     - 0.01
@@ -336,19 +364,19 @@ legs:
       - - 8.367
         - -19.628
       - - 8.367
-        - -19.629
-      - - 9.493
-        - -22.462
-      - - 10.619
-        - -25.294
-      - - 11.747
-        - -28.126
-      - - 12.881
-        - -30.956
-      - - 14.022
-        - -33.782
-      - - 15.171
-        - -36.605
+        - -19.628
+      - - 9.494
+        - -22.461
+      - - 10.627
+        - -25.291
+      - - 11.765
+        - -28.119
+      - - 12.909
+        - -30.944
+      - - 14.061
+        - -33.766
+      - - 15.22
+        - -36.584
     - - - 3.109
         - -7.302
       - - 3.591
@@ -366,25 +394,29 @@ legs:
       - - 7.143
         - -16.834
       - - 8.274
-        - -19.665
-      - - 9.4
-        - -22.499
-      - - 10.526
-        - -25.331
-      - - 11.654
-        - -28.163
-      - - 11.654
-        - -28.164
-      - - 12.788
-        - -30.993
-      - - 12.788
-        - -30.993
-      - - 13.93
-        - -33.819
-      - - 13.93
-        - -33.82
-      - - 15.078
-        - -36.643
+        - -19.666
+      - - 9.402
+        - -22.498
+      - - 9.402
+        - -22.498
+      - - 10.534
+        - -25.328
+      - - 10.534
+        - -25.328
+      - - 11.672
+        - -28.156
+      - - 11.672
+        - -28.156
+      - - 12.817
+        - -30.981
+      - - 12.817
+        - -30.981
+      - - 13.969
+        - -33.803
+      - - 13.969
+        - -33.803
+      - - 15.127
+        - -36.622
     centerline_start_m: 7.936
     centerline_style: double_yellow
     confirmed: false
@@ -402,14 +434,14 @@ legs:
     crosswalk_skew_deg: -3.913
     crosswalk_style: lines
     far_m:
-    - 15.124
-    - -36.624
+    - 15.174
+    - -36.603
     near_m:
     - 0.025
     - 0.011
     stop_bar_offset_m: null
-    stop_bar_width_m: 9.526
-    width_m: 9.526
+    stop_bar_width_m: 9.515
+    width_m: 9.515
 name: Existing Conditions
 props:
 - fire_hydrant@420202.49,567130.87

@@ -176,6 +176,234 @@ def test_a_stall_divider_does_not_reach_past_the_kerb():
         assert offsets.max() <= 9.0 + 1e-6
 
 
+# --------------------------------------------------------------------------
+# Angled stalls: three figures, all functions of the angle
+# --------------------------------------------------------------------------
+
+def test_an_angled_bay_is_deeper_than_the_stall_is_long_projected():
+    """The `W*cos(theta)` term, which is the one an eyeballed derivation drops.
+
+    A stall's centre axis reaches `L*sin(theta)` off the kerb, and the STALL BODY reaches
+    further, because its near corner sits half a width to the side of that axis. Dropping the
+    term understates a 9x18 bay at 60 degrees by 4.50 ft - a quarter of the bay, and enough to
+    report a cross-section as fitting a street it overruns.
+    """
+    from math import radians, sin
+    from src.geometry.model.stripes import angled_stall_depth_ft
+
+    depth_ft = angled_stall_depth_ft(18.0, 9.0, 60.0)
+    assert depth_ft == pytest.approx(20.0885, abs=5e-4)
+    axis_only_ft = 18.0 * sin(radians(60.0))
+    assert depth_ft - axis_only_ft == pytest.approx(4.5, abs=5e-4)
+
+
+def test_head_in_stalls_degenerate_to_the_stall_itself():
+    """At 90 degrees the three relations have to collapse to the stall's own dimensions.
+
+    This is the only angle where the answer is known without the trigonometry, so it is the
+    only one that can catch a swapped width and length or an angle measured from the WRONG
+    datum. Every figure here is measured from the KERB, so 90 degrees is head-in - measured
+    from the direction of travel instead, 90 and 0 trade places and each relation below comes
+    out as the other's answer.
+    """
+    from src.geometry.model.stripes import (angled_stall_depth_ft, angled_stall_pitch_ft,
+                                            angled_stall_skew_ft)
+
+    assert angled_stall_depth_ft(18.0, 9.0, 90.0) == pytest.approx(18.0)
+    assert angled_stall_pitch_ft(9.0, 90.0) == pytest.approx(9.0)
+    assert angled_stall_skew_ft(18.0, 90.0) == pytest.approx(0.0)
+    # ...and a shallower bay is deeper, takes more kerb per car, and leans further. All three
+    # move together, which is why they are one module and not three call sites.
+    assert angled_stall_depth_ft(18.0, 9.0, 45.0) > angled_stall_depth_ft(18.0, 9.0, 90.0)
+    assert angled_stall_pitch_ft(9.0, 45.0) > angled_stall_pitch_ft(9.0, 90.0)
+    assert angled_stall_skew_ft(20.0, 45.0) > angled_stall_skew_ft(20.0, 90.0)
+
+
+def test_a_zero_angle_is_refused_rather_than_read_as_parallel():
+    """0 is not parallel parking arrived at as a limit - the relations diverge there.
+
+    A stall lying flat on the kerb has a pitch of `W/sin(0)`, and the honest answer to "how much
+    kerb does it take" is 22 ft from PARKING_STALL_LENGTH_DEFAULT_FT, not an infinity. Silently
+    accepting 0 would draw one divider at the start of the bay and nothing after it.
+    """
+    from src.geometry.model.stripes import angled_stall_depth_ft, angled_stall_pitch_ft
+
+    for angle_deg in (0.0, -30.0, 91.0, 120.0):
+        with pytest.raises(ValueError):
+            angled_stall_depth_ft(18.0, 9.0, angle_deg)
+        with pytest.raises(ValueError):
+            angled_stall_pitch_ft(9.0, angle_deg)
+
+
+def test_a_skewed_divider_leans_down_the_leg_by_its_skew():
+    """The drawn coordinates, not the arithmetic that was supposed to produce them.
+
+    A divider between two angled stalls is NOT one cross-section - that assertion holds for
+    every parallel stall this repo draws (see test_stall_dividers_land_on_their_stations, which
+    says so) and it is exactly what an angled bay breaks. The outer end leads the inner one by
+    `depth/tan(theta)`, and the pitch between dividers is `W/sin(theta)`, which is neither the
+    stall's width nor its length.
+    """
+    from src.geometry.model.stripes import (angled_stall_line_depth_ft, angled_stall_pitch_ft,
+                                            angled_stall_skew_ft)
+
+    # THE LINE'S DEPTH, NOT THE BAY'S - the divider is the stall's SIDE, so the skew that goes
+    # with it is the side's own run along the kerb. Paired with the bay depth instead the skew
+    # comes out 11.60 against a line that spans 9.00, and the stall stops being a rectangle.
+    depth_ft = angled_stall_line_depth_ft(18.0, 60.0)
+    pitch_ft = angled_stall_pitch_ft(9.0, 60.0)
+    skew_ft = angled_stall_skew_ft(depth_ft, 60.0)
+    assert (depth_ft, pitch_ft, skew_ft) == (pytest.approx(15.5885, abs=5e-4),
+                                             pytest.approx(10.3923, abs=5e-4),
+                                             pytest.approx(9.0, abs=5e-4))
+
+    # A kerb far enough out that nothing here is clipped by it - the clip is its own test.
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left", [(0, 30.0), (260, 30.0)])
+    dividers = parking_stall_lines_ft(leg, "left", depth_ft=depth_ft, stall_length_ft=pitch_ft,
+                                      start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                      skew_ft=skew_ft)
+    assert dividers
+    for i, divider in enumerate(dividers):
+        stations, offsets = stations_of(divider, leg)
+        inner_at = stations[np.argmin(offsets)]
+        outer_at = stations[np.argmax(offsets)]
+        assert inner_at == pytest.approx(40.0 + i * pitch_ft, abs=0.05), (
+            "the INNER end is what sits on the pitch - it is the end the next stall's kerb "
+            "frontage is measured from")
+        assert outer_at - inner_at == pytest.approx(skew_ft, abs=0.05)
+        assert offsets.max() - offsets.min() == pytest.approx(depth_ft, abs=0.05)
+
+
+def test_the_painted_divider_is_the_stall_s_own_length_and_leaves_its_mouth_bare():
+    """A divider drawn to the full bay depth paints straight over the way into the stall.
+
+    A bay is `L*sin + W*cos` deep because that is where the far corner of a parked CAR lands.
+    The painted line is the stall's SIDE, so it is `stall_length_ft` of paint at the stall
+    angle and reaches only `L*sin` - and the `W*cos` remainder is the stall's MOUTH, the ground
+    a driver turns across on the way in. Run to the bay depth instead, the line comes out
+    23.20 ft against an 18 ft stall and meets whatever bounds the travel way, so the divider
+    and that boundary read as one line painted across every opening.
+
+    Three things have to agree here or the stall is not a rectangle: the painted LENGTH is the
+    stall's length, the depth it spans is `L*sin`, and the skew is `L*cos`.
+    """
+    from math import cos, radians, sin
+
+    from src.geometry.model.stripes import (angled_stall_depth_ft, angled_stall_line_depth_ft,
+                                            angled_stall_mouth_ft, angled_stall_pitch_ft,
+                                            angled_stall_skew_ft)
+
+    bay_ft = angled_stall_depth_ft(18.0, 9.0, 60.0)
+    line_ft = angled_stall_line_depth_ft(18.0, 60.0)
+    mouth_ft = angled_stall_mouth_ft(9.0, 60.0)
+    assert (bay_ft, line_ft, mouth_ft) == (pytest.approx(20.0885, abs=5e-4),
+                                           pytest.approx(15.5885, abs=5e-4),
+                                           pytest.approx(4.5, abs=5e-4))
+    assert line_ft + mouth_ft == pytest.approx(bay_ft), (
+        "the bay is the painted line plus the mouth, and nothing else - if these stop summing, "
+        "one of the three is being derived from a different stall")
+    # THE MOUTH DOES NOT DEPEND ON THE STALL'S LENGTH, which is what lets a caller holding only
+    # a declared bay depth take the line's depth off it without restating the length.
+    for stall_ft in (16.0, 18.0, 22.0):
+        assert (angled_stall_depth_ft(stall_ft, 9.0, 60.0)
+                - angled_stall_line_depth_ft(stall_ft, 60.0)) == pytest.approx(mouth_ft)
+
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left", [(0, 30.0), (260, 30.0)])
+    dividers = parking_stall_lines_ft(
+        leg, "left", line_ft, angled_stall_pitch_ft(9.0, 60.0), start_ft=40.0, end_ft=200.0,
+        curb_offset_ft=0.0, skew_ft=angled_stall_skew_ft(line_ft, 60.0))
+    assert dividers
+    for divider in dividers:
+        stations, offsets = stations_of(divider, leg)
+        assert divider.length == pytest.approx(18.0, abs=0.05), (
+            "the painted line is the stall's own side, so it is the stall's own length")
+        assert offsets.max() - offsets.min() == pytest.approx(18.0 * sin(radians(60)), abs=0.05)
+        assert stations.max() - stations.min() == pytest.approx(18.0 * cos(radians(60)), abs=0.05)
+        # AND IT STOPS SHORT OF THE TRAVEL WAY BY THE MOUTH. 30 ft kerb less a 20.09 ft bay puts
+        # the bay's inner edge at 9.91 ft; the paint must not come within the mouth of it.
+        assert offsets.min() - (30.0 - bay_ft) == pytest.approx(mouth_ft, abs=0.05)
+
+
+def test_both_treatments_hold_the_divider_back_and_parallel_parking_is_untouched():
+    """The two places a bay gets drawn have to agree, and neither may move parallel parking.
+
+    MarkedParking carries a stall LENGTH and multiplies out; a bikeway section carries only the
+    declared bay DEPTH and subtracts the mouth off it. Two derivations of one figure is the
+    defect shape this repo keeps finding (SKILLS 0a), so they are pinned equal here rather than
+    trusted to stay so - and the parallel case must come out byte-identical to what it always
+    was, because a divider that spans the whole lane is right for a stall lying along the kerb.
+    """
+    from src.geometry.model.stripes import angled_stall_depth_ft
+    from src.geometry.treatments.bikeways.sections import BikeLane
+
+    bay_ft = angled_stall_depth_ft(18.0, 9.0, 60.0)
+    marked = MarkedParking(LegSide("east", "left"), depth_ft=bay_ft, stall_length_ft=18.0,
+                           angle_deg=60.0, stall_width_ft=9.0)
+    section = BikeLane(width_ft=5.0, buffer_ft=2.0, parking_ft=bay_ft,
+                       parking_angle_deg=60.0, parking_stall_width_ft=9.0)
+    assert marked.stall_line_depth_ft == pytest.approx(section.parking_line_depth_ft(), abs=1e-9)
+    assert marked.stall_mouth_ft == pytest.approx(section.parking_mouth_ft(), abs=1e-9)
+    assert marked.skew_ft == pytest.approx(section.parking_skew_ft(runs_outward=True), abs=1e-9)
+    assert marked.stall_line_depth_ft == pytest.approx(15.5885, abs=5e-4)
+
+    # PARALLEL: the divider spans the lane, there is no mouth, and both ends share a station.
+    flat = MarkedParking(LegSide("east", "left"), depth_ft=8.0, stall_length_ft=22.0)
+    assert (flat.stall_line_depth_ft, flat.stall_mouth_ft, flat.skew_ft) == (8.0, 0.0, 0.0)
+    plain = BikeLane(width_ft=5.0, buffer_ft=2.0, parking_ft=8.0)
+    assert (plain.parking_line_depth_ft(), plain.parking_mouth_ft(),
+            plain.parking_skew_ft()) == (8.0, 0.0, 0.0)
+
+
+def test_the_skew_runs_the_way_the_traffic_does():
+    """Which end leads is a design decision, and a bay leaning into the traffic is wrong.
+
+    Front-in stalls lean AWAY from the approaching driver, so on the two kerbs of a one-way
+    street the two bays lean the same way in world terms and OPPOSITE ways in each side's own
+    frame. Nothing about the trigonometry knows this - angled_stall_skew_ft is unsigned and the
+    caller signs it - so the sign is what this test pins.
+    """
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left", [(0, 30.0), (260, 30.0)])
+    leans = {}
+    for skew_ft in (11.6, -11.6):
+        divider = parking_stall_lines_ft(leg, "left", depth_ft=20.09, stall_length_ft=10.39,
+                                         start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                         skew_ft=skew_ft)[0]
+        stations, offsets = stations_of(divider, leg)
+        leans[skew_ft] = stations[np.argmax(offsets)] - stations[np.argmin(offsets)]
+    assert leans[11.6] == pytest.approx(11.6, abs=0.05)
+    assert leans[-11.6] == pytest.approx(-11.6, abs=0.05)
+    # AND NEITHER BAY STARTS OUTSIDE ITS OWN SPAN. A negative skew puts the outer end BEHIND
+    # the inner one, so laying the dividers out from start_ft unshifted would hang the first
+    # one's outer end into the crossing the bay was held clear of.
+    for skew_ft in (11.6, -11.6):
+        for divider in parking_stall_lines_ft(leg, "left", depth_ft=20.09, stall_length_ft=10.39,
+                                              start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                              skew_ft=skew_ft):
+            stations, _offsets = stations_of(divider, leg)
+            assert stations.min() >= 40.0 - 1e-6
+            assert stations.max() <= 200.0 + 1e-6
+
+
+def test_a_skewed_divider_is_still_clipped_to_the_kerb():
+    """The clip is per END, because a skewed divider's two ends are at different stations.
+
+    Clipping both ends against the kerb offset read at ONE station is right for a parallel
+    divider and wrong here by however much the kerb wanders over the skew - 11.6 ft of leg on
+    a 60-degree bay, which is more than the 5-10 ft the kerbs in this project are traced at.
+    """
+    leg = traced(a_leg(length_ft=260.0, width_ft=60.0), "left",
+                 [(0, 26.0), (100, 26.0), (160, 14.0), (260, 14.0)])
+    for divider in parking_stall_lines_ft(leg, "left", depth_ft=20.09, stall_length_ft=10.39,
+                                          start_ft=40.0, end_ft=200.0, curb_offset_ft=0.0,
+                                          skew_ft=11.6):
+        stations, offsets = stations_of(divider, leg)
+        for station, offset in zip(stations, offsets):
+            kerb_ft = float(curb_offsets_at_stations(leg, "left", np.array([station]))[0])
+            assert offset <= abs(kerb_ft) + 1e-6, (
+                f"a divider end at station {station:.1f} reaches {offset:.2f} ft where the kerb "
+                f"is {abs(kerb_ft):.2f} ft out")
+
+
 def test_curb_offsets_are_read_at_the_station_asked_for():
     leg = traced(a_leg(), "left", [(20, 15), (70, 20), (130, 15)])
     got = curb_offsets_at_stations(leg, "left", np.array([20.0, 70.0, 130.0]))
@@ -749,7 +977,7 @@ def test_sampled_polylines_are_rendered_as_polylines_not_chords():
     two_point = set(declared["TWO_POINT_CHANNELS"])
     # The channels whose entries come from inset_line_ft or a taper arc - many vertices apiece.
     for name in ("lane_narrowing_edge_lines", "lane_narrowing_taper_lines", "parking_edge_lines",
-                  "parking_buffer_edge_lines", "parking_buffer_taper_lines",
+                  "left_edge_lines", "parking_buffer_edge_lines", "parking_buffer_taper_lines",
                   "bike_lane_edge_lines"):
         assert name in sampled, f"{name} is a sampled polyline and is not declared as one"
         assert name not in two_point, f"{name} would be drawn as the chord between its endpoints"
@@ -757,12 +985,31 @@ def test_sampled_polylines_are_rendered_as_polylines_not_chords():
 
     # Every paint channel the export writes is drawn SOMEWHERE. This is the half the old guard could
     # not check: a channel dropped from the draw block entirely would have passed it.
-    from src.geometry.markings import CHANNELS
+    from src.geometry.markings import CHANNELS, NOT_DRAWN_IN_3D
 
-    drawn = sampled | two_point | {
-        "bike_lane_contraflow_lines", "bike_lane_surface_polygons",
-        "bike_lane_symbol_polygons", "corner_apron_polygons"}
-    missing = [c.key for c in CHANNELS if c.key not in drawn]
+    # THE REST OF THE DRAW BLOCK, READ OFF THE SOURCE RATHER THAN LISTED HERE. It used to be a
+    # hardcoded set of four channel keys, which is the very drift this test's docstring warns
+    # about one level up: a correct addition to blender_scene.py failed it, and the fix would
+    # have been to widen the literal - the move the comment below calls "how a marking comes to
+    # ship in 2D and not in 3D". Every channel not in the two declared polyline groups is drawn
+    # by a `data.get("<key>", [])` in the draw block, so that call IS the property, and finding
+    # it by AST cannot be fooled by a rename or a rewrite the way a grep for a call site was.
+    read_from_data = {node.args[0].value
+                      for node in ast.walk(ast.parse(source))
+                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                      and node.func.attr == "get" and node.args
+                      and isinstance(node.args[0], ast.Constant)
+                      and isinstance(node.args[0].value, str)}
+    drawn = sampled | two_point | read_from_data
+    # A channel may be absent from the 3D render only by DECISION, and the decision is declared
+    # beside the channels rather than spelled here - otherwise widening this set is how a
+    # marking comes to ship in 2D and not in 3D, which is the seam README calls the unguarded
+    # one. NOT_DRAWN_IN_3D carries the reason for each entry.
+    deliberate = {c.key for c in NOT_DRAWN_IN_3D}
+    assert not (drawn & deliberate), (
+        f"{sorted(drawn & deliberate)} is declared NOT_DRAWN_IN_3D and blender_scene.py draws "
+        f"it anyway - one of the two is wrong about what the render shows")
+    missing = [c.key for c in CHANNELS if c.key not in drawn | deliberate]
     assert not missing, f"declared marking channel(s) never drawn in 3D: {missing}"
 
 
@@ -1287,3 +1534,416 @@ def test_a_stall_keeps_its_clearance_from_the_driveway_return():
         f"itself, and every zone at this driveway is paying for it")
     assert openings.against(PARKING_EDGE_LINE) is None, (
         "and (09) still carries the edge line straight through, clearance or no clearance")
+
+
+# --------------------------------------------------------------------------
+# The white lane line - a broken line between lanes running the SAME way
+# --------------------------------------------------------------------------
+
+def a_straight_leg(name="north", length_ft=190.0, width_ft=70.0):
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+
+    return Leg(name=name, centerline=LineString([(0, 0), (0, length_ft)]),
+                curb_to_curb_ft=width_ft)
+
+
+def test_a_white_lane_line_is_broken_exactly_where_a_yellow_one_is():
+    """Same geometry, different meaning - so the pattern is shared and only the colour differs.
+
+    MUTCD 11th ed. 3A.04 P6 gives ONE broken-line ratio, and the dash spans are what both views
+    draw from, so a second dash loop for the white style would be a second place for the two
+    renderers to disagree about where a line breaks.
+    """
+    from src.render.crosswalks import centerline_paint_ft
+
+    leg = a_straight_leg()
+    yellow = centerline_paint_ft(leg, 20.0, "single_yellow_dashed")
+    white = centerline_paint_ft(leg, 20.0, "single_white_dashed")
+    assert len(white) == len(yellow) > 0
+    for w, y in zip(white, yellow):
+        assert w.equals(y)
+
+
+def test_a_centerline_style_nobody_declared_is_refused_rather_than_drawn_yellow():
+    """The fallthrough used to BE the dashed branch, which is the expensive kind of wrong.
+
+    A typo in a config's centerline_style validated (the schema catches that one) or a treatment
+    setting a style this function had not heard of both landed in the dash loop and came out as
+    a yellow centre line - a confident, plausible marking asserting oncoming traffic. Nothing
+    downstream could tell it from a real one.
+    """
+    import pytest
+
+    from src.render.crosswalks import centerline_paint_ft
+
+    with pytest.raises(ValueError, match="unknown centerline style"):
+        centerline_paint_ft(a_straight_leg(), 20.0, "single_white_solid")
+
+
+def test_every_valid_style_is_something_both_renderers_can_draw():
+    """A style in the vocabulary that no renderer has a colour for draws nothing, silently.
+
+    `none` is the one that legitimately draws nothing. Every other style has to produce paint
+    AND be classified as yellow or white, because the two views pick their material off exactly
+    that classification.
+    """
+    from src.geometry.treatments import (CENTERLINE_IS_WHITE, VALID_CENTERLINE_STYLES)
+    from src.render.crosswalks import centerline_paint_ft
+
+    leg = a_straight_leg()
+    for style in VALID_CENTERLINE_STYLES:
+        drawn = centerline_paint_ft(leg, 20.0, style)
+        if style == "none":
+            assert drawn == []
+            continue
+        assert drawn, f"{style} draws nothing"
+        assert isinstance(style in CENTERLINE_IS_WHITE, bool)
+    assert set(CENTERLINE_IS_WHITE) <= set(VALID_CENTERLINE_STYLES)
+
+
+def test_blender_centerline_colours_match_the_styles():
+    """blender_scene.py's white-style list and treatments.CENTERLINE_IS_WHITE are one set.
+
+    Blender runs in its own interpreter and cannot import src (see .importlinter), so the two are
+    a copy by necessity - the same pair as the stroke widths above, and the same way of pinning
+    them. Drift here is invisible: the render simply lays the line in the other material, and a
+    lane line that comes out yellow says the next lane runs at you.
+    """
+    import ast
+    from pathlib import Path
+
+    from src.geometry.treatments import CENTERLINE_IS_WHITE
+
+    source = (Path(__file__).resolve().parent.parent
+              / "scripts" / "blender" / "blender_scene.py").read_text()
+    declared = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            try:
+                declared[node.targets[0].id] = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                continue
+    assert "CENTERLINE_STYLES_WHITE" in declared, (
+        "blender_scene.py no longer declares CENTERLINE_STYLES_WHITE - the guard has nothing to "
+        "read, which is not the same as the two agreeing")
+    assert set(declared["CENTERLINE_STYLES_WHITE"]) == set(CENTERLINE_IS_WHITE)
+
+
+def test_the_plan_view_draws_a_lane_line_white_and_a_centre_line_gold():
+    """The colour is read off the style in the 2D view too, not hardcoded at the call site.
+
+    Both views hardcoded gold before, so adding a style was two edits with nothing to catch the
+    second - and the plan view is where a reviewer checks what the render claims.
+    """
+    import ast
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parent.parent
+              / "src" / "render" / "plan_view.py").read_text()
+    tree = ast.parse(source)
+    hardcoded_gold = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "plot"
+        and any(kw.arg == "color" and isinstance(kw.value, ast.Constant)
+                and kw.value.value == "gold" for kw in node.keywords)]
+    assert not hardcoded_gold, (
+        "a plan-view line is still drawn gold unconditionally - the centreline's colour has to "
+        "come from its style, or a white lane line is drawn as a yellow centre line")
+
+
+def test_a_one_way_lane_pinned_to_its_kerb_MOVES_THE_LINE_BETWEEN_THE_TRAVEL_LANES():
+    """DesignState.travel_lane_divider_shift must see every pinned section, not the two-way ones.
+
+    It looked up AddTwoWayBikeLane by name and asked divider_shift_toward_ft only about the legs
+    that lookup found, so a section pinned by a ONE-WAY lane shifted the travel way, the checks
+    measured the shift (they ask the function directly) and the PAINT stayed on the alignment.
+    That is the second-derivation defect .claude/SKILLS.md section 2 is about, and it only became
+    visible when there was a line down the middle to misplace: NJ 35 NB's two northbound lanes
+    would have come out 3.70 ft different in width under a lane line claiming to divide them
+    equally.
+
+    Asserted against divider_shift_toward_ft rather than against a number, because the point is
+    that ONE definition answers for both - a literal here would be a third copy.
+    """
+    from src.geometry.targets import LegSide, Side
+    from src.geometry.treatments import (AddBikeLane, DesignState,
+                                         divider_shift_toward_ft)
+
+    leg = a_straight_leg(name="east", width_ft=70.0)
+    state = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+        # Pinned, one-way, behind an angled bay - the NJ 35 NB section, which is the only
+        # shape of section this used to miss.
+        AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=2.0,
+                     parking_ft=20.09, parking_angle_deg=60, pin_to_kerb=True))
+    shift = state.travel_lane_divider_shift("east")
+    assert shift is not None, (
+        "a pinned one-way lane shifts the travel way, so the line between the travel lanes is "
+        "not on the alignment - see divider_shift_toward_ft, which has known this all along")
+    distance_ft, side = shift
+    assert distance_ft > 0 and side == str(Side.LEFT)   # away from the kerb carrying the lane
+    assert distance_ft == pytest.approx(
+        divider_shift_toward_ft(state, "east", Side.LEFT), abs=1e-9)
+
+    # And the other direction: an UNPINNED lane leaves the lanes straddling the alignment, so
+    # None still means None. Without this the fix could be "always return a shift".
+    unpinned = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+        AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=2.0))
+    assert unpinned.travel_lane_divider_shift("east") is None
+
+
+# --------------------------------------------------------------------------
+# The left edge line of a one-way roadway is YELLOW (MUTCD 3B.09 P3)
+# --------------------------------------------------------------------------
+def _a_state_with_one_way_legs(heads_toward="north"):
+    """A DesignState double carrying nothing but the two legs and which way they run.
+
+    A double and not a site model, because tests/fixtures/data clips to Mercer County and the
+    only one-way carriageway this project draws is in Ocean - see conftest.
+    """
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+    from src.geometry.treatments import DesignState
+
+    # Both point OUTWARD from the junction at the origin, which is the whole point: the northern
+    # approach runs away up the page and the southern one away down it.
+    legs = {"gc_north": Leg(name="gc_north", centerline=LineString([(0, 0), (0, 190)]),
+                            curb_to_curb_ft=70.0),
+            "gc_south": Leg(name="gc_south", centerline=LineString([(0, 0), (0, -190)]),
+                            curb_to_curb_ft=70.0)}
+    return DesignState(legs=legs, corner_fillets={},
+                       traffic_heads_toward=dict.fromkeys(legs, heads_toward))
+
+
+def test_the_left_edge_of_a_ONE_WAY_roadway_is_the_same_real_kerb_on_both_approaches():
+    """The trap this exists for: both legs of a street point OUTWARD from the junction.
+
+    So `side == "left"` names the west kerb on the northern approach and the EAST kerb on the
+    southern one. Asked that way, the yellow line would cross the street at the junction.
+    """
+    from src.geometry.treatments import is_left_edge_of_the_roadway
+
+    state = _a_state_with_one_way_legs("north")
+    yellow = {(name, side) for name in state.legs for side in ("left", "right")
+              if is_left_edge_of_the_roadway(state, state.legs[name], side)}
+    assert yellow == {("gc_north", "left"), ("gc_south", "right")}, (
+        "the yellow edge line has to land on ONE real kerb along a one-way street; it went to "
+        f"{sorted(yellow)}")
+
+
+def test_a_two_way_street_has_no_left_edge_line_on_either_kerb():
+    """Both edges of an ordinary street are white (3B.09 P2) - the yellow there is the CENTRE
+    line, which is a different marking with a different home."""
+    from src.geometry.treatments import DesignState, is_left_edge_of_the_roadway
+
+    legs = {"main": a_straight_leg("main")}
+    two_way = DesignState(legs=legs, corner_fillets={})
+    assert not any(is_left_edge_of_the_roadway(two_way, legs["main"], side)
+                   for side in ("left", "right"))
+
+
+def test_the_yellow_stripes_are_the_same_two_in_both_renderers():
+    """blender_scene.py's YELLOW_CHANNELS against markings.YELLOW_CHANNELS, read from the source.
+
+    The same AST mirror the centreline styles get, and for the reason section 3 of SKILLS.md
+    gives: Blender runs under its own bundled Python and cannot import src, so the two lists are
+    written twice and nothing but a test can hold them together. A yellow marking routed through
+    a white channel renders yellow in the plan view and white in 3D, with no check able to see it.
+    """
+    import ast
+    from pathlib import Path
+
+    from src.geometry.markings import YELLOW_CHANNELS
+
+    source = (Path(__file__).resolve().parent.parent
+              / "scripts" / "blender" / "blender_scene.py").read_text()
+    declared = {node.targets[0].id: ast.literal_eval(node.value)
+                for node in ast.parse(source).body
+                if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "YELLOW_CHANNELS"}
+    assert "YELLOW_CHANNELS" in declared, (
+        "blender_scene.py no longer declares which channels are yellow - the guard has nothing "
+        "to read, which is not the same as the render being right")
+    assert set(declared["YELLOW_CHANNELS"]) == {c.key for c in YELLOW_CHANNELS}
+
+
+def test_the_plan_view_draws_every_yellow_channel_yellow_too():
+    """The 3D render is not the only place the colour can drift: PAINT_STYLE is per KIND, so a
+    kind whose channel is yellow must not be styled in the blue the white bay edge line uses."""
+    from src.geometry import markings
+    from src.render.plan_view import PAINT_STYLE
+
+    yellow_keys = {c.key for c in markings.YELLOW_CHANNELS}
+    for kind in markings.KINDS.values():
+        if kind.channel is None or kind.channel.key not in yellow_keys:
+            continue
+        colour = PAINT_STYLE.get(kind, {}).get("color")
+        assert colour in ("gold", "goldenrod", "yellow"), (
+            f"{kind} travels in a YELLOW channel but the plan view draws it {colour!r}")
+
+
+def test_a_leg_traffic_LEAVES_BY_gets_no_stop_bar_of_our_invention():
+    """One-way street, so half its legs are exits - and nobody stops on the way out.
+
+    The derivation hangs a bar off every leg carrying a crosswalk, which is right on a two-way
+    street because every leg there is an approach. Danny traced three bars at NJ 35 & Reese for
+    four legs; the fourth was this function's, not the street's.
+    """
+    from src.render.crosswalks import resolve_stop_bar_offsets
+
+    state = _a_state_with_one_way_legs("north")
+    offsets = dict.fromkeys(state.legs, (40.0, "modelled"))
+    bars = resolve_stop_bar_offsets(state, offsets, stop_lines=[])
+    # gc_north points north and traffic heads north, so it is the way OUT of the junction.
+    assert set(bars) == {"gc_south"}, (
+        f"a bar was derived for a leg traffic leaves by; got {sorted(bars)}")
+
+
+def test_a_ONE_WAY_carriageways_stop_bar_spans_EVERY_approach_lane():
+    """NJ 35 NB is two lanes wide and both of them are approach lanes.
+
+    The bar was sized off the "entering half" - correct on a two-way street, where the far half
+    belongs to oncoming traffic, and half a street on a carriageway where nobody is coming the
+    other way. It reached the middle of the roadway and stopped, leaving the left lane with
+    nothing to stop at.
+    """
+    from src.render.crosswalks import STOP_BAR_CURB_CLEARANCE_M, stop_bar_ends_ft
+    from src.render.coords import FT_TO_M
+
+    state = _a_state_with_one_way_legs("north")
+    clearance_ft = STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
+    kerb_ft = 70.0 / 2 - clearance_ft
+    for name in state.legs:
+        outer_ft, inner_ft = stop_bar_ends_ft(state, name)
+        assert (outer_ft, inner_ft) == pytest.approx((kerb_ft, -kerb_ft)), (
+            f"{name}: a one-way carriageway's bar runs kerb to kerb; this one runs "
+            f"{inner_ft:+.2f} to {outer_ft:+.2f} ft of a roadway {kerb_ft * 2:.2f} ft wide")
+
+
+def test_a_TWO_WAY_legs_stop_bar_still_stops_at_the_centreline():
+    """The rule above must not reach an ordinary street. There the far lanes are oncoming, and a
+    bar painted across them tells a driver to stop in the wrong half of the road."""
+    from src.geometry.treatments import DesignState
+    from src.render.crosswalks import stop_bar_ends_ft
+
+    state = _a_state_with_one_way_legs("north")
+    two_way = DesignState(legs=state.legs, corner_fillets={})      # no traffic_heads_toward
+    for name in two_way.legs:
+        _outer_ft, inner_ft = stop_bar_ends_ft(two_way, name)
+        assert inner_ft == pytest.approx(0.0), (
+            f"{name}: the bar starts {inner_ft:+.2f} ft off the centreline of a two-way street")
+
+
+def test_a_two_way_street_still_gets_a_stop_bar_on_every_leg():
+    """The rule above must not reach an ordinary street, where every leg is an approach."""
+    from src.geometry.treatments import DesignState
+    from src.render.crosswalks import resolve_stop_bar_offsets
+
+    state = _a_state_with_one_way_legs("north")
+    two_way = DesignState(legs=state.legs, corner_fillets={})      # no traffic_heads_toward
+    offsets = dict.fromkeys(two_way.legs, (40.0, "modelled"))
+    assert set(resolve_stop_bar_offsets(two_way, offsets, stop_lines=[])) == set(two_way.legs)
+
+
+# --------------------------------------------------------------------------
+# Green coloured pavement is a TREATMENT, not a bike lane
+# --------------------------------------------------------------------------
+def _bike_lane_surface_kinds(observed: bool) -> set:
+    """The surface kind(s) a lane on one kerb emits, with everything else held equal."""
+    from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
+    from src.geometry.paint import curbside_paint_ft
+    from src.geometry.targets import LegSide
+    from src.geometry.treatments import AddBikeLane, DesignState
+
+    leg = a_straight_leg(name="east", width_ft=70.0)
+    state = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+        AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=0.0, pin_to_kerb=True,
+                     observed=observed))
+    paint = curbside_paint_ft(state, crossing_at(20.0), None)
+    return {p.kind for p in paint if p.kind in BIKE_LANE_SURFACE_KINDS}
+
+
+def test_an_EXISTING_bike_lane_is_not_painted_green():
+    """Green coloured pavement is something a PROPOSAL does, not something a street has.
+
+    The plan view's legend calls its green swatch "Bike lane - green surface" and
+    blender_scene.py lays that green as real pavement under the white stripes, so the green is a
+    claim about paint on the ground rather than a schematic. NJ 35 through Lavallette has
+    carried `cycleway:right=lane` on `surface=asphalt` - with no colour tag anywhere - since the
+    way was drawn, which is a conventional white-striped bike lane and nothing more.
+
+    Drawn green on the sheet labelled EXISTING CONDITIONS, the drawing asserts a treatment the
+    street has not had, and the before/after then credits the proposal with nothing for applying
+    it, because the green was already in the "before". That is the same false claim about a
+    street as a marked crosswalk rendered bare, pointing the other way.
+
+    HERMETIC, ON A SYNTHETIC LEG, and deliberately not on the site it was found at: the roads
+    fixture is clipped to Mercer County and this junction is in Ocean, so a site-level version of
+    this would SKIP in every run - which pins nothing at all.
+    """
+    from src.geometry.markings import BIKE_LANE_SURFACE, BIKE_LANE_UNCOLOURED_SURFACE
+
+    assert _bike_lane_surface_kinds(observed=True) == {BIKE_LANE_UNCOLOURED_SURFACE}, (
+        "an OSM-observed bike lane was drawn in the green a proposal applies")
+    # The other direction, without which the fix could be "never paint a lane green".
+    assert _bike_lane_surface_kinds(observed=False) == {BIKE_LANE_SURFACE}, (
+        "a PROPOSED lane still proposes green coloured pavement")
+
+
+def test_an_existing_lane_still_has_a_FOOTPRINT_the_invariants_can_see():
+    """Why this is a second kind and not a deletion.
+
+    Two invariants measure a bikeway through its DRAWN surface on purpose -
+    BikewayReachesTheEndOfItsKerb and bollard_in_the_bike_lane - because the treatment's own
+    idea of its extent is the arithmetic they exist not to trust (.claude/SKILLS.md section 0).
+    Dropping the polygon to take the green off would have made both blind on exactly the lane
+    the OSM reader had just added, which is the "check that cannot see anything must not pass"
+    failure in its most direct form.
+
+    So: same ground, both ways, to the square foot. Asserted as an identity between the two
+    builds rather than against a number, because a literal here would be a third derivation of a
+    width that already has one.
+    """
+    from shapely.ops import unary_union
+
+    from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
+    from src.geometry.paint import curbside_paint_ft
+    from src.geometry.targets import LegSide
+    from src.geometry.treatments import AddBikeLane, DesignState
+
+    def footprint(observed: bool):
+        leg = a_straight_leg(name="east", width_ft=70.0)
+        state = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+            AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=0.0, pin_to_kerb=True,
+                         observed=observed))
+        paint = curbside_paint_ft(state, crossing_at(20.0), None)
+        return unary_union([p.geometry for p in paint if p.kind in BIKE_LANE_SURFACE_KINDS])
+
+    existing, proposed = footprint(True), footprint(False)
+    assert existing.area > 0, "an existing bike lane has to be drawn as ground somewhere"
+    assert existing.area == pytest.approx(proposed.area, abs=1e-6), (
+        f"the same lane covers {existing.area:.2f} sq ft unpainted and {proposed.area:.2f} sq ft "
+        f"green - taking the colour off moved the ground, so the two invariants that read this "
+        f"footprint are measuring a different lane depending on who painted it")
+
+
+def test_every_fill_colour_has_an_outline_colour():
+    """A filled marking's fill colour must be in plan_view.PAINT_FILL_EDGE.
+
+    Written after a new marking's `seagreen` fill raised KeyError from inside the plan build -
+    not at import, not in any unit test, but three phases downstream while rendering a site,
+    which is exactly the drift the six-place table in README warns about. PAINT_FILL_EDGE is a
+    seventh place and nothing was checking it.
+
+    A LINE has no fill, so only entries that actually get filled are required: the ones with an
+    alpha or a hatch. That is the same distinction _draw already makes.
+    """
+    from src.render.plan_view import PAINT_FILL_EDGE, PAINT_STYLE
+
+    missing = sorted({style["color"] for style in PAINT_STYLE.values()
+                      if "linewidth" not in style and style.get("color") not in PAINT_FILL_EDGE})
+    assert not missing, (f"fill colour(s) with no outline colour in plan_view.PAINT_FILL_EDGE: "
+                         f"{missing} - add a row there in the same change as the style")

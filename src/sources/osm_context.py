@@ -8,7 +8,7 @@ import os
 import time
 from pathlib import Path
 
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 
 import requests
 
@@ -18,12 +18,12 @@ from src.geometry.model import buffer_point_wgs84
 DEFAULT_BUILDING_HEIGHT_M = 7.0  # ~2 stories, typical for small-borough Main St buildings
 METERS_PER_LEVEL = 3.0
 # Where fetched OSM responses are cached. Overridable so the test suite can point at a
-# committed fixture set and run hermetically - see tests/conftest.py and HOPEWELL_OFFLINE.
+# committed fixture set and run hermetically - see tests/conftest.py and ROAD_SKETCHES_OFFLINE.
 CACHE_DIR = Path(os.environ.get(
-    "HOPEWELL_OSM_CACHE",
+    "ROAD_SKETCHES_OSM_CACHE",
     Path(__file__).resolve().parent.parent.parent / "output" / ".cache"))
 
-REFRESH_ENV = "HOPEWELL_REFRESH_OSM"
+REFRESH_ENV = "ROAD_SKETCHES_REFRESH_OSM"
 
 # Second-level cache: the raw borough snapshot and its parsed form. A batch build asks for
 # the same junction's kerbs ~27 times over; re-parsing the same JSON each time is pure waste.
@@ -44,14 +44,14 @@ _warned: set[str] = set()
 def refresh_requested() -> bool:
     """True when this process was told to ignore the cache and re-pull from Overpass.
 
-    Refusing while HOPEWELL_OFFLINE is set is not politeness: the test suite runs against
+    Refusing while ROAD_SKETCHES_OFFLINE is set is not politeness: the test suite runs against
     the committed fixture cache, and honouring a stray refresh there would turn every fetch
     into an OfflineCacheMiss.
     """
     if not os.environ.get(REFRESH_ENV):
         return False
-    if os.environ.get("HOPEWELL_OFFLINE"):
-        _warn_once(f"{REFRESH_ENV} ignored: HOPEWELL_OFFLINE is set, so the cached responses "
+    if os.environ.get("ROAD_SKETCHES_OFFLINE"):
+        _warn_once(f"{REFRESH_ENV} ignored: ROAD_SKETCHES_OFFLINE is set, so the cached responses "
                    f"in {CACHE_DIR} are all this process is allowed to see.")
         return False
     return True
@@ -141,16 +141,50 @@ OSM_API_MAP = "https://api.openstreetmap.org/api/0.6/map.json"
 # and disturbs nothing already cached (the cache key is a hash of the bbox, so re-keying
 # would re-download every existing site and orphan committed fixtures).
 #
-# Each bbox has margin for the context radii (up to 250 m) at the sites inside it, and each is
-# far under the API's 0.25 sq deg limit. Sites in NO area are refused loudly rather than
-# silently returning nothing - see assert_within_snapshot.
-SNAPSHOT_AREAS: dict[str, tuple[float, float, float, float]] = {
-    # west, south, east, north
-    "hopewell_borough": (-74.7760, 40.3830, -74.7500, 40.3970),    # 0.000364 sq deg
-    "pennington_borough": (-74.8120, 40.3180, -74.7830, 40.3420),  # 0.000696 sq deg
-}
+# THE AREAS THEMSELVES ARE NOT DECLARED HERE. They are a list of towns - the same kind of fact
+# as which junctions this project studies - so they live in sites/osm_areas.yaml and porting to
+# a new municipality touches no module. Sites in NO area are refused loudly rather than
+# silently returning nothing; see assert_within_snapshot.
+SNAPSHOT_AREAS_FILE = Path(__file__).resolve().parents[2] / "sites" / "osm_areas.yaml"
 
-# The Hopewell bbox under its old name. Kept because the cache key is a hash of this exact
+# The OSM API refuses a /map call bigger than this, and a bbox typed with a sign or a digit
+# wrong is usually enormous - so the check that catches the typo is the API's own limit.
+MAX_SNAPSHOT_SQ_DEG = 0.25
+
+
+def _load_snapshot_areas(path: Path = SNAPSHOT_AREAS_FILE) -> dict:
+    """{town: (west, south, east, north)} from sites/osm_areas.yaml, validated on load.
+
+    Validated because every way a bbox can be wrong reads downstream as "nothing mapped here":
+    an inverted or degenerate rectangle contains no site (so every site is refused with a
+    message about the site), and one over the API's size limit fails at download time, hours of
+    tracing later. Both are cheap to catch at the only moment the tuple is read.
+    """
+    import yaml
+
+    raw = yaml.safe_load(path.read_text()) or {}
+    areas = {}
+    for name, bbox in raw.items():
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            raise ValueError(f"{path.name}: {name} must be [west, south, east, north], got {bbox!r}")
+        west, south, east, north = (float(v) for v in bbox)
+        if not (east > west and north > south):
+            raise ValueError(
+                f"{path.name}: {name} is not a rectangle running west->east and south->north "
+                f"({west}, {south}, {east}, {north}). A reversed bbox contains no site, so every "
+                f"site in this town would be refused as though it were somewhere else.")
+        if (east - west) * (north - south) > MAX_SNAPSHOT_SQ_DEG:
+            raise ValueError(
+                f"{path.name}: {name} is {(east - west) * (north - south):.3f} sq deg, over the "
+                f"OSM API's {MAX_SNAPSHOT_SQ_DEG} sq deg limit for one /map call - it would be "
+                f"refused at download. Split the town into smaller areas.")
+        areas[name] = (west, south, east, north)
+    return areas
+
+
+SNAPSHOT_AREAS: dict[str, tuple[float, float, float, float]] = _load_snapshot_areas()
+
+# The Hopewell bbox, still reachable by name. Kept because the cache key is a hash of this exact
 # tuple and the committed fixture is named after it - see test_hopewells_cache_key_is_unchanged.
 BOROUGH_BBOX = SNAPSHOT_AREAS["hopewell_borough"]
 
@@ -183,16 +217,17 @@ def _area_for(center_wgs84: Point, radius_m: float) -> tuple[float, float, float
     raise SiteOutsideSnapshotError(
         f"this site's {radius_m:.0f} m context window ({west:.5f},{south:.5f},{east:.5f},"
         f"{north:.5f}) is not fully inside any downloaded snapshot area. Areas: {areas}. "
-        f"Add one for this site to SNAPSHOT_AREAS in src/sources/osm_context.py - a new area "
-        f"is a separate download and leaves every existing cache and fixture untouched.")
+        f"Add one for this site to {SNAPSHOT_AREAS_FILE.parent.name}/{SNAPSHOT_AREAS_FILE.name} "
+        f"(SNAPSHOT_AREAS) - a new area is a separate download and leaves every existing "
+        f"cache and fixture untouched.")
 
 
 def _download_snapshot(bbox: tuple | None = None) -> list[dict]:
     """One whole snapshot area from the OSM API, falling back to Overpass."""
-    if os.environ.get("HOPEWELL_OFFLINE"):
+    if os.environ.get("ROAD_SKETCHES_OFFLINE"):
         from src.sources.data_loader import OfflineCacheMiss
         raise OfflineCacheMiss(
-            "HOPEWELL_OFFLINE is set and the snapshot for this area is not in the fixture "
+            "ROAD_SKETCHES_OFFLINE is set and the snapshot for this area is not in the fixture "
             "cache. Refresh it with: cp output/.cache/borough_*.json tests/fixtures/osm_cache/")
 
     west, south, east, north = BOROUGH_BBOX if bbox is None else bbox
@@ -214,11 +249,18 @@ def _download_snapshot(bbox: tuple | None = None) -> list[dict]:
 
 
 def fetch_borough_osm(use_cache: bool = True, bbox: tuple | None = None) -> dict:
-    """{"nodes": {id: element}, "ways": [element]} for one whole snapshot area.
+    """{"nodes": {id: element}, "ways": [element], "relations": [element]} for one snapshot area.
 
     `bbox` selects the area; None means Hopewell Borough. Raises if any way references a
     node that is not present - a gap means a truncated download, and half a kerb is worse
     than no kerb.
+
+    RELATIONS ARE KEPT, and the only one read so far is the municipal boundary. A boundary is
+    the one fact in this project nobody can trace off the pavement: an admin_level=8 relation
+    carries the tags and its member ways carry the geometry, so dropping relations threw away
+    where the corridor ENDS while keeping every foot of street past it. See
+    `fetch_municipal_boundary`. The download already contained them - /map.json returns
+    relations whose members are in the bbox - so this costs nothing but a key.
     """
     cache_path = _snapshot_path(bbox)
     if use_cache and _cache_hit(cache_path):
@@ -232,13 +274,14 @@ def fetch_borough_osm(use_cache: bool = True, bbox: tuple | None = None) -> dict
     if key not in _MEMO:
         nodes = {el["id"]: el for el in raw if el["type"] == "node"}
         ways = [el for el in raw if el["type"] == "way"]
+        relations = [el for el in raw if el["type"] == "relation"]
         dangling = sum(1 for w in ways for nid in w.get("nodes", []) if nid not in nodes)
         if dangling:
             raise RuntimeError(
                 f"{dangling} way node reference(s) in the snapshot don't resolve - the "
                 f"download is truncated. Delete {cache_path} and re-pull; do not build geometry "
                 f"from it, the ways would come out with missing vertices.")
-        _MEMO[key] = {"nodes": nodes, "ways": ways}
+        _MEMO[key] = {"nodes": nodes, "ways": ways, "relations": relations}
     return _MEMO[key]
 
 
@@ -501,3 +544,51 @@ def fetch_stop_lines(center_wgs84: Point, radius_m: float) -> list[dict]:
                                                lambda t: t.get("road_marking") == "stop_line")
                 if len(coords) >= 2]
     return _layer("stop_lines", center_wgs84, radius_m, build)
+
+
+def fetch_municipality_containing(center_wgs84: Point, radius_m: float) -> tuple | None:
+    """(name, [ring of (lon, lat)]) for the municipality this junction stands in, or None.
+
+    WHY THIS LAYER EXISTS. Every terminus in this project is jurisdictional - the corridor stops
+    at the borough line because nothing past it is the borough's to build - and until this was
+    read, the terminus device was placed against the end of the DRAWN leg instead. Those agree
+    to 0.3 ft at W Broad & Lanning by construction (that leg is configured to the line) and they
+    are not the same fact: a leg's length is a rendering decision (.claude/SKILLS.md section 0b),
+    so on a 2.5x sheet the two-stage turn box marched 195 ft into Hopewell Township.
+
+    BY CONTAINMENT, NOT BY NAME, because the names do not line up and the failure is silent.
+    OSM calls the borough "Hopewell" while every site config says "Hopewell Borough", and the
+    neighbour it shares this corridor with is "Hopewell Township" - so a substring match returns
+    the wrong municipality and an exact match returns nothing. Which polygon holds the junction
+    needs no naming convention to be right. `admin_level=8` is New Jersey's municipality level.
+
+    A RING THAT DOES NOT CLOSE IS NOT A MUNICIPALITY, so it is dropped rather than closed for it.
+    Member ways come out of the area snapshot, and a municipality bigger than its bbox has its
+    ring clipped - which is not a smaller town but a polygon with a straight edge down the bbox,
+    that a leg can cross anywhere. Measured over the five areas here: Hopewell and Pennington
+    close from one way each, Lavallette closes in its own area and is clipped in the other, and
+    Hopewell Township (14 ways, none of them in the borough's snapshot) never appears at all.
+    A junction whose municipality does not resolve returns None, and `municipal_limit_ft` then
+    has nothing to say about that leg - the same answer as a leg that never leaves town.
+    """
+    def build():
+        snapshot = snapshot_for_site(center_wgs84, radius_m)
+        nodes, ways = snapshot["nodes"], {w["id"]: w for w in snapshot["ways"]}
+        for relation in snapshot.get("relations", []):
+            tags = relation.get("tags") or {}
+            if tags.get("boundary") != "administrative" or tags.get("admin_level") != "8":
+                continue
+            for member in relation.get("members", []):
+                if member.get("type") != "way" or member.get("role") not in ("outer", ""):
+                    continue
+                way = ways.get(member["ref"])
+                if way is None:
+                    continue
+                ring = [(nodes[nid]["lon"], nodes[nid]["lat"])
+                        for nid in way.get("nodes", []) if nid in nodes]
+                if len(ring) < 4 or ring[0] != ring[-1]:
+                    continue
+                if Polygon(ring).contains(center_wgs84):
+                    return (tags.get("name"), ring)
+        return None
+    return _layer("municipality", center_wgs84, radius_m, build)

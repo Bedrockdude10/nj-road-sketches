@@ -4,7 +4,7 @@ Two things make the suite reproducible and fast:
 
   * The OSM cache is pointed at tests/fixtures/osm_cache, a committed snapshot of the
     Overpass responses for the four sites. Tests therefore see a fixed OSM state.
-  * HOPEWELL_OFFLINE is set, so any fetch that ISN'T satisfied from that snapshot raises
+  * ROAD_SKETCHES_OFFLINE is set, so any fetch that ISN'T satisfied from that snapshot raises
     OfflineCacheMiss instead of quietly reaching the network. A test that silently depends
     on Overpass's uptime and current replication state is worse than no test - during one
     editing session two consecutive live fetches of the same junction returned 4 tactile
@@ -21,15 +21,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_CACHE = REPO_ROOT / "tests" / "fixtures" / "osm_cache"
 FIXTURE_DATA = REPO_ROOT / "tests" / "fixtures" / "data"
 
-# Set before any src module is imported: osm_context reads HOPEWELL_OSM_CACHE at import time.
-os.environ.setdefault("HOPEWELL_OSM_CACHE", str(FIXTURE_CACHE))
-os.environ.setdefault("HOPEWELL_OFFLINE", "1")
+# Set before any src module is imported: osm_context reads ROAD_SKETCHES_OSM_CACHE at import time.
+os.environ.setdefault("ROAD_SKETCHES_OSM_CACHE", str(FIXTURE_CACHE))
+os.environ.setdefault("ROAD_SKETCHES_OFFLINE", "1")
 # The GIS layers come from the committed clip, EVEN WHEN data/ IS PRESENT, so that a local run
 # and CI are checking the same bytes. Otherwise the goldens would be pinned against the full
 # county here and against the clip there, and a divergence would show up as a mystery failure on
 # whichever machine was the minority. tests/test_data_fixture.py is the bridge: it builds every
 # site both ways and compares, and it is the one thing here that does need data/.
-os.environ.setdefault("HOPEWELL_DATA_DIR", str(FIXTURE_DATA))
+os.environ.setdefault("ROAD_SKETCHES_DATA_DIR", str(FIXTURE_DATA))
 
 SITES = ("broad_st_greenwood", "ebroad_princeton", "columbia_princeton", "wbroad_louellen")
 

@@ -6,7 +6,7 @@ scene both renderers draw from (src/render/scene.py:SceneGeometry), never from t
 
 A crossing's length is NOT the leg's configured width: crosswalk_reach_to_curbs_ft measures
 to the traced kerbs, asymmetrically (12 ft one way, 20 the other on a 30 ft street). Parking
-stalls are counted over the PARKING_EDGE_LINE pieces the paint builder emitted, cut by the
+stalls are counted over the BAY_EDGE_LINES pieces the paint builder emitted, cut by the
 entrances a stall may not be marked across - see marked_stall_runs for why the edge line alone
 is no longer the run.
 
@@ -21,7 +21,7 @@ import numpy as np
 from shapely.geometry import LineString
 from shapely.ops import substring, unary_union
 
-from src.geometry.markings import PARKING_EDGE_LINE, STALL_DIVIDER
+from src.geometry.markings import BAY_EDGE_LINES, STALL_DIVIDER
 from src.geometry.model import stall_lane_runs_ft, station_offset_many, whole_stalls_ft
 from src.geometry.targets import Corner, LegSide
 from typing import TYPE_CHECKING
@@ -126,7 +126,10 @@ def marked_stall_runs(paint: list, state: "DesignState", openings=None):
     from src.geometry.treatments import MarkedParking
 
     for piece in paint:
-        if piece.kind is not PARKING_EDGE_LINE:
+        # BOTH bay edge lines, not just the white one: a one-way street's left kerb carries the
+        # same stripe in yellow (markings.BAY_EDGE_LINES), and reading PARKING_EDGE_LINE alone
+        # counted the stalls on one kerb of NJ 35 NB and none of the other.
+        if piece.kind not in BAY_EDGE_LINES:
             continue
         parking = state.treatment_for(MarkedParking, LegSide(piece.leg, piece.side))
         leg = state.legs.get(piece.leg)
@@ -144,10 +147,14 @@ def marked_stall_runs(paint: list, state: "DesignState", openings=None):
             stations, _offsets = station_offset_many(leg.centerline,
                                                      np.asarray(run.coords, dtype=float))
             spans.append((float(stations.min()), float(stations.max())))
-        for lo, hi in stall_lane_runs_ft(sorted(spans), parking.stall_length_ft,
+        # ON THE PITCH, NOT THE STALL'S LENGTH. What a stall consumes here is KERB FRONTAGE,
+        # and for a parallel stall those are the same 22 ft, which is why every earlier test
+        # passed either way. An angled stall is 18 ft long and eats 10.39 ft of kerb at 60
+        # degrees, so counting on the length would report 6 stalls on a bay drawn with 12.
+        for lo, hi in stall_lane_runs_ft(sorted(spans), parking.pitch_ft,
                                          keep_inside_ft=MIN_LINE_LENGTH_FT):
             yield (piece, _between_stations(piece.geometry, leg, lo, hi), parking,
-                   whole_stalls_ft(hi - lo, parking.stall_length_ft))
+                   whole_stalls_ft(hi - lo, parking.pitch_ft))
 
 
 def turn_speed_mph(radius_ft: float) -> float:
@@ -300,9 +307,12 @@ class ParkingRun:
     #: How much of this run lies past the length the site configured for its leg - drawn because
     #: the frame was widened, not because anybody surveyed that far. 0.0 at an unscaled frame.
     projected_ft: float = 0.0
-    #: The stall length the treatment marks at. Carried rather than recovered as length/stalls,
-    #: which is the AVERAGE and rounds a run's measured share to the wrong whole stall.
-    stall_length_ft: float = 0.0
+    #: The kerb frontage one stall takes, which is what this run was COUNTED on - NAMED FOR
+    #: THE ROLE AND NOT FOR THE STALL, because on an angled bay it is neither of the stall's
+    #: own dimensions (10.39 ft for a 9x18 stall at 60 degrees). Carried rather than recovered
+    #: as length/stalls, which is the AVERAGE and rounds a run's measured share to the wrong
+    #: whole stall.
+    pitch_ft: float = 0.0
 
     @property
     def measured_ft(self) -> float:
@@ -377,7 +387,7 @@ class SceneMetrics:
             # division stay one call, which is the whole point of marked_stall_runs.
             runs.append(ParkingRun(leg=piece.leg, side=piece.side, length_ft=run.length,
                                     projected_ft=projected,
-                                    stall_length_ft=parking.stall_length_ft, stalls=stalls))
+                                    pitch_ft=parking.pitch_ft, stalls=stalls))
 
         corners = []
         for key in sorted(state.corner_fillets):
@@ -406,8 +416,8 @@ class SceneMetrics:
         Counted from each run's measured length rather than by scaling the total, because a run
         crossing the surveyed end is one run and the stalls in it are whole.
         """
-        return sum(stalls_in_run(run.measured_ft, run.stall_length_ft)
-                   for run in self.parking if run.stall_length_ft > 0)
+        return sum(stalls_in_run(run.measured_ft, run.pitch_ft)
+                   for run in self.parking if run.pitch_ft > 0)
 
     @property
     def projected_stalls(self) -> int:

@@ -10,7 +10,8 @@ from shapely.ops import substring
 
 from src.sources.data_loader import load_parcels_near, load_road_network
 from src.geometry.cross_streets import cross_streets_ft
-from src.render.frame import frame_scale
+from src.geometry.intersection.municipality import municipal_limits_ft
+from src.render.frame import frame_scale, set_drawn_reach_ft
 from src.geometry.model import (
     Leg,
     assign_kerbs_to_corners,
@@ -21,6 +22,7 @@ from src.geometry.model import (
     clip_to_radius,
     label_quadrants,
     nearest_per_quadrant,
+    NJ_STATE_PLANE_FT,
     reproject_to_state_plane,
     split_leg_centerlines,
 )
@@ -77,6 +79,20 @@ def _corner_radii_from_osm(center_wgs84: Point, center_ft: Point, legs: dict, fa
     return radii
 
 
+
+def _no_parcels_layer(extra: tuple[str, ...] = ()) -> gpd.GeoDataFrame:
+    """An empty parcels frame carrying the columns its readers name.
+
+    `phase2_geometry.py` prints `corner_parcels[["quadrant", "PAMS_PIN", ...]]`, so an empty frame
+    without those columns raises KeyError where the whole point is to print nothing. The columns
+    are the contract; the rows are the data.
+    """
+    columns = ("PAMS_PIN", "BLOCK", "LOT", *extra)
+    return gpd.GeoDataFrame({c: [] for c in columns},
+                            geometry=gpd.GeoSeries([], crs=NJ_STATE_PLANE_FT),
+                            crs=NJ_STATE_PLANE_FT)
+
+
 def load_intersection_model(config: dict | None = None, site: str | None = None) -> IntersectionModel:
     """Pass either a pre-loaded `config` dict, or a `site` name to load it fresh
     (defaults to src.site.DEFAULT_SITE if neither is given)."""
@@ -90,7 +106,8 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
 
     data_sources = config.get("data_sources", {})
     road_network_path = ROOT_DIR / data_sources["road_network"]
-    parcels_path = ROOT_DIR / data_sources["parcels"]
+    configured_parcels = data_sources.get("parcels")
+    parcels_path = ROOT_DIR / configured_parcels if configured_parcels else None
 
     clip_radius_m = config["intersection"]["clip_radius_m"]
     bbox = buffer_point_wgs84(center, clip_radius_m * 1.3)
@@ -108,6 +125,11 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     # reports the projected part separately so a stall count does not move with a camera setting.
     scale = frame_scale()
     leg_lengths = {name: length * scale for name, length in surveyed_leg_lengths.items()}
+    # EVERYTHING BELOW FETCHES CONTEXT - kerbs, roads, driveways, parking, crossings - and it has
+    # to reach as far as this model is about to DRAW, not to a fixed radius. A per-leg
+    # working_length_ft is invisible to the frame scale, so without this a long leg is drawn
+    # through empty ground; see src/render/frame.py:_drawn_reach_ft.
+    set_drawn_reach_ft(max(leg_lengths.values(), default=0.0))
     # ...and that scaled length is the WHOLE story: no second, shorter span travels with the Leg
     # for treatments to be sized over. A treatment applies to the street in the drawing, so what
     # the street can hold is asked over exactly the street the reader is looking at. Sizing over a
@@ -182,8 +204,18 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
         corner_radii = _corner_radii_from_osm(center, center_ft, legs, radius_ft)
         corner_fillets = _build_corners(legs, radius_ft, corner_radii, kerb_lines)
 
-    parcels = load_parcels_near(center, radius_ft=300, path=parcels_path)
-    corner_parcels = nearest_per_quadrant(label_quadrants(parcels, center_ft))
+    # A site with no parcels layer is a site in a county whose parcels this project has not
+    # downloaded, NOT an error: nothing geometric reads them (no treatment, check or kerb does),
+    # so they are context - tan boundaries on the plan sheet, corner outlines in the 3D, and the
+    # SECOND choice of building height after OSM's own. Absent, they must still be a GeoDataFrame
+    # of the right shape rather than None, so the plan view, the export and phase2's table each
+    # draw nothing instead of each growing its own None check.
+    if parcels_path is not None:
+        parcels = load_parcels_near(center, radius_ft=300, path=parcels_path)
+        corner_parcels = nearest_per_quadrant(label_quadrants(parcels, center_ft))
+    else:
+        parcels = _no_parcels_layer()
+        corner_parcels = _no_parcels_layer(extra=("quadrant", "dist_ft"))
 
     return IntersectionModel(
         config=config,
@@ -199,4 +231,8 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
         paved_surfaces=_paved_surfaces_ft(center, corner_fillets),
         surveyed_leg_lengths=surveyed_leg_lengths,
         cross_streets=cross_streets_ft(center, center_ft, legs),
+        # WHERE THE CORRIDOR ENDS, from the boundary rather than from the drawing - resolved at
+        # the same radius everything else along the street is, so a leg drawn to the line has
+        # the line in hand. See src/geometry/intersection/municipality.py.
+        municipal_limits_ft=municipal_limits_ft(center, legs),
     )

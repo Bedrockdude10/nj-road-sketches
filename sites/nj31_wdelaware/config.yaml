@@ -24,6 +24,9 @@ data_sources:
 
 intersection:
   name: "NJ 31 & W Delaware Ave, Pennington, NJ 08534"
+  # The town this junction is in, and the key a corridor decision is looked up by
+  # (src/geometry/treatments/corridor.py) - street names repeat between towns.
+  municipality: "Pennington Borough"
   center_wgs84: [-74.7989728, 40.3272925]
   street1: "NJ 31"
   street2: "West Delaware Avenue"

@@ -12,6 +12,7 @@ from enum import StrEnum
 import geopandas as gpd
 from shapely.geometry import LineString, Point, Polygon
 
+from src.geometry.context_roads import osm_width_ft
 from src.geometry.model import (
     Leg,
 )
@@ -56,6 +57,11 @@ class IntersectionModel:
     # rather than separately by the kerb openings and the DesignState. R.S. 39:4-138(e) applies
     # at every one of them - see src/geometry/cross_streets.py.
     cross_streets: dict = field(default_factory=dict)
+    # {leg name: station in feet where the leg crosses out of this municipality}, absent for a
+    # leg that never leaves town. WHERE A CORRIDOR ENDS, and the only fact here that cannot be
+    # traced off the pavement - see src/geometry/intersection/municipality.py for why the end of
+    # the drawn leg is not a substitute for it.
+    municipal_limits_ft: dict = field(default_factory=dict)
 
     @property
     def site_roadways(self) -> tuple:
@@ -85,6 +91,22 @@ class IntersectionModel:
         """
         return [(span.start_ft, span.end_ft,
                  parking_restriction_by_side(span.tags, span.aligned), span.way_id)
+                for span in self.leg_road_spans.get(leg_name, [])]
+
+    def cycleway_spans(self, leg_name: str) -> list[tuple]:
+        """[(start_ft, end_ft, {"left": value, "right": value}, {"left": ft, "right": ft}, way_id)]
+        in the LEG's frame - what OSM says is painted on each kerb of this leg for riders, and
+        how wide it says it is.
+
+        The same shape parking_restriction_spans returns and built off the same spans, because it
+        is the same question asked of a different tag: the ways were already matched to the leg
+        with their tags and their direction, so a cycle facility needed no new fetch - only
+        somebody to read the key. Nothing did, which is how a street with an existing bike lane
+        came to be drawn as though a proposal would be introducing one.
+        """
+        return [(span.start_ft, span.end_ft,
+                 cycleway_by_side(span.tags, span.aligned),
+                 cycleway_width_by_side(span.tags, span.aligned), span.way_id)
                 for span in self.leg_road_spans.get(leg_name, [])]
 
 
@@ -251,3 +273,66 @@ def parking_restriction_by_side(tags: dict, aligned: bool) -> dict[str, str | No
 def parking_is_restricted(restriction: str | None) -> bool:
     """True where OSM prohibits kerbside parking. Absent or "none" is not a prohibition."""
     return restriction is not None and restriction != "none"
+
+
+# OSM records a cycle facility per side of the way the same way it records parking:
+# cycleway:left, cycleway:right, cycleway:both - plus a bare `cycleway`, which the wiki
+# defines as applying to both sides and which is read here as "both" for exactly that reason.
+CYCLEWAY_KEYS = {"left": "cycleway:left", "right": "cycleway:right", "both": "cycleway:both"}
+
+# The values that mean A MARKED LANE IN THE CARRIAGEWAY - a stripe on the road surface, which is
+# the only cycle facility this project draws. Deliberately short:
+#
+#   `track`         is physically separated from the carriageway. Real, and not this; drawing it
+#                   as paint would state something false about the kerb line.
+#   `shared_lane`   is a sharrow. It reserves no width and marks no lane.
+#   `separate`      says the facility is mapped as its own way somewhere else.
+#   `no`            is a positive statement that there is none, which is worth having and is
+#                   NOT the same as the tag being absent.
+#
+# So an unrecognised value draws nothing and says so, rather than being read as a lane.
+CYCLEWAY_IS_A_MARKED_LANE = frozenset({"lane", "opposite_lane"})
+
+
+def cycleway_by_side(tags: dict, aligned: bool) -> dict[str, str | None]:
+    """{"left": value|None, "right": value|None} in the LEG's frame.
+
+    The same flip parking_restriction_by_side does and for the same reason: OSM's left and right
+    are relative to the direction the way was DRAWN, and half this project's legs run against
+    their way. NJ 35 NB is `cycleway:right=lane` on one way drawn northbound, which is the EAST
+    kerb - and the junction's southern approach points south, so read straight through it would
+    have put the existing bike lane on the west kerb of one leg and the east kerb of the next,
+    on one continuous carriageway. Exactly the trap is_left_edge_of_the_roadway exists for.
+
+    None means OSM says nothing about that side, which is NOT the same as "no".
+    """
+    both = tags.get(CYCLEWAY_KEYS["both"], tags.get("cycleway"))
+    if both is not None:
+        return {"left": both, "right": both}
+    osm = {side: tags.get(key) for side, key in CYCLEWAY_KEYS.items() if side != "both"}
+    if aligned:
+        return {"left": osm["left"], "right": osm["right"]}
+    return {"left": osm["right"], "right": osm["left"]}
+
+
+def cycleway_width_by_side(tags: dict, aligned: bool) -> dict[str, float | None]:
+    """{"left": ft|None, "right": ft|None} - the mapped width of each side's lane, in FEET.
+
+    None means unmapped - which is the case on every way this project touches today. See
+    apply_osm_bike_lanes for what is assumed instead and how that assumption is reported.
+    """
+    def width_ft(key: str) -> float | None:
+        feet = osm_width_ft(tags.get(f"{key}:width", tags.get(f"{key}:est_width")))
+        # A bike lane is between MIN_BIKE_LANE_FT and about twice AASHTO's design width; a value
+        # outside that is a mistagging (a metres/feet mix-up puts 5 ft in as 16), and reading it
+        # would draw a lane nobody painted. Bounded here rather than in osm_width_ft because a
+        # plausible carriageway is not a plausible bike lane.
+        return feet if feet is not None and 3.0 <= feet <= 10.0 else None
+
+    both = width_ft(CYCLEWAY_KEYS["both"]) if tags.get(CYCLEWAY_KEYS["both"]) is not None else None
+    if both is not None:
+        return {"left": both, "right": both}
+    osm = {side: width_ft(key) for side, key in CYCLEWAY_KEYS.items() if side != "both"}
+    if aligned:
+        return {"left": osm["left"], "right": osm["right"]}
+    return {"left": osm["right"], "right": osm["left"]}

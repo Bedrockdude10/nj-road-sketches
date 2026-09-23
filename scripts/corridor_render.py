@@ -726,7 +726,15 @@ def _render_corridor(corridor, models, args) -> int:
     # nobody has proposed there, under a table asking which kerb should carry a lane that is not
     # going to exist. Looked up by the CORRIDOR'S name rather than by the argument, so a partial
     # `--road broad` still finds the decision the sites themselves apply.
-    decision = route_decision_for(corridor.name)
+    # AND BY THE TOWN, because "Broad Street" alone names a street in most New Jersey boroughs.
+    # A corridor that runs through more than one is not asked once for all of it: there is no
+    # decision that covers it, and the sheet says so rather than adopting the first town's.
+    towns = corridor.municipalities
+    decision = route_decision_for(corridor.name, towns[0]) if len(towns) == 1 else None
+    if len(towns) > 1:
+        print(f"  NOTE: {corridor.name} runs through {len(towns)} municipalities "
+              f"({', '.join(towns)}), and a route decision is made per town - so no single "
+              f"decision covers this corridor and none is drawn.")
     # The ladder the refusals below are measured with. This project declares exactly one protected
     # section, and "would THAT fit here" is the question a street without a facility has to answer
     # - so a calmed route borrows the sections to be REFUSED by them, never to be drawn with them.

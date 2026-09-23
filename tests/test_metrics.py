@@ -173,6 +173,27 @@ def test_paint_that_is_not_a_parking_line_is_not_counted_as_parking():
     assert m.total_stalls == 4
 
 
+def test_an_angled_bay_is_counted_on_its_kerb_FRONTAGE_not_its_stall_length():
+    """A 60-degree stall is 18 ft long and takes 10.39 ft of kerb, and the count is the kerb.
+
+    This is the one place the two figures are easy to swap, because for a PARALLEL stall they
+    are the same number - 22 ft along the kerb IS the stall's length - so every existing test
+    above passes either way. On an angled bay counting on the length reports 5 stalls where 10
+    are drawn, and the summary panel then credits a proposal with half the parking it added.
+    """
+    state = a_state().apply(MarkedParking(LegSide("east", "left"), depth_ft=20.09,
+                                          stall_length_ft=18.0, angle_deg=60.0))
+    parking = state.treatment_for(MarkedParking, LegSide("east", "left"))
+    assert parking.pitch_ft == pytest.approx(10.3923, abs=5e-4)
+
+    m = metrics(state, paint=[parking_run(105.0)])
+    assert m.total_stalls == 10                       # 105 // 10.39, not 105 // 18 == 5
+    assert [run.stalls for run in m.parking] == [10]
+    assert m.parking[0].pitch_ft == pytest.approx(10.3923, abs=5e-4), (
+        "the run carries the figure it was COUNTED on - named for the role, so a reader "
+        "cannot mistake it for the stall's own length")
+
+
 def test_stalls_in_run_is_the_rule_the_plan_view_labels_with():
     """One rule, so the label beside a run and the total in the panel cannot disagree.
     src/render/plan_view.py:_label_paint calls this."""

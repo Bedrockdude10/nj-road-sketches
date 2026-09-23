@@ -184,7 +184,7 @@ the way `network/corridor.py:_eased_alignment` already eases a corridor across o
 **The corridor's EXTENT was a render parameter, and that was the bug class itself.** Extensions were
 carried out from the end of a junction piece - a frame-cut leg - so the search window and the
 fetch-radius cap in what is now `_traced_end_ft` were both relative to a seam that moves with
-`HOPEWELL_FRAME_SCALE`, and the junction centre defining the cap circle was picked by proximity to
+`ROAD_SKETCHES_FRAME_SCALE`, and the junction centre defining the cap circle was picked by proximity to
 that seam. A wider sheet slid the window outward and discovered street the narrower sheet never
 looked for: Columbia Ave's traced coverage moved 369 ft between sheets, Greenwood's 196 ft. Since a
 facility's rung is chosen over a span, the viewport was voting on the design. Anchoring on the

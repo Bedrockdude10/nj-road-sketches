@@ -21,10 +21,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 from shapely.geometry import Point
 
-from src.geometry.markings import (PARKING_EDGE_LINE, STALL_DIVIDER,
+from src.geometry.markings import (BAY_EDGE_LINES, STALL_DIVIDER,
                                    lies_legitimately_on, opening_rule)
 from src.geometry.paint import stroke_width_ft
-from src.geometry.targets import Side
 from src.geometry.model import curb_offsets_at_stations, station_offset_many
 
 if TYPE_CHECKING:                      # the runtime import is in _empty_state, below
@@ -47,10 +46,10 @@ CURB_BEHIND_JUNCTION_TOLERANCE_FT = 6.0
 # bounded by the roadway itself (crosswalks.crosswalk_reach_to_curbs_ft); a loose bound here
 # hides the failure it is named for - end bars painted up the corner onto the sidewalk.
 MIN_CROSSWALK_IN_PAVEMENT = 0.99
-# A stop bar covers the entering half only, and it RESTS AGAINST the centreline rather than
-# crossing it - so this is float noise and the width of a polygon vertex, not a design margin.
-# The bar is built to start exactly at the line (crosswalks.stop_bar_band_geometry_ft), so
-# anything past it is a fault rather than a tolerance being used up.
+# A stop bar covers the approach lanes only, and it RESTS AGAINST the line that ends them
+# rather than crossing it - so this is float noise and the width of a polygon vertex, not a
+# design margin. The bar is built to start exactly at that line (crosswalks.stop_bar_ends_ft),
+# so anything past it is a fault rather than a tolerance being used up.
 STOP_BAR_PAST_CENTERLINE_TOLERANCE_FT = 0.1
 # Paint is specified to a tenth of a foot; this absorbs float noise, nothing more.
 LANE_WIDTH_TOLERANCE_FT = 0.05
@@ -58,6 +57,11 @@ LANE_WIDTH_TOLERANCE_FT = 0.05
 # past it where the strip is sampled across a curve between two traced vertices. Beyond this
 # it is painted on the footway.
 PAINT_PAST_CURB_TOLERANCE_FT = 0.25
+# A boundary is a surveyed line and a leg's centreline is sampled, so the station where the two
+# cross carries the same sub-foot noise every other stationed figure here does. Half a foot
+# absorbs that. It is NOT a licence to spill over the line: the terminus device is placed against
+# the limit (bikeways/terminus.py), so anything past it is a fault, not headroom being spent.
+PAINT_PAST_MUNICIPALITY_TOLERANCE_FT = 0.5
 # A kerbside facility's surface is built on paint_stations' ~2 ft grid, so its last station
 # landing a step or two short of the kerb's is measurement rather than amputation. Beyond this
 # the facility ended early and the drawing owes the reader a reason.
@@ -571,7 +575,7 @@ class BikewayReachesTheEndOfItsKerb(SceneCheck):
     """
 
     def run(self, scene: SceneContext) -> list[Violation]:
-        from src.geometry.markings import BIKE_LANE_SURFACE
+        from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
         from src.geometry.model import curb_station_span
         state = scene.state
         # Per kerb: the outermost station any of this facility's surface reached. Taken over the
@@ -579,7 +583,8 @@ class BikewayReachesTheEndOfItsKerb(SceneCheck):
         # the arithmetic this check exists not to trust (SKILLS 0).
         reached: dict[tuple[str, str], float] = {}
         for piece in scene.paint:
-            if piece.kind is not BIKE_LANE_SURFACE or piece.leg is None or piece.side is None:
+            if (piece.kind not in BIKE_LANE_SURFACE_KINDS
+                    or piece.leg is None or piece.side is None):
                 continue
             leg = state.legs.get(piece.leg)
             if leg is None:
@@ -723,7 +728,7 @@ class ParkingIsLegal(SceneCheck):
         violations = []
         zones_by_side = {}
         for piece in paint:
-            if piece.kind not in (STALL_DIVIDER, PARKING_EDGE_LINE) or piece.leg is None:
+            if piece.kind not in (STALL_DIVIDER, *BAY_EDGE_LINES) or piece.leg is None:
                 continue
             leg = state.legs.get(piece.leg)
             if leg is None:
@@ -829,6 +834,17 @@ class MarkingsDoNotCollide(SceneCheck):
             width_ft = stroke_width_ft(line.kind)
             if width_ft is None or line.geometry.is_empty:
                 continue
+            # A STRIPE SHORTER THAN IT IS WIDE IS NOT RUNNING ALONG ANYTHING. The fraction below
+            # asks "how much of this stripe's body is on the colour", and on a sub-width fragment
+            # the answer is decided by its two end caps rather than by where it was ruled: a
+            # 0.36 ft remnant of a 0.82 ft edge line at W Broad & Lanning's mouth came out 6% over
+            # the green, three times the tolerance, on 0.0 sq ft of paint. Skipping it is not a
+            # relaxation - the question this pass exists to ask cannot be put to a blob, and the
+            # fragment is too short to be visible in either view. What IS wrong is that the
+            # fragment exists at all, which is an openings/trimming matter and not paint over
+            # paint.
+            if line.geometry.length < width_ft:
+                continue
             # Flat caps and mitred joins, matching blender_geometry's extrusion: a stripe is a
             # ribbon of rectangles, not a rounded sausage, and a round cap would invent paint past
             # the end of every dash and report an overlap the render does not draw.
@@ -901,6 +917,15 @@ def _divider_shift_toward_ft(state: "DesignState", leg_name: str, side: str) -> 
     from src.geometry.treatments import divider_shift_toward_ft
 
     return divider_shift_toward_ft(state, leg_name, side)
+
+
+def _stop_bar_inner_end_ft(state: "DesignState", leg_name: str) -> tuple[float, float]:
+    """This leg's stop bar's two ends. Delegates to src/render/crosswalks.py, which is where the
+    one definition lives - see stop_bar_ends_ft for why the inner end is not always a centreline.
+    Imported here rather than at module scope because src/render/ imports src/checks.py."""
+    from src.render.crosswalks import stop_bar_ends_ft
+
+    return stop_bar_ends_ft(state, leg_name)
 
 
 def _travel_lane_target_ft(state: "DesignState", leg_name: str, side: str) -> float:
@@ -1016,10 +1041,28 @@ class TravelLanesHoldTheTarget(SceneCheck):
                     return narrowing.stripe_width_ft
                 return 0.0
 
-            restriped = any(painted_ft(side) > 0
-                            or state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None
-                            for side in sides)
-            if not restriped:
+            def a_decision_was_made(side: str, narrowing=narrowing, leg_name=leg_name):
+                """Has THIS DESIGN restriped this kerb - as against recorded what is there?
+
+                painted_ft alone is not that question, and reading it as though it were is what
+                made this check fail an existing-conditions drawing. apply_observed_parking marks
+                the 60-degree bays that Grand Central Ave already has; the drawing narrows
+                nothing, so the 14.89 ft it leaves beside them is a MEASUREMENT of the street and
+                not an omission. See MarkedParking.observed, and this class's own docstring,
+                which rules out exactly this reading two paragraphs up.
+                """
+                bike_lane = state.treatment_for(AddBikeLane, LegSide(leg_name, side))
+                if bike_lane is not None:
+                    # ...unless the lane is one OSM says is already painted. NJ 35 NB's east kerb
+                    # carries one today (apply_osm_bike_lanes), and a drawing that records it
+                    # narrows nothing - the same reading MarkedParking.observed closes below.
+                    return not bike_lane.observed
+                parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
+                if parking is not None:
+                    return not parking.observed
+                return narrowing is not None and side in narrowing.sides
+
+            if not any(a_decision_was_made(side) for side in sides):
                 continue        # untouched leg - the street as it is, not a design
             for side in sides:
                 if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:
@@ -1075,14 +1118,15 @@ class BollardsStandInTheirBuffer(SceneCheck):
     def run(self, scene: SceneContext) -> list[Violation]:
         from shapely.ops import unary_union
 
-        from src.geometry.markings import BIKE_LANE_SURFACE
+        from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
 
         paint = scene.paint
         violations = []
         # Per kerb, so a post is only ever tested against the lane on its own side of its own leg.
         surfaces: dict[tuple, list] = {}
         for piece in paint:
-            if piece.kind is BIKE_LANE_SURFACE and piece.leg is not None and piece.side is not None:
+            if (piece.kind in BIKE_LANE_SURFACE_KINDS
+                    and piece.leg is not None and piece.side is not None):
                 surfaces.setdefault((piece.leg, piece.side), []).append(piece.geometry)
         if not surfaces:
             return violations
@@ -1415,11 +1459,70 @@ class ZonesGiveWayAtAnOpening(SceneCheck):
         return violations
 
 
+class PaintInsideTheMunicipality(SceneCheck):
+    """No marking may be drawn outside the municipality that would lay it.
+
+    Every terminus in this project is jurisdictional: the Broad St bikeway stops at the Hopewell
+    Borough line in both directions because nothing past it is the borough's to build, not
+    because the street stops. A drawing that carries paint over the line proposes work to a
+    municipality that cannot do it, and it does so in the one place a reader is least likely to
+    check - the far end of the sheet.
+
+    THE SOURCE IS THE BOUNDARY, NOT THE DRAWN LEG, which is the whole reason this can fail. Those
+    coincide today at both termini (2,307.2 ft against a leg configured to 2,307.5; 129.8 against
+    130.0) and coinciding is not being the same fact: a leg's length is a rendering decision
+    (.claude/SKILLS.md section 0b), so at 2.5x the same leg reaches 195 ft past the line. This
+    fired on 7 pieces before `municipal_limits_ft` existed - a two-stage turn box, its boundary
+    line, a bicycle symbol and a through arrow, all in Hopewell Township.
+
+    Silent where the municipality did not resolve, which is a `municipal_limits_ft` with no entry
+    for the leg - see src/geometry/intersection/municipality.py. A check with no datum has to say
+    nothing rather than pass everything.
+    """
+
+    def run(self, scene: SceneContext) -> list[Violation]:
+        state, paint = scene.state, scene.paint
+        limits = getattr(state, "municipal_limits_ft", None) or {}
+        if not limits:
+            return []
+        violations = []
+        for piece in paint:
+            limit_ft = limits.get(piece.leg)
+            if limit_ft is None:
+                continue
+            leg = state.legs.get(piece.leg)
+            if leg is None:
+                continue
+            coords = (piece.geometry.exterior.coords if piece.geometry.geom_type == "Polygon"
+                      else piece.geometry.coords)
+            points = np.asarray(coords, dtype=float)
+            stations, _offsets = station_offset_many(leg.centerline, points)
+            worst = float(stations.max())
+            if worst > limit_ft + PAINT_PAST_MUNICIPALITY_TOLERANCE_FT:
+                index = int(np.argmax(stations))
+                violations.append(Violation(
+                    "paint_outside_the_municipality",
+                    f"{piece.leg}: {piece.kind} reaches station {worst:.1f} ft, {worst - limit_ft:.1f} "
+                    f"ft past the municipal line at {limit_ft:.1f} ft - this is paint outside the "
+                    f"town that would lay it. A terminus is bounded by the boundary, never by how "
+                    f"far the leg happens to be drawn",
+                    tuple(points[index])))
+        return violations
+
+
 class StopBarsOnEnteringHalf(SceneCheck):
     """A driver stops in their own lanes, never across the opposing ones.
 
-    The bar must stay on one side of its leg's centerline, never full width across both
-    directions of travel.
+    ON A TWO-WAY STREET that means the bar stays on one side of the leg's centreline, never full
+    width across both directions of travel. ON A ONE-WAY CARRIAGEWAY THERE ARE NO OPPOSING LANES,
+    so the same rule permits the full width - the line the bar rests against is the far kerb, and
+    a bar held back to half the roadway leaves a whole approach lane with nothing to stop at.
+
+    RE-EXPRESSED RATHER THAN EXEMPTED (.claude/SKILLS.md section 4): the check asks the design
+    where this bar's inner end belongs and measures against that, so a one-way leg is still
+    checked - just against its own far kerb instead of against a centreline it does not have.
+    Exempting one-way legs would have dropped the check on the only site where the arithmetic
+    was wrong.
     """
 
     def run(self, scene: SceneContext) -> list[Violation]:
@@ -1435,18 +1538,21 @@ class StopBarsOnEnteringHalf(SceneCheck):
             # lane shifts the travel lanes off the alignment, and then the line a driver actually
             # sees is the divider. Measured from the alignment, a bar resting correctly against
             # that divider looks like it crosses, and a bar genuinely painted 3.15 ft across it
-            # looks fine - which is what shipped on broad_st_east.
-            divider_ft = _divider_shift_toward_ft(scene.state, leg_name, Side.LEFT)
-            # Positive is the entering (LEFT) side, so anything below the divider is over the line.
-            past_ft = float(divider_ft - offsets.min())
+            # looks fine - which is what shipped on broad_st_east. On a one-way leg the same
+            # question returns the far KERB, which is why this reads the resolved end rather than
+            # the divider it used to.
+            _outer_ft, inner_ft = _stop_bar_inner_end_ft(scene.state, leg_name)
+            # Positive is the entering (LEFT) side, so anything below the inner end is over it.
+            past_ft = float(inner_ft - offsets.min())
             if past_ft > STOP_BAR_PAST_CENTERLINE_TOLERANCE_FT:
                 violations.append(Violation(
                     "stop_bar_crosses_centerline",
-                    f"{leg_name}'s stop bar is painted {past_ft:.2f} ft past the centreline into "
-                    f"the opposing lanes - it must rest AGAINST that line, not cross it. A stop "
-                    f"bar covers the entering half only (MUTCD), and where a two-way bike lane "
-                    f"has shifted the travel lanes the line to rest against is the divider, not "
-                    f"the NJDOT alignment",
+                    f"{leg_name}'s stop bar is painted {past_ft:.2f} ft past the line at "
+                    f"{inner_ft:+.2f} ft that ends its approach lanes - it must rest AGAINST that "
+                    f"line, not cross it. A stop bar covers the approach only (MUTCD); that line "
+                    f"is the centreline on a two-way street, the DIVIDER where a two-way bike lane "
+                    f"has shifted the travel lanes, and the far KERB on a one-way carriageway - "
+                    f"never the NJDOT alignment",
                     (bar.centroid.x, bar.centroid.y)))
         return violations
 
