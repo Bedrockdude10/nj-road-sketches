@@ -205,6 +205,12 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
     except Exception as e:
         return [f"{site}: could not build the junction model - {type(e).__name__}: {e}"], []
 
+    # Only once the site has loaded, so an Overpass outage cannot empty output/ of JSON it
+    # was never going to rewrite. Past this point every scenario's JSON is rewritten or, if
+    # refused, stays gone: a file left over from an earlier run reads as this run's answer.
+    for stale in out_dir.glob("geometry_*.json"):
+        stale.unlink()
+
     states = [("existing", "Existing Conditions", existing)]
     with contextlib.redirect_stdout(quiet):
         scenarios = load_site_scenarios(site)
@@ -213,19 +219,20 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
                             run_scenario(getattr(scenarios, name),
                                           DesignState.from_model(model), model)))
 
-    theme = buildings = None
-    if render_3d:
-        with contextlib.redirect_stdout(quiet):
-            theme = build_default_theme()
-            # THROUGH frame_covering_radius_m, exactly as export_scenario does when nothing is
-            # passed in. Fetching here at the flat base radius made this a SECOND answer to "how
-            # far do the buildings go", and the quieter one won: wbroad_lanning's corridor frame
-            # reaches 781 m from the junction node and this handed it 130 m, so two thirds of
-            # its own picture came out as bare field while export.py's own fetch would have
-            # covered it.
-            buildings = fetch_buildings(model.center_wgs84,
-                                        radius_m=frame_covering_radius_m(model,
-                                                                         BUILDING_CONTEXT_RADIUS_M))
+    # THE JSON IS WRITTEN ON EVERY BUILD, not only a 3D one. It is the numbers the PNGs beside
+    # it were drawn from, so a 2D-only build that skipped it left geometry_*.json from an
+    # earlier run next to fresh sheets, and a reader measured an unchanged number three times.
+    with contextlib.redirect_stdout(quiet):
+        theme = build_default_theme()
+        # THROUGH frame_covering_radius_m, exactly as export_scenario does when nothing is
+        # passed in. Fetching here at the flat base radius made this a SECOND answer to "how
+        # far do the buildings go", and the quieter one won: wbroad_lanning's corridor frame
+        # reaches 781 m from the junction node and this handed it 130 m, so two thirds of
+        # its own picture came out as bare field while export.py's own fetch would have
+        # covered it.
+        buildings = fetch_buildings(model.center_wgs84,
+                                    radius_m=frame_covering_radius_m(model,
+                                                                     BUILDING_CONTEXT_RADIUS_M))
 
     for label, name, state in states:
         with contextlib.redirect_stdout(quiet):
@@ -239,14 +246,18 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
             if violation.fatal:
                 failures.append(f"{site}/{label}: {violation}")
 
-        if render_3d:
-            try:
-                with contextlib.redirect_stdout(quiet):
-                    geometry = export_scenario(model, state, name, out_dir / f"geometry_{label}.json",
-                                                buildings=buildings, crossings=crossings, theme=theme)
-                blender_jobs.append((geometry, out_dir / f"phase4_render_{label}.png"))
-            except SceneInvariantError as e:
-                failures.append(f"{site}/{label}: 3D export refused - {e}")
+        render = out_dir / f"phase4_render_{label}.png"
+        try:
+            with contextlib.redirect_stdout(quiet):
+                geometry = export_scenario(model, state, name, out_dir / f"geometry_{label}.json",
+                                            buildings=buildings, crossings=crossings, theme=theme)
+            if render_3d:
+                blender_jobs.append((geometry, render))
+        except SceneInvariantError as e:
+            failures.append(f"{site}/{label}: 3D export refused - {e}")
+            # The render of a scene this build refused is a picture of something else.
+            if render_3d:
+                render.unlink(missing_ok=True)
 
     status = "FAILED" if failures else "ok"
     print(f"  {site:22s} {len(states)} scenario(s)  {time.perf_counter() - started:5.1f}s  {status}\n"
