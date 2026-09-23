@@ -201,7 +201,8 @@ def test_the_network_exports_as_one_geojson(tmp_path) -> None:
     back = gpd.read_file(path)
 
     assert back.crs.to_epsg() == WGS84_EPSG
-    assert set(back["kind"]) == {"street", "kerb", "crossing"}
+    assert {"street", "kerb", "crossing", "bikeway", "bikeway_buffer", "edge_line",
+            "bollard"} <= set(back["kind"])
     assert (back.geometry.is_valid | back.geometry.is_empty).all()
 
     streets = back[back["kind"] == "street"]
@@ -209,3 +210,10 @@ def test_the_network_exports_as_one_geojson(tmp_path) -> None:
     assert decided["Broad Street"] == "CorridorFacility"
     assert decided["Princeton Avenue"] == "CorridorCalming"
     assert streets[streets["name"] == "Broad Street"]["kerb_coverage"].iloc[0] > 0.5
+
+    # THE DESIGN IS IN THE DOCUMENT, not only the geometry - what makes a render a slice of this
+    # rather than a rebuild. Every bikeway run is on the street that carries the facility.
+    bikeway = back[back["kind"] == "bikeway"]
+    assert set(bikeway["name"]) == {"Broad Street"}
+    assert (bikeway["end_ft"] - bikeway["start_ft"]).sum() > 3000.0
+    assert (bikeway["compass_side"] == "north").all(), "CORRIDOR_SIDE is the north kerb"

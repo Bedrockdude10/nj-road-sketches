@@ -23,8 +23,10 @@ import geopandas as gpd
 from shapely.geometry import Point
 
 from src.geometry.model import NJ_STATE_PLANE_FT
+from src.geometry.corridor_paint import paint_facility
 from src.geometry.network.area import area_corridors
 from src.geometry.treatments import route_decision_for
+from src.geometry.treatments.corridor import CorridorFacility
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = REPO_ROOT / "output" / "network"
@@ -37,15 +39,41 @@ def _decision_name(road: str, municipality: str) -> str | None:
     return type(decision).__name__ if decision is not None else None
 
 
-def network_features(area: str) -> gpd.GeoDataFrame:
-    """Every corridor, kerb run and crossing in one frame, tagged by `kind`.
+def _paint_rows(corridor, facility, town: str) -> list[dict]:
+    """The facility this route proposes, drawn along the whole corridor.
 
-    One frame rather than three files: a reader asking "what is on this street" wants them
-    together, and `kind` is cheaper to filter than three joins.
+    `paint_facility` never needed a junction model - it takes a Corridor - so the design comes
+    out network-wide for free. Broad St: 3,953 ft of 6,868 placed on the north kerb in 11 runs,
+    0 refusals, 15 spans where the kerb is untraced and the section cannot be tested.
+    """
+    common = {"name": corridor.name, "municipality": town}
+    paint = paint_facility(corridor, facility)
+    rows: list[dict] = []
+    for run in paint.runs:
+        span = {"start_ft": round(run.start_ft, 2), "end_ft": round(run.end_ft, 2),
+                "side": paint.side, "compass_side": paint.compass_side,
+                "width_ft": round(run.section.width_ft, 2),
+                "buffer_ft": round(run.section.buffer_ft, 2),
+                "constrained": bool(run.section.constrained)}
+        rows.append({"kind": "bikeway", **common, **span, "geometry": run.lane_surface})
+        rows.append({"kind": "bikeway_buffer", **common, **span, "geometry": run.buffer_zone})
+        rows += [{"kind": "edge_line", **common, **span, "geometry": line}
+                 for line in run.edge_lines]
+        rows += [{"kind": "bollard", **common, **span, "geometry": Point(xy)}
+                 for xy in run.bollards]
+    return rows
+
+
+def network_features(area: str) -> gpd.GeoDataFrame:
+    """Every corridor, kerb run, crossing and proposed marking in one frame, tagged by `kind`.
+
+    One frame rather than several files: a reader asking "what is on this street" wants them
+    together, and `kind` is cheaper to filter than a pile of joins.
     """
     rows: list[dict] = []
     for corridor in area_corridors(area):
         town = corridor.municipalities[0] if corridor.municipalities else ""
+        facility = route_decision_for(corridor.name, town)
         decision = _decision_name(corridor.name, town)
         traced_ft = sum(run.length_ft for run in corridor.kerb_runs)
         rows.append({"kind": "street", "name": corridor.name, "municipality": town,
@@ -67,6 +95,10 @@ def network_features(area: str) -> gpd.GeoDataFrame:
                   "station_ft": round(station, 2),
                   "geometry": Point(corridor.centerline.interpolate(station).coords[0])}
                  for station in corridor.cross_street_ft]
+        # Only a facility DRAWS something. CorridorCalming places no new section - it narrows an
+        # existing one - so it contributes a `decision` on the street and no paint of its own.
+        if isinstance(facility, CorridorFacility):
+            rows += _paint_rows(corridor, facility, town)
 
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
@@ -87,8 +119,15 @@ def _summarise(features: gpd.GeoDataFrame) -> str:
     return (f"{len(streets)} streets ({streets['length_ft'].sum() / 5280:.2f} mi), "
             f"{(features['kind'] == 'kerb').sum()} kerb runs, "
             f"{(features['kind'] == 'crossing').sum()} crossings, "
-            f"{len(decided)} street(s) carrying a route decision: "
-            f"{', '.join(sorted(decided['name'])) or 'none'}")
+            f"{len(decided)} street(s) carrying a route decision "
+            f"({', '.join(sorted(decided['name'])) or 'none'}), "
+            f"{(features['kind'] == 'bikeway').sum()} bikeway run(s) totalling "
+            f"{_bikeway_ft(features):,.0f} ft, {(features['kind'] == 'bollard').sum()} bollards")
+
+
+def _bikeway_ft(features: gpd.GeoDataFrame) -> float:
+    runs = features[features["kind"] == "bikeway"]
+    return float((runs["end_ft"] - runs["start_ft"]).sum()) if len(runs) else 0.0
 
 
 def main() -> None:
