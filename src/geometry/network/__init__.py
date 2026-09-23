@@ -13,8 +13,9 @@ them was invisible. Split by the QUESTION each part answers:
     kerb      where the kerb is TRACED along a road, and where it is a junction corner instead
     corridor  a chain of roads, bridged along the NJDOT alignment each end's leg was cut from
     facts     what is actually there, stationed once for the whole street
+    area      every named street in a municipality, from OSM alone - no modelled junction needed
 
-The layering is road | kerb <- corridor <- facts. There is exactly ONE back edge, and it is
+The layering is road | kerb <- corridor <- facts, with area alongside facts on top of corridor. There is exactly ONE back edge, and it is
 deliberate: `_build_corridor` needs to know where the cross streets land before it can break the
 traced kerb runs at them, and cross streets are resolved FROM a corridor. That import is
 function-level, with the reason written at the call site, so the module graph stays a DAG.
@@ -80,6 +81,17 @@ from src.geometry.network.corridor import (
                                     _street_name,
                                     corridors_from_models,
 )
+from src.geometry.network.area import (
+                                    MIN_CORRIDOR_FT,
+                                    _connected_runs,
+                                    _cross_street_ft,
+                                    _named_carriageways,
+                                    _pieces_of,
+                                    _projected_nodes,
+                                    _snapshot_center,
+                                    _way_line,
+                                    area_corridors,
+)
 from src.geometry.network.facts import (
                                     CorridorFacts,
                                     _WINDOW_SAMPLE_FT,
@@ -105,6 +117,7 @@ __all__ = [
                                     "KERB_FROM_TRACING",
                                     "KERB_RUN_JOIN_FT",
                                     "KERB_SAMPLE_MIN_GAP_FT",
+                                    "MIN_CORRIDOR_FT",
                                     "SAME_POINT_FT",
                                     "_ALIGNMENT_BBOX_MARGIN_M",
                                     "_COMPASS_WORDS",
@@ -119,10 +132,12 @@ __all__ = [
                                     "_build_corridor",
                                     "_chains",
                                     "_complement_spans",
+                                    "_connected_runs",
                                     "_corridor_kerb_ways",
                                     "_corridor_name",
                                     "_corridor_nodes",
                                     "_corridor_ways",
+                                    "_cross_street_ft",
                                     "_cross_streets_on",
                                     "_cumulative_ft",
                                     "_dense_kerb_points",
@@ -142,21 +157,27 @@ __all__ = [
                                     "_linked_ends",
                                     "_marked_crossings_on",
                                     "_merged_spans",
+                                    "_named_carriageways",
                                     "_no_parking_zones_on",
                                     "_openings_on",
                                     "_oriented_chain",
                                     "_oriented_piece",
+                                    "_pieces_of",
                                     "_placed_on_corridor",
+                                    "_projected_nodes",
                                     "_road_joint_ft",
                                     "_road_spans_on",
                                     "_same_point",
                                     "_seam",
+                                    "_snapshot_center",
                                     "_sri_alignment",
                                     "_sri_spans",
                                     "_street_name",
                                     "_traced_end_ft",
                                     "_traced_kerb_runs",
+                                    "_way_line",
                                     "approaches_of",
+                                    "area_corridors",
                                     "corridor_facts",
                                     "corridors_from_models",
                                     "junction_corner_reach_ft",
