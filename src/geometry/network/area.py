@@ -15,8 +15,9 @@ import shapely
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import linemerge
 
-from src.geometry.context_roads import is_carriageway
+from src.geometry.context_roads import assumed_width_ft, is_carriageway
 from src.geometry.intersection.municipality import municipal_boundary_ft
+from src.geometry.model import station_offset_many
 from src.geometry.network.corridor import Corridor, _street_name
 from src.geometry.network.kerb import KerbRun, _traced_kerb_runs
 from src.render.coords import wgs84_to_state_plane
@@ -138,11 +139,16 @@ def area_corridors(area: str = "hopewell_borough",
 
     by_node: dict[int, set[str]] = {}
     lines_by_name: dict[str, list[LineString]] = {}
+    width_by_name: dict[str, float] = {}
     for name, way in _named_carriageways(snapshot):
         line = _way_line(way, xy)
         if line is None or not line.intersects(boundary):
             continue
         lines_by_name.setdefault(name, []).append(line)
+        # The WIDEST way's width, not the first or the mean: OSM splits a street at every change
+        # and a short narrow segment would otherwise shrink the whole corridor's untraced asphalt.
+        width_by_name[name] = max(width_by_name.get(name, 0.0),
+                                  assumed_width_ft(way.get("tags", {})))
         for nid in way.get("nodes", []):
             if nid in xy:
                 by_node.setdefault(nid, set()).add(name)
@@ -161,7 +167,26 @@ def area_corridors(area: str = "hopewell_borough",
     for name, piece in pieces:
         crossings = _cross_street_ft(piece, name, by_node, xy)
         corridors.append(Corridor(name=name, centerline=piece, junctions=(),
+                                  nominal_width_ft=width_by_name[name],
                                   kerb_runs=_kerb_runs_for(piece, crossings, kerb_ways),
                                   municipalities=(boundary_name,),
                                   cross_street_ft=crossings))
     return corridors
+
+
+def corridor_pavement(corridor: Corridor) -> Polygon | None:
+    """This street's asphalt, walked between ITS OWN traced kerbs.
+
+    The kerb runs on a Corridor were already claimed by it, so unlike `assign_kerbs_to_roads`
+    there is no nearest-road contest left to run - the vertices are handed straight over. Where a
+    side is untraced the surface falls back to `nominal_width_ft`, which is why an untraced street
+    still draws as a street rather than as nothing.
+    """
+    from src.geometry.context_roads import kerb_points, roadway_surface
+
+    points = kerb_points([run.line for run in corridor.kerb_runs])
+    stations, offsets = (station_offset_many(corridor.centerline, points)
+                         if len(points) else (np.empty(0), np.empty(0)))
+    surface, _, _ = roadway_surface(corridor.centerline, stations, offsets,
+                                    corridor.nominal_width_ft)
+    return surface

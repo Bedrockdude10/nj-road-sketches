@@ -81,7 +81,8 @@ from src.geometry.network.corridor import (
                                     _street_name,
                                     corridors_from_models,
 )
-from src.geometry.network.area import (
+from src.geometry.network.area import (corridor_pavement,
+    
                                     MIN_CORRIDOR_FT,
                                     _connected_runs,
                                     _cross_street_ft,
@@ -183,6 +184,7 @@ __all__ = [
                                     "approaches_of",
                                     "area_corridors",
                                     "corridor_facts",
+                                    "corridor_pavement",
                                     "corridors_from_models",
                                     "junction_corner_reach_ft",
                                     "marked_parking_capacity",

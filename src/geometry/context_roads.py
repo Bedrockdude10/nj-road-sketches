@@ -214,13 +214,13 @@ def _edge_points(line: LineString, stations: np.ndarray, offsets: np.ndarray) ->
 
 
 def roadway_surface(line: LineString, stations: np.ndarray, offsets: np.ndarray,
-                     tags: dict) -> tuple[Polygon | None, set, float]:
+                     width_ft: float) -> tuple[Polygon | None, set, float]:
     """One street's asphalt, from its traced kerbs where there are any.
 
     Returns (polygon, traced sides, assumed width used). Walks the left edge out and the right
-    edge back at the same stations.
+    edge back at the same stations. `width_ft` is only reached for where a side is untraced -
+    passed in rather than read off tags, because a corridor is many ways and has no single tag.
     """
-    width_ft = assumed_width_ft(tags)
     samples, left, right, traced = _edge_offsets(line, stations, offsets, width_ft)
     ring = _edge_points(line, samples, left) + _edge_points(line, samples[::-1], right[::-1])
     if len(ring) < 4:

@@ -36,7 +36,8 @@ def kerb_along(y_ft, x0=0.0, x1=400.0):
 
 def measure(street, kerbs, tags=None):
     stations, offsets = assign_kerbs_to_roads([street], kerb_points(kerbs))[0]
-    return roadway_surface(street, stations, offsets, tags or {"highway": "residential"})
+    return roadway_surface(street, stations, offsets,
+                           assumed_width_ft(tags or {"highway": "residential"}))
 
 
 def test_a_street_traced_on_both_sides_is_as_wide_as_the_tracing():

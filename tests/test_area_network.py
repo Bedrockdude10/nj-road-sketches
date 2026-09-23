@@ -239,6 +239,41 @@ def test_a_render_is_a_slice_of_the_document(tmp_path) -> None:
     assert out.exists() and out.stat().st_size > 10_000
 
 
+def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
+    """The other end of the same pipeline: the local-metre document blender_scene.py consumes,
+    built from the GeoJSON alone. Asserted rather than rendered because Blender is a minute and
+    a subprocess - what can go wrong HERE is the translation, and that is all in the numbers.
+    """
+    import math
+
+    from scripts.export_network import export_network
+    from scripts.render_slice import load_network, slice_around, _center_ft
+    from scripts.render_slice_3d import scene_document
+
+    export_network(AREA, tmp_path)
+    around = slice_around(load_network(AREA, tmp_path),
+                          _center_ft("-74.7619598,40.389179"), 320.0)
+    doc = scene_document(around, "test")
+
+    # blender_scene.REQUIRED_KEYS, copied rather than imported: that module runs in Blender's
+    # interpreter and .importlinter forbids reaching into it from here.
+    assert {"frame", "kerbs", "paved_surfaces", "surveyed_crossings"} <= set(doc)
+    assert doc["pavement_near"], "a slice with no asphalt renders paint floating in space"
+    assert doc["bike_lane_surface_polygons"], "the facility should survive the translation"
+    assert [p for p in doc["props"] if p["type"] == "bollard"], "so should its flex posts"
+
+    # Every coordinate is METRES FROM THE SLICE CENTRE, which is the whole contract. A ring left
+    # in state-plane feet still renders - 400,000 m from the origin, off the edge of the camera -
+    # so the frame radius is the only thing that catches it.
+    radius_m = doc["frame"]["radius_m"]
+    rings = (doc["pavement_near"] + doc["bike_lane_surface_polygons"]
+             + doc["bike_lane_edge_lines"] + [k["coords"] for k in doc["kerbs"]])
+    worst = max(math.hypot(x, y) for ring in rings for x, y in ring)
+    assert worst <= radius_m * 1.5, (
+        f"a vertex {worst:,.0f} m out on a {radius_m:.0f} m frame is not in the local frame")
+    assert max(math.hypot(*p["position_m"]) for p in doc["props"]) <= radius_m * 1.5
+
+
 def test_a_slice_clips_rather_than_dropping_what_overhangs_it() -> None:
     """A 1,050 ft bikeway run whose centre is outside the window still crosses it. Filtering by
     centroid instead of clipping would draw a hole where the longest run should be."""

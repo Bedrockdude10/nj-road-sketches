@@ -24,7 +24,7 @@ from shapely.geometry import Point
 
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.corridor_paint import paint_facility
-from src.geometry.network.area import area_corridors
+from src.geometry.network.area import area_corridors, corridor_pavement
 from src.geometry.treatments import route_decision_for
 from src.geometry.treatments.corridor import CorridorFacility
 
@@ -84,6 +84,12 @@ def network_features(area: str) -> gpd.GeoDataFrame:
                      "kerb_coverage": round(traced_ft / (2 * corridor.length_ft), 4),
                      "crossings": len(corridor.cross_street_ft),
                      "geometry": corridor.centerline})
+        # The asphalt, so a slice of this document is a street and not paint floating in space.
+        pavement = corridor_pavement(corridor)
+        if pavement is not None:
+            rows.append({"kind": "pavement", "name": corridor.name, "municipality": town,
+                         "width_ft": round(corridor.nominal_width_ft, 2),
+                         "area_sqft": round(pavement.area, 1), "geometry": pavement})
         rows += [{"kind": "kerb", "name": corridor.name, "municipality": town,
                   "side": run.side, "source": run.source,
                   "start_ft": round(run.start_ft, 2), "end_ft": round(run.end_ft, 2),
@@ -119,6 +125,8 @@ def _summarise(features: gpd.GeoDataFrame) -> str:
     return (f"{len(streets)} streets ({streets['length_ft'].sum() / 5280:.2f} mi), "
             f"{(features['kind'] == 'kerb').sum()} kerb runs, "
             f"{(features['kind'] == 'crossing').sum()} crossings, "
+            f"{features[features['kind'] == 'pavement']['area_sqft'].sum() / 43560:.1f} acres "
+            f"of asphalt, "
             f"{len(decided)} street(s) carrying a route decision "
             f"({', '.join(sorted(decided['name'])) or 'none'}), "
             f"{(features['kind'] == 'bikeway').sum()} bikeway run(s) totalling "

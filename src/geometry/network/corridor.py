@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 from shapely.geometry import LineString
 
+from src.geometry.context_roads import ROADWAY_DEFAULT_WIDTH_FT
 from src.geometry.model import (STRIP_SAMPLE_FT, frame_at, is_through_street, line_direction,
                                 place_in_measured_frame, station_offset_many)
 from src.geometry.network.kerb import (CORRIDOR_KERB_RADIUS_M, KerbRun, _complement_spans,
@@ -100,6 +101,10 @@ class Corridor:
     #: (station, lateral gap in ft) at each seam between a modelled junction and NJDOT's
     #: alignment. Reported rather than smoothed away silently - see _eased_alignment.
     seams: tuple[tuple[float, float], ...] = ()
+    #: What OSM says this carriageway is worth kerb to kerb, used ONLY where nothing is traced.
+    #: A street fact rather than an argument to the surface builder, because a corridor with no
+    #: tracing at all has nothing else to be drawn from and the width decides its whole asphalt.
+    nominal_width_ft: float = ROADWAY_DEFAULT_WIDTH_FT
 
     @property
     def length_ft(self) -> float:

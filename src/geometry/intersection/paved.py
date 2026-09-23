@@ -38,7 +38,8 @@ def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude) -> tuple
     up coplanar for Blender to z-fight over.
     """
     from src.geometry.context_roads import (SAMPLE_SPACING_FT, assign_kerbs_to_roads,
-                                            is_carriageway, kerb_points, roadway_surface)
+                                            assumed_width_ft, is_carriageway,
+                                            kerb_points, roadway_surface)
     from src.sources.osm_context import fetch_kerbs, fetch_roads
 
     center_ft = Point(*to_state_plane([(center_wgs84.x, center_wgs84.y)])[0])
@@ -71,7 +72,7 @@ def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude) -> tuple
 
     out = []
     for (tags, line), (stations, offsets) in zip(ways, per_road):
-        surface, traced, width_ft = roadway_surface(line, stations, offsets, tags)
+        surface, traced, width_ft = roadway_surface(line, stations, offsets, assumed_width_ft(tags))
         if surface is None:
             continue
         if exclude is not None:
