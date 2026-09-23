@@ -50,7 +50,7 @@ from src.checks import SceneInvariantError
 from src.geometry.intersection import load_intersection_model
 from src.geometry.treatments import DesignState, existing_conditions
 from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
-from src.render.frame import FRAME_SCALE_ENV
+from src.render.frame import FRAME_SCALE_ENV, frame_covering_radius_m
 from src.render.plan_view import draw_change_panel, legend_handles, plot_design_state
 from src.render.theme import build_default_theme
 from src.site import (list_sites, load_site_scenarios, run_scenario, scenario_label,
@@ -197,7 +197,11 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
             # is still RUN on from_model below: a proposal builds on the untreated street,
             # because a treatment is added and never removed.
             existing = existing_conditions(model)
-            crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+            # Through the frame too - see the buildings fetch below. A surveyed crossing this
+            # misses is drawn as bare asphalt, which is the one error a reader cannot spot.
+            crossings = fetch_crossings(
+                model.center_wgs84,
+                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
     except Exception as e:
         return [f"{site}: could not build the junction model - {type(e).__name__}: {e}"], []
 
@@ -213,7 +217,15 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
     if render_3d:
         with contextlib.redirect_stdout(quiet):
             theme = build_default_theme()
-            buildings = fetch_buildings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+            # THROUGH frame_covering_radius_m, exactly as export_scenario does when nothing is
+            # passed in. Fetching here at the flat base radius made this a SECOND answer to "how
+            # far do the buildings go", and the quieter one won: wbroad_lanning's corridor frame
+            # reaches 781 m from the junction node and this handed it 130 m, so two thirds of
+            # its own picture came out as bare field while export.py's own fetch would have
+            # covered it.
+            buildings = fetch_buildings(model.center_wgs84,
+                                        radius_m=frame_covering_radius_m(model,
+                                                                         BUILDING_CONTEXT_RADIUS_M))
 
     for label, name, state in states:
         with contextlib.redirect_stdout(quiet):

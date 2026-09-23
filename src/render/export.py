@@ -154,7 +154,10 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     if traffic_control is None:
         traffic_control = fetch_traffic_control(model.center_wgs84, radius_m=TRAFFIC_CONTROL_RADIUS_M)
     if street_furniture is None:
-        street_furniture = fetch_street_furniture(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+        # The same context_m as the buildings and crossings above: street furniture fills the
+        # picture too, and a bench that exists in one view and not the other is the seam this
+        # project keeps finding bugs in.
+        street_furniture = fetch_street_furniture(model.center_wgs84, radius_m=context_m)
 
     # Every marking position this scenario implies, resolved once (src/render/scene.py) and
     # shared with the plan view and the invariants. Crosswalks outrank every other marking,

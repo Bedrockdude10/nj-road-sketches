@@ -796,6 +796,25 @@ def _extra_props_from_config(model: IntersectionModel, state: DesignState, offse
     return [p for p in placed if p is not None]
 
 
+def _bikeway_sign_props(state: DesignState, offsets_ft: dict, pavement=None) -> list[dict]:
+    """The MUTCD signing a two-way bikeway's ends and its crossroads need.
+
+    WHICH sign and WHY is decided in src/geometry/treatments/bikeways/terminus.py, beside the
+    standards rows for it; this places the entries it returns with the one placer every other
+    sign in this file goes through. A plaque that names no side gets the approaching driver's
+    right - the same kerb the STOP it hangs under stands on, read from one constant so the two
+    cannot drift apart.
+    """
+    from src.geometry.treatments.bikeways.terminus import bikeway_sign_entries
+
+    placed = (_extra_prop(state, {"side": APPROACHING_DRIVER_RIGHT, **entry}, offsets_ft,
+                           pavement=pavement,
+                           source="required signing for a two-way bikeway, placed by the "
+                                  f"terminus treatment (not site config): {entry['note']}")
+              for entry in bikeway_sign_entries(state))
+    return [p for p in placed if p is not None]
+
+
 def _extra_props_from_state(state: DesignState, offsets_ft: dict, pavement=None) -> list[dict]:
     """Scenario-specific extra signage added by a treatment
     (src/geometry/treatments/extras.py:ExtraProp) - e.g. an RRFB or a relocated
@@ -1009,6 +1028,7 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, 
         + _no_turn_on_red_props(model, state, offsets_ft, pavement)
         + _extra_props_from_config(model, state, offsets_ft, pavement)
         + _extra_props_from_state(state, offsets_ft, pavement)
+        + _bikeway_sign_props(state, offsets_ft, pavement)
         + _bollard_props(state)
         + _parking_buffer_bollard_props(state)
     )

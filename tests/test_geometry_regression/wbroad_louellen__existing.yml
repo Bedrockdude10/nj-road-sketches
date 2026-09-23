@@ -22,6 +22,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  bike_lane_uncoloured_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
   corner_apron_polygons:
     count: 0
     extent: null
@@ -124,6 +128,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  shared_lane_symbol_polygons:
+    count: 0
+    extent: null
+    points: 0
   sidewalks_far:
     count: 10
     extent:
@@ -148,6 +156,14 @@ channels:
     count: 0
     extent: null
     points: 0
+  turn_box_edge_lines:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
 existing_marked_crosswalks:
 - louellen_st_west
 facilities: {}
@@ -161,13 +177,13 @@ legs:
     centerline_paint_m:
     - - - -18.777
         - 2.22
-      - - -20.167
+      - - -20.166
         - 2.282
       - - -20.167
         - 2.282
-      - - -23.212
+      - - -23.211
         - 2.424
-      - - -23.212
+      - - -23.211
         - 2.424
       - - -26.256
         - 2.574
@@ -175,13 +191,13 @@ legs:
         - 2.574
       - - -29.3
         - 2.731
-      - - -29.301
+      - - -29.3
         - 2.731
       - - -32.344
         - 2.896
       - - -35.388
         - 3.061
-      - - -38.432
+      - - -38.431
         - 3.224
       - - -41.474
         - 3.381
@@ -197,11 +213,11 @@ legs:
         - 2.831
       - - -32.339
         - 2.996
-      - - -35.383
+      - - -35.382
         - 3.161
-      - - -38.427
+      - - -38.426
         - 3.324
-      - - -38.427
+      - - -38.426
         - 3.324
       - - -41.469
         - 3.481
@@ -222,7 +238,7 @@ legs:
     crosswalk_skew_deg: -44.028
     crosswalk_style: lines
     far_m:
-    - -41.472
+    - -41.471
     - 3.431
     near_m:
     - -2.495
@@ -233,11 +249,11 @@ legs:
     stop_bar_centre_m:
     - -18.775
     - 2.27
-    stop_bar_lateral_offset_m: 4.101
+    stop_bar_lateral_offset_m: 4.116
     stop_bar_offset_m: 16.965
-    stop_bar_span_m: 5.897
-    stop_bar_width_m: 12.793
-    width_m: 12.793
+    stop_bar_span_m: 5.919
+    stop_bar_width_m: 12.837
+    width_m: 12.837
   w_broad_st_northeast:
     centerline_paint_m:
     - - - 7.09
@@ -326,9 +342,9 @@ legs:
     - 0.506
     crosswalk_bar_count: 11
     crosswalk_centre_m:
-    - 5.859
-    - 7.405
-    crosswalk_offset_m: 8.927
+    - 5.878
+    - 7.416
+    crosswalk_offset_m: 8.948
     crosswalk_offset_source: geometric_estimate
     crosswalk_reach_left_m: 4.648
     crosswalk_reach_right_m: 6.096
@@ -346,11 +362,11 @@ legs:
     stop_bar_centre_m:
     - 7.115
     - 8.13
-    stop_bar_lateral_offset_m: 2.436
+    stop_bar_lateral_offset_m: 2.44
     stop_bar_offset_m: 10.376
-    stop_bar_span_m: 4.872
-    stop_bar_width_m: 10.745
-    width_m: 10.745
+    stop_bar_span_m: 4.88
+    stop_bar_width_m: 10.76
+    width_m: 10.76
   w_broad_st_southwest:
     centerline_paint_m:
     - - - -15.86
@@ -367,6 +383,8 @@ legs:
         - -18.567
       - - -20.505
         - -18.567
+      - - -22.584
+        - -20.801
       - - -24.662
         - -23.034
       - - -26.736
@@ -381,6 +399,8 @@ legs:
         - -16.25
       - - -20.579
         - -18.499
+      - - -22.657
+        - -20.733
       - - -24.735
         - -22.966
       - - -24.735
@@ -399,9 +419,9 @@ legs:
     - -0.753
     crosswalk_bar_count: 13
     crosswalk_centre_m:
-    - -8.362
-    - -4.569
-    crosswalk_offset_m: 8.927
+    - -8.376
+    - -4.585
+    crosswalk_offset_m: 8.948
     crosswalk_offset_source: geometric_estimate
     crosswalk_reach_left_m: 7.544
     crosswalk_reach_right_m: 5.867
@@ -419,11 +439,11 @@ legs:
     stop_bar_centre_m:
     - -15.897
     - -13.398
-    stop_bar_lateral_offset_m: 3.106
+    stop_bar_lateral_offset_m: 3.063
     stop_bar_offset_m: 20.535
-    stop_bar_span_m: 6.212
-    stop_bar_width_m: 13.424
-    width_m: 13.424
+    stop_bar_span_m: 6.127
+    stop_bar_width_m: 13.254
+    width_m: 13.254
 name: Existing Conditions
 props:
 - fire_hydrant@418080.91,566067.60

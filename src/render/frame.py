@@ -64,6 +64,30 @@ def frame_scale() -> float:
     return scale
 
 
+# HOW FAR DOWN THE STREET THIS DRAWING ACTUALLY GOES, in feet, already frame-scaled. The other
+# half of the answer FRAME_SCALE_ENV gives, and the half that was missing.
+#
+# The frame scale lengthens legs and widens the context fetch by the same factor, so a site whose
+# legs are all `leg_working_length_ft` keeps the two in step at every zoom. A PER-LEG
+# `working_length_ft` does not go through the frame scale: it lengthens ONE leg and tells nothing
+# else. wbroad_lanning's southwest leg is 2,307.5 ft to the borough line, so the street was drawn
+# 703 m while roads, kerbs, driveways and crossings were all fetched at 130 m - 573 m of corridor
+# through an empty field, with Louellen St and W Prospect St simply absent from the picture.
+#
+# Set by load_intersection_model before it fetches anything, for the same reason the frame scale
+# is an environment variable: it has to reach call sites several layers down that hold a centre
+# point and nothing else (drawn_kerb_radius_ft holds not even that, and MUST return the radius the
+# kerbs were really fetched at or the two renderers draw different sets). Set UNCONDITIONALLY on
+# every load, so a site with no override resets it instead of inheriting the last site's reach.
+_drawn_reach_ft = 0.0
+
+
+def set_drawn_reach_ft(reach_ft: float) -> None:
+    """Record the longest leg the model being built will draw. See `_drawn_reach_ft`."""
+    global _drawn_reach_ft
+    _drawn_reach_ft = max(0.0, float(reach_ft))
+
+
 def context_radius_m(base_m: float) -> float:
     """How far out to pull CONTEXT - buildings, roads, parking - for the frame in force.
 
@@ -74,8 +98,14 @@ def context_radius_m(base_m: float) -> float:
     measured FROM the model and the context is fetched to BUILD the model, so reading one from
     the other is circular. A flat multiple of the constant each layer already uses is not, and at
     1x returns exactly the radius that layer used before, so an unscaled render is unchanged.
+
+    AND NEVER LESS THAN THE STREET IS DRAWN. The drawn reach is not circular either - it is the
+    configured leg length times the frame scale, known before a single feature is fetched. It
+    binds only where a leg is longer than the base radius, which is no site whose legs are the
+    130 ft default (39.6 m, well inside every base here) and is exactly the case the base radius
+    cannot see. See `_drawn_reach_ft`.
     """
-    return base_m * frame_scale()
+    return max(base_m * frame_scale(), _drawn_reach_ft * FT_TO_M)
 
 
 def frame_covering_radius_m(model: "IntersectionModel", base_m: float) -> float:
@@ -92,8 +122,18 @@ def frame_covering_radius_m(model: "IntersectionModel", base_m: float) -> float:
 
     Floored at `base_m`, so at 1x no existing render moves. The 10% margin covers the difference
     between a circular fetch and the square-ish ground the camera actually sees.
+
+    AND MEASURED FROM THE JUNCTION NODE, WHICH IS NOT THE FRAME'S CENTRE. Every fetch is a circle
+    around `model.center_wgs84`; the frame is centred on the modelled pavement. Those coincide
+    only while the legs are about the same length - 0.3 to 3.8 m apart at the seven junctions
+    here - and not at all on a corridor: wbroad_lanning's frame centre sits 306 m down W Broad,
+    so a radius equal to the frame's own reached 444 m and left the far half of its own picture
+    with no buildings and no crossings in it. The radius a circle at the node needs to cover a
+    circle at the frame centre is the distance between them PLUS the frame's radius.
     """
-    return max(base_m, junction_frame(model).radius_ft * FT_TO_M * 1.1)
+    frame = junction_frame(model)
+    reach_ft = frame.center_ft.distance(model.center_ft) + frame.radius_ft
+    return max(base_m, reach_ft * FT_TO_M * 1.1)
 
 # How far past a leg's far end a pavement vertex may still count as part of this junction. The
 # corner fillets trim the curbs a little past the leg's own end, so a hard cut at the leg length

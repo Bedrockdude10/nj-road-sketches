@@ -22,7 +22,7 @@ from src.render.props import (DRAWN_BY_PAINT, TACTILE_PAD_DEPTH_FT, TACTILE_PAD_
                                build_props, pad_polygon, signalization_conflicts)
 from src.render.coords import wgs84_to_state_plane
 from src.render.crosswalks import centerline_paint_ft, centerline_start_ft
-from src.render.frame import junction_frame
+from src.render.frame import frame_covering_radius_m, junction_frame
 from src.render.labels import LabelPlacer, ft_per_point
 from src.render.scene import SceneGeometry
 from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_sidewalks,
@@ -33,7 +33,7 @@ from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_sidewal
 TACTILE_PAD_COLOR = "#8c1f14"
 
 TRAFFIC_CONTROL_RADIUS_M = 60  # matches src/render/export.py
-BUILDING_CONTEXT_RADIUS_M = 130  # matches src/render/export.py - same real-world radius crossings are searched
+BUILDING_CONTEXT_RADIUS_M = 130  # matches src/render/export.py - the FLOOR under the frame's own reach
                                   # within, so a leg's crosswalk_offset here matches what the 3D export computes
 
 
@@ -124,6 +124,25 @@ PROP_MARKERS = {
                                     linewidths=1.2, zorder=7),),
     "no_turn_on_red_sign":    (dict(color="white", marker="s", s=26, edgecolors="red",
                                     linewidths=1.2, zorder=7),),
+    # MUTCD W-series warning plates at a bikeway terminus: W9-5 BIKE LANE ENDS, and the
+    # W16-21P TWO-WAY BICYCLE CROSS TRAFFIC plaque under a crossroad's STOP. A yellow diamond,
+    # which is the plate's real shape - and distinct from the yield triangle and the school
+    # zone pentagon so the three sign families read apart at a glance.
+    # A THIN diamond, and a big one. The OSM RRFB beacon is already a small gold "D", and two
+    # prop types drawn identically are two things the reader cannot tell apart on the sheet -
+    # tests/test_props.py:test_every_prop_type_is_drawn_distinguishably is what holds that down.
+    "bike_warning_sign":      (dict(color="gold", marker="d", s=64, edgecolors="black",
+                                    linewidths=1.2, zorder=7),),
+    # The R9-23 series regulatory plate at the two-stage turn box (MUTCD 9B.18). White plate,
+    # black edge - the NTOR sign is the other white rectangle and is edged RED, so the two do
+    # not read as the same sign.
+    "bike_regulatory_sign":   (dict(color="white", marker="s", s=26, edgecolors="black",
+                                    linewidths=1.2, zorder=7),),
+    # Drawn in 3D since the school-zone builder was added and never here, so a relocated
+    # school zone sign was invisible in plan. Pentagon-ish (matplotlib's "p"), fluorescent
+    # yellow-green, as built.
+    "school_zone_sign":       (dict(color="greenyellow", marker="p", s=44, edgecolors="black",
+                                    linewidths=0.6, zorder=7),),
     "streetlight":            (dict(color="dimgrey", marker="*", s=34, zorder=6),),
     "bollard":                (dict(color=BOLLARD_PLAN_COLOR, marker="o", s=14,
                                     edgecolors="black", linewidths=0.4, zorder=7),),
@@ -213,6 +232,12 @@ PAINT_STYLE = require_every_kind({
     # A green bike lane's asphalt. Under the stripes' zorder so the white edge lines read on
     # top of it, exactly as they do on the street and in the render.
     markings.BIKE_LANE_SURFACE:   dict(color="mediumseagreen", alpha=0.45, zorder=2),
+    # THE SAME LANE WITH NO GREEN ON IT - an existing conventional bike lane. Drawn, because a
+    # reader of a 2D sheet has to see where the lane runs; drawn GREY and faint, because the
+    # legend's green swatch says "green surface" and means it. The 3D render draws nothing here
+    # at all (markings.NOT_DRAWN_IN_3D): on asphalt, an unpainted lane IS the asphalt, and the
+    # white stripes and the symbol beside it are what make it a bike lane.
+    markings.BIKE_LANE_UNCOLOURED_SURFACE: dict(color="slategrey", alpha=0.18, zorder=2),
     markings.LANE_EDGE_LINE:      dict(color="goldenrod", linewidth=1.5, zorder=3),
     markings.TAPER_LINE:          dict(color="goldenrod", linewidth=1.5, zorder=3),
     markings.BUFFER_EDGE_LINE:    dict(color="goldenrod", linewidth=1.5, zorder=3),
@@ -244,12 +269,35 @@ PAINT_STYLE = require_every_kind({
     # The BIKE LANE symbol, white on the green like the real marking, and above the surface it
     # sits on for the same reason the contraflow stripe is.
     markings.BIKE_LANE_SYMBOL:    dict(color="white", alpha=0.95, zorder=4),
+    # The arrow beside it (MUTCD 9E.01(04), 9E.11(06)). Drawn exactly as the symbol is, because
+    # it is the same paint - the two are one instruction to a striper and reading them in two
+    # colours would invent a distinction the street does not have.
+    markings.BIKE_THROUGH_ARROW:  dict(color="white", alpha=0.95, zorder=4),
+    # THE TWO-STAGE TURN BOX. Green like the lane, because 9E.11(11)-(12) makes it the same
+    # coloured pavement and a reader has to see at a glance that the box and the bikeway are one
+    # facility - but a shade darker and more opaque than BIKE_LANE_SURFACE, because it is a place
+    # to STAND rather than to ride through, and the sheet has to be able to say which is which.
+    markings.TURN_BOX_SURFACE:    dict(color="mediumseagreen", alpha=0.55, zorder=2),
+    # 9E.11(07)'s solid white line, on all four sides. Above the green it bounds, like every
+    # other stripe over a coloured surface here.
+    markings.TURN_BOX_EDGE_LINE:  dict(color="white", linewidth=1.8, zorder=4),
+    # THE SHARROW, and the one marking on this sheet that must be seen NOT to be on green:
+    # 9E.09(05) forbids a green background under it. Drawn white on whatever the road already is,
+    # which past the end of the facility is bare asphalt.
+    markings.SHARED_LANE_MARKING: dict(color="white", alpha=0.95, zorder=4),
 }, "plan_view.PAINT_STYLE")
 # Outline colour for each filled zone's own fill colour. White outlines white: a symbol is a
 # SOLID glyph, not a hatched zone that needs a rim to read as bounded, so giving it a contrasting
 # edge would draw a border no striper paints.
+#
+# NOT a lookup with a fallback. A fill colour missing from here used to raise KeyError deep in
+# the plan build, several phases after the style was written, which is the same
+# forgot-one-of-the-six-places failure require_every_kind exists to stop - so
+# tests/test_paint.py:test_every_fill_colour_has_an_outline_colour reads both tables and fails
+# on import instead. A .get(colour, colour) default would have made the miss invisible, which
+# is worse: the zone would simply lose its rim.
 PAINT_FILL_EDGE = {"gold": "goldenrod", "peru": "saddlebrown", "orangered": "orangered",
-                   "mediumseagreen": "seagreen", "white": "white"}
+                   "mediumseagreen": "seagreen", "white": "white", "slategrey": "slategrey"}
 
 
 def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offsets: dict,
@@ -463,7 +511,9 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
                        traffic_control: list[dict] | None = None, street_furniture: list[dict] | None = None):
     if sidewalks is None:
         try:
-            sidewalks = fetch_sidewalks(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+            sidewalks = fetch_sidewalks(
+                model.center_wgs84,
+                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
         except RuntimeError as e:
             print(f"  WARNING: could not fetch OSM sidewalks ({e}) - drawn without them.")
             sidewalks = []
@@ -476,7 +526,9 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
             traffic_control = []
     if street_furniture is None:
         try:
-            street_furniture = fetch_street_furniture(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+            street_furniture = fetch_street_furniture(
+                model.center_wgs84,
+                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
         except RuntimeError:
             street_furniture = []
     for note in signalization_conflicts(model, traffic_control):
@@ -488,7 +540,9 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     # is then visible only in the render. fetch_crossings is disk-cached per (center, radius).
     if crossings is None:
         try:
-            crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
+            crossings = fetch_crossings(
+                model.center_wgs84,
+                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
         except RuntimeError as e:
             # Overpass unreachable and nothing cached. Don't fail the whole plan view for
             # context data - fall back to the geometric estimate, which is drawn in a
@@ -923,16 +977,28 @@ def legend_handles():
                label="Bike lane - edge lines (dotted across a driveway)"),
         Patch(facecolor="mediumseagreen", alpha=0.45, edgecolor="seagreen",
                label="Bike lane - green surface"),
+        Patch(facecolor="slategrey", alpha=0.18, edgecolor="slategrey",
+               label="Bike lane - EXISTING, unpainted asphalt"),
         Patch(facecolor="mediumseagreen", alpha=0.35, hatch="\\\\", edgecolor="seagreen",
                label="Bike lane buffer"),
         Line2D([0], [0], color="goldenrod", lw=1.3, ls="--",
                label="Two-way bike lane - contraflow divider (MUTCD yellow)"),
+        # The two ends of the facility (MUTCD 9E.11, 9E.09 - STANDARDS.md section 2). The box is
+        # where a rider crosses ONTO a bikeway running up the far kerb; the sharrow is what the
+        # travelled way carries once the bikeway has stopped. They are the two halves of one
+        # answer, so they sit together.
+        Patch(facecolor="seagreen", alpha=0.55, edgecolor="white",
+               label="Two-stage bike turn box - cross here to join the bikeway (MUTCD 9E.11)"),
+        Patch(facecolor="white", edgecolor="white",
+               label="BIKE LANE symbol, through arrow, and shared-lane marking (sharrow)"),
         Line2D([0], [0], marker="o", color=BOLLARD_PLAN_COLOR, lw=0, label="Bollard"),
         Line2D([0], [0], color="steelblue", lw=1.5, label="Marked parking lane + stalls"),
         Patch(facecolor="white", edgecolor="darkviolet", label="Crosswalk - OSM-surveyed position"),
         Patch(facecolor="white", edgecolor="crimson", ls="--", label="Crosswalk - estimated position"),
         Line2D([0], [0], color="grey", lw=0.7, ls=":", label="Unmarked leg (no crosswalk today)"),
-        Line2D([0], [0], color="dimgrey", lw=3, label="Stop bar (entering half only)"),
+        # "entering half" until Lavallette, where a one-way carriageway has no half to stop at -
+        # the bar spans the whole roadway there. See stop_bar_ends_ft, which is what decides.
+        Line2D([0], [0], color="dimgrey", lw=3, label="Stop bar (entering lanes only)"),
         Line2D([0], [0], marker="o", color="limegreen", markeredgecolor="black", lw=0,
                 label="Traffic signal pole + mast arm"),
         Line2D([0], [0], marker="s", color="limegreen", markeredgecolor="black", lw=0,
@@ -944,6 +1010,14 @@ def legend_handles():
                 label="Pedestrian pushbutton (OSM)"),
         Patch(facecolor=TACTILE_PAD_COLOR, edgecolor="black", label="Tactile paving / curb ramp (OSM)"),
         Line2D([0], [0], marker="D", color="gold", markeredgecolor="black", lw=0, label="RRFB beacon (OSM)"),
+        Line2D([0], [0], marker="d", color="gold", markeredgecolor="black", lw=0, markersize=9,
+                label="Bicycle warning sign (MUTCD W9-5 / W16-21P)"),
+        Line2D([0], [0], marker="s", color="white", markeredgecolor="black", lw=0,
+                label="Turn box regulatory sign (MUTCD R9-23)"),
+        Line2D([0], [0], marker="p", color="greenyellow", markeredgecolor="black", lw=0,
+                label="School zone sign"),
+        Line2D([0], [0], marker="v", color="white", markeredgecolor="red", lw=0,
+                label="Yield sign (unsignalized)"),
         Line2D([0], [0], marker="P", color="firebrick", lw=0, label="Fire hydrant (OSM)"),
         Line2D([0], [0], color="saddlebrown", lw=1.5, label="Corner parcel"),
         Line2D([0], [0], marker="o", color="blue", lw=0, label="Intersection"),

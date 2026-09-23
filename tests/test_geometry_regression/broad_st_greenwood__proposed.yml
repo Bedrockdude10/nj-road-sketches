@@ -22,6 +22,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  bike_lane_uncoloured_surface_polygons:
+    count: 0
+    extent: null
+    points: 0
   corner_apron_polygons:
     count: 0
     extent: null
@@ -160,6 +164,10 @@ channels:
     count: 0
     extent: null
     points: 0
+  shared_lane_symbol_polygons:
+    count: 0
+    extent: null
+    points: 0
   sidewalks_far:
     count: 15
     extent:
@@ -181,6 +189,14 @@ channels:
       - -15.747
     points: 1555
   tree_points:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_edge_lines:
+    count: 0
+    extent: null
+    points: 0
+  turn_box_surface_polygons:
     count: 0
     extent: null
     points: 0

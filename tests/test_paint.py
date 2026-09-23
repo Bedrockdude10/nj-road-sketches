@@ -985,12 +985,31 @@ def test_sampled_polylines_are_rendered_as_polylines_not_chords():
 
     # Every paint channel the export writes is drawn SOMEWHERE. This is the half the old guard could
     # not check: a channel dropped from the draw block entirely would have passed it.
-    from src.geometry.markings import CHANNELS
+    from src.geometry.markings import CHANNELS, NOT_DRAWN_IN_3D
 
-    drawn = sampled | two_point | {
-        "bike_lane_contraflow_lines", "bike_lane_surface_polygons",
-        "bike_lane_symbol_polygons", "corner_apron_polygons"}
-    missing = [c.key for c in CHANNELS if c.key not in drawn]
+    # THE REST OF THE DRAW BLOCK, READ OFF THE SOURCE RATHER THAN LISTED HERE. It used to be a
+    # hardcoded set of four channel keys, which is the very drift this test's docstring warns
+    # about one level up: a correct addition to blender_scene.py failed it, and the fix would
+    # have been to widen the literal - the move the comment below calls "how a marking comes to
+    # ship in 2D and not in 3D". Every channel not in the two declared polyline groups is drawn
+    # by a `data.get("<key>", [])` in the draw block, so that call IS the property, and finding
+    # it by AST cannot be fooled by a rename or a rewrite the way a grep for a call site was.
+    read_from_data = {node.args[0].value
+                      for node in ast.walk(ast.parse(source))
+                      if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                      and node.func.attr == "get" and node.args
+                      and isinstance(node.args[0], ast.Constant)
+                      and isinstance(node.args[0].value, str)}
+    drawn = sampled | two_point | read_from_data
+    # A channel may be absent from the 3D render only by DECISION, and the decision is declared
+    # beside the channels rather than spelled here - otherwise widening this set is how a
+    # marking comes to ship in 2D and not in 3D, which is the seam README calls the unguarded
+    # one. NOT_DRAWN_IN_3D carries the reason for each entry.
+    deliberate = {c.key for c in NOT_DRAWN_IN_3D}
+    assert not (drawn & deliberate), (
+        f"{sorted(drawn & deliberate)} is declared NOT_DRAWN_IN_3D and blender_scene.py draws "
+        f"it anyway - one of the two is wrong about what the render shows")
+    missing = [c.key for c in CHANNELS if c.key not in drawn | deliberate]
     assert not missing, f"declared marking channel(s) never drawn in 3D: {missing}"
 
 
@@ -1827,3 +1846,104 @@ def test_a_two_way_street_still_gets_a_stop_bar_on_every_leg():
     two_way = DesignState(legs=state.legs, corner_fillets={})      # no traffic_heads_toward
     offsets = dict.fromkeys(two_way.legs, (40.0, "modelled"))
     assert set(resolve_stop_bar_offsets(two_way, offsets, stop_lines=[])) == set(two_way.legs)
+
+
+# --------------------------------------------------------------------------
+# Green coloured pavement is a TREATMENT, not a bike lane
+# --------------------------------------------------------------------------
+def _bike_lane_surface_kinds(observed: bool) -> set:
+    """The surface kind(s) a lane on one kerb emits, with everything else held equal."""
+    from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
+    from src.geometry.paint import curbside_paint_ft
+    from src.geometry.targets import LegSide
+    from src.geometry.treatments import AddBikeLane, DesignState
+
+    leg = a_straight_leg(name="east", width_ft=70.0)
+    state = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+        AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=0.0, pin_to_kerb=True,
+                     observed=observed))
+    paint = curbside_paint_ft(state, crossing_at(20.0), None)
+    return {p.kind for p in paint if p.kind in BIKE_LANE_SURFACE_KINDS}
+
+
+def test_an_EXISTING_bike_lane_is_not_painted_green():
+    """Green coloured pavement is something a PROPOSAL does, not something a street has.
+
+    The plan view's legend calls its green swatch "Bike lane - green surface" and
+    blender_scene.py lays that green as real pavement under the white stripes, so the green is a
+    claim about paint on the ground rather than a schematic. NJ 35 through Lavallette has
+    carried `cycleway:right=lane` on `surface=asphalt` - with no colour tag anywhere - since the
+    way was drawn, which is a conventional white-striped bike lane and nothing more.
+
+    Drawn green on the sheet labelled EXISTING CONDITIONS, the drawing asserts a treatment the
+    street has not had, and the before/after then credits the proposal with nothing for applying
+    it, because the green was already in the "before". That is the same false claim about a
+    street as a marked crosswalk rendered bare, pointing the other way.
+
+    HERMETIC, ON A SYNTHETIC LEG, and deliberately not on the site it was found at: the roads
+    fixture is clipped to Mercer County and this junction is in Ocean, so a site-level version of
+    this would SKIP in every run - which pins nothing at all.
+    """
+    from src.geometry.markings import BIKE_LANE_SURFACE, BIKE_LANE_UNCOLOURED_SURFACE
+
+    assert _bike_lane_surface_kinds(observed=True) == {BIKE_LANE_UNCOLOURED_SURFACE}, (
+        "an OSM-observed bike lane was drawn in the green a proposal applies")
+    # The other direction, without which the fix could be "never paint a lane green".
+    assert _bike_lane_surface_kinds(observed=False) == {BIKE_LANE_SURFACE}, (
+        "a PROPOSED lane still proposes green coloured pavement")
+
+
+def test_an_existing_lane_still_has_a_FOOTPRINT_the_invariants_can_see():
+    """Why this is a second kind and not a deletion.
+
+    Two invariants measure a bikeway through its DRAWN surface on purpose -
+    BikewayReachesTheEndOfItsKerb and bollard_in_the_bike_lane - because the treatment's own
+    idea of its extent is the arithmetic they exist not to trust (.claude/SKILLS.md section 0).
+    Dropping the polygon to take the green off would have made both blind on exactly the lane
+    the OSM reader had just added, which is the "check that cannot see anything must not pass"
+    failure in its most direct form.
+
+    So: same ground, both ways, to the square foot. Asserted as an identity between the two
+    builds rather than against a number, because a literal here would be a third derivation of a
+    width that already has one.
+    """
+    from shapely.ops import unary_union
+
+    from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
+    from src.geometry.paint import curbside_paint_ft
+    from src.geometry.targets import LegSide
+    from src.geometry.treatments import AddBikeLane, DesignState
+
+    def footprint(observed: bool):
+        leg = a_straight_leg(name="east", width_ft=70.0)
+        state = DesignState(legs={"east": leg}, corner_fillets={}).apply(
+            AddBikeLane(LegSide("east", "right"), width_ft=5.0, buffer_ft=0.0, pin_to_kerb=True,
+                         observed=observed))
+        paint = curbside_paint_ft(state, crossing_at(20.0), None)
+        return unary_union([p.geometry for p in paint if p.kind in BIKE_LANE_SURFACE_KINDS])
+
+    existing, proposed = footprint(True), footprint(False)
+    assert existing.area > 0, "an existing bike lane has to be drawn as ground somewhere"
+    assert existing.area == pytest.approx(proposed.area, abs=1e-6), (
+        f"the same lane covers {existing.area:.2f} sq ft unpainted and {proposed.area:.2f} sq ft "
+        f"green - taking the colour off moved the ground, so the two invariants that read this "
+        f"footprint are measuring a different lane depending on who painted it")
+
+
+def test_every_fill_colour_has_an_outline_colour():
+    """A filled marking's fill colour must be in plan_view.PAINT_FILL_EDGE.
+
+    Written after a new marking's `seagreen` fill raised KeyError from inside the plan build -
+    not at import, not in any unit test, but three phases downstream while rendering a site,
+    which is exactly the drift the six-place table in README warns about. PAINT_FILL_EDGE is a
+    seventh place and nothing was checking it.
+
+    A LINE has no fill, so only entries that actually get filled are required: the ones with an
+    alpha or a hatch. That is the same distinction _draw already makes.
+    """
+    from src.render.plan_view import PAINT_FILL_EDGE, PAINT_STYLE
+
+    missing = sorted({style["color"] for style in PAINT_STYLE.values()
+                      if "linewidth" not in style and style.get("color") not in PAINT_FILL_EDGE})
+    assert not missing, (f"fill colour(s) with no outline colour in plan_view.PAINT_FILL_EDGE: "
+                         f"{missing} - add a row there in the same change as the style")

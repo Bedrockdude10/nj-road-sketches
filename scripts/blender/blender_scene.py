@@ -180,6 +180,8 @@ SAMPLED_POLYLINE_CHANNELS = (
     ("parking_buffer_edge_lines", 0.25),
     ("parking_buffer_taper_lines", 0.15),
     ("bike_lane_edge_lines", 0.25),
+    # MUTCD 9E.11(07): a solid white line on all four sides of the two-stage turn box.
+    ("turn_box_edge_lines", 0.25),
 )
 # Two-point strokes: a hatch stroke runs edge to edge of its zone and a stall tick lies across the
 # kerbside strip. Only their two ends exist, so the chord IS the line.
@@ -461,6 +463,13 @@ def build_scene(data: dict):
     for ring in data.get("bike_lane_surface_polygons", []):
         green.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z - MARKING_CLEARANCE_M)
     green.build()
+    # AND NOTHING AT ALL for `bike_lane_uncoloured_surface_polygons`, which is the same footprint
+    # with no green on it - an EXISTING conventional bike lane, whose surface is the road's own
+    # asphalt. The carriageway already renders as asphalt, so the honest 3D drawing of it is the
+    # white edge lines and the symbol, which travel in their own channels above. This is a
+    # DECISION and not an omission: markings.NOT_DRAWN_IN_3D declares it, and a test compares
+    # that declaration against the channels this file draws - because a channel quietly missing
+    # from here is the one seam in the project nothing else can see (README).
 
     # The BIKE LANE symbol, white on the green. AT the stripe layer rather than half a clearance
     # below it like the green is, because the symbol is paint applied ON the coloured surface -
@@ -469,6 +478,24 @@ def build_scene(data: dict):
     for ring in data.get("bike_lane_symbol_polygons", []):
         symbols.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z)
     symbols.build()
+
+    # THE TWO-STAGE TURN BOX (MUTCD 9E.11), where a rider crosses onto a bikeway on the far kerb.
+    # Same green material and the same height as the lane surface, because 9E.11(12) makes it the
+    # same coloured pavement - and at the same z for the same reason, so the white line round it
+    # and the symbol and arrow inside it sit on top rather than z-fighting with it.
+    box = MeshBatch("turn_box_surface", bike_surface_mat)
+    for ring in data.get("turn_box_surface_polygons", []):
+        box.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z - MARKING_CLEARANCE_M)
+    box.build()
+
+    # THE SHARROW (MUTCD 9E.09), downstream of where the facility ends. White paint on the road's
+    # own asphalt, at the stripe layer - and note what is NOT here: 9E.09(05) forbids green
+    # pavement as its background, so this batch reads a channel of its own and no green is ever
+    # laid under it. See markings.py, where the same rule is stated as an absence from MAY_LIE_ON.
+    sharrows = MeshBatch("shared_lane_marking", marking_mat)
+    for ring in data.get("shared_lane_symbol_polygons", []):
+        sharrows.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z)
+    sharrows.build()
 
     # EVERY SURVEYED CROSSING IN THE PICTURE, drawn from its own traced way rather than rebuilt
     # from a leg. This is the network-renderer change (docs/network-renderer-plan.md): a crossing
@@ -601,19 +628,104 @@ def build_scene(data: dict):
         tree_template = build_tree_proxy(trunk_mat, foliage_mat)
         add_tree_instances("street_trees", tree_points, tree_template)
 
-    return cx, cy, scene_radius, ground_size
+    return cx, cy, scene_radius, ground_size, corridor_view(framed_x, framed_y, cx, cy)
 
 
-def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_size: float):
-    dist = scene_radius * 1.6
-    height = scene_radius * 2.3
-    bpy.ops.object.camera_add(location=(cx, cy - dist, height))
+# A SUBJECT LONGER THAN THIS CANNOT BE FRAMED AS A SQUARE. The camera below looks from due
+# south and sizes itself off half the LARGER span, which fits a junction about as wide as it is
+# tall. W Broad & Lanning is not one: its southwest leg runs 2,307 ft to the borough line, 23x
+# the other three, and squaring that extent laid the whole corridor across the diagonal of a
+# 4:3 frame as a thread on an otherwise empty field.
+#
+# THE THRESHOLD IS SET FROM THE MEASUREMENT, not from taste, because a render that moves is a
+# render somebody has to re-check (.claude/SKILLS.md: adding a site must not move existing
+# sites). The seven junctions already in output/ measure 0.81, 1.02, 1.03, 1.03, 2.17, 2.18 and
+# 3.90 on this ratio; this corridor measures 9.62. 6.0 sits in that gap, so no existing render
+# changes and princeton_eprospect - the one T-junction that is genuinely long and thin at 3.90,
+# and which the square frame still draws legibly - keeps the camera it has.
+ELONGATED_ASPECT = 6.0
+
+
+def oriented_extent(xs, ys, cx, cy):
+    """((ux, uy) along the cloud's long axis, half-length along it, half-width across it).
+
+    The closed-form principal axis of the 2x2 covariance. The half-extents are the largest
+    absolute projection on each axis and NOT a standard deviation, because a camera has to
+    contain the subject rather than describe it.
+    """
+    dx = [x - cx for x in xs]
+    dy = [y - cy for y in ys]
+    n = max(len(dx), 1)
+    sxx = sum(a * a for a in dx) / n
+    syy = sum(b * b for b in dy) / n
+    sxy = sum(a * b for a, b in zip(dx, dy)) / n
+    theta = 0.5 * math.atan2(2 * sxy, sxx - syy)
+    ux, uy = math.cos(theta), math.sin(theta)
+    along = max((abs(a * ux + b * uy) for a, b in zip(dx, dy)), default=0.0)
+    across = max((abs(-a * uy + b * ux) for a, b in zip(dx, dy)), default=0.0)
+    return (ux, uy), along, across
+
+
+# THE CAMERA'S OWN FRAMING, as multiples of scene_radius, named because corridor_view has to
+# divide by what they imply. The lens and the 36 mm horizontal sensor fit are Blender's.
+# A little air past each end of the corridor, so the far kerb and the borough line are inside
+# the sheet rather than cut by it - `along` is the extreme projected vertex, not a margin.
+CORRIDOR_END_MARGIN = 1.1
+CAMERA_DIST_MULTIPLE = 1.6
+CAMERA_HEIGHT_MULTIPLE = 2.3
+CAMERA_LENS_MM = 32.0
+CAMERA_SENSOR_MM = 36.0
+
+
+def lateral_coverage_multiple() -> float:
+    """How many scene_radii of ground the frame spans side to side, at the target."""
+    eye_to_target = math.hypot(CAMERA_DIST_MULTIPLE, CAMERA_HEIGHT_MULTIPLE)
+    return eye_to_target * (CAMERA_SENSOR_MM / 2) / CAMERA_LENS_MM
+
+
+def corridor_view(xs, ys, cx, cy):
+    """(unit vector the camera should stand on, radius to frame) for an elongated subject.
+
+    None for anything that fits a square, which is every junction here. THE VIEWING ANGLE IS
+    UNCHANGED - same 3/4 oblique, same elevation, same distance-to-radius ratio as every other
+    render. All this does is turn the camera about the vertical axis so the corridor lies ACROSS
+    the frame instead of on its diagonal, and size the radius off the long half-extent rather
+    than off half the larger axis-aligned span. A different angle for one site would be a second
+    way of drawing the same thing.
+    """
+    (ux, uy), along, across = oriented_extent(xs, ys, cx, cy)
+    if across <= 0 or along / across < ELONGATED_ASPECT:
+        return None
+    # Perpendicular to the corridor, and of the two perpendiculars the one that keeps the camera
+    # as close to the others' due-south station as it can be.
+    px, py = -uy, ux
+    if py > 0:
+        px, py = -px, -py
+    # AND A RADIUS THAT FILLS THE FRAME. Everywhere else scene_radius is half the larger span and
+    # the lens then shows about 1.6x that, which is the margin a junction wants around it. Here
+    # that margin is 700 ft of empty field off each end of the corridor, so the radius is divided
+    # back out by the camera's own lateral coverage instead of being taken raw.
+    return (px, py), along * CORRIDOR_END_MARGIN / lateral_coverage_multiple(), across
+
+
+def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_size: float,
+                           view=None):
+    if view is not None:
+        # SAME ANGLE, TURNED IN PLAN - see corridor_view. The two multipliers below are the ones
+        # every other render uses; only the compass direction the camera stands in changes.
+        (px, py), scene_radius, _across = view
+    else:
+        px, py = 0.0, -1.0
+    dist = scene_radius * CAMERA_DIST_MULTIPLE
+    height = scene_radius * CAMERA_HEIGHT_MULTIPLE
+    eye = (cx + px * dist, cy + py * dist, height)
+    bpy.ops.object.camera_add(location=eye)
     cam = bpy.context.active_object
     cam.name = "Camera"
     bpy.context.scene.camera = cam
     direction = mathutils.Vector((cx, cy, 0)) - cam.location
     cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-    cam.data.lens = 32
+    cam.data.lens = CAMERA_LENS_MM
     # Blender's default clip range (0.1 - 1000 m) is enormously wider than this
     # scene ever needs, which starves the depth buffer of precision at the
     # ~50-100 m distance this camera actually sits at - confirmed by an
@@ -650,6 +762,17 @@ def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_siz
 # A multiplier rather than a width/height pair keeps the camera framing and the 4:3 aspect
 # fixed, so scale 2 is the same picture with four times the pixels, not a different crop.
 BASE_RESOLUTION = (1920, 1440)
+# AND A WIDER SHEET FOR A CORRIDOR, which is the other half of framing one (see corridor_view).
+# Turning the camera puts W Broad across the frame instead of down its diagonal, but a 4:3 sheet
+# then spends two thirds of its height on empty field either side of a 108 ft-wide street. The
+# CAMERA IS NOT TOUCHED - same elevation, same lens, same distance; the render is simply cropped
+# to the band the subject occupies. Horizontal coverage is 2x the corridor's half-length, and
+# this asks for 3x its half-width vertically - so the cross streets, the junction's buildings and
+# the kerb either side all stay in shot.
+CORRIDOR_SHEET_MARGIN = 3.0
+# Not past this, because a strip thinner than 16:9 stops reading as a picture of a place and the
+# 3D view has nothing left to show above the ground plane.
+CORRIDOR_SHEET_MAX_ASPECT = 4.0
 RENDER_SCALE_ENV = "ROAD_SKETCHES_RENDER_SCALE"
 # Its pre-rename name, refused rather than ignored - a stale HOPEWELL_RENDER_SCALE=2 would
 # render at 1 and say nothing, and an hour of Blender is a slow way to find that out. This
@@ -685,10 +808,26 @@ def configure_render():
     scene.render.engine = "BLENDER_EEVEE_NEXT"
     scene.eevee.taa_render_samples = 64  # visually indistinguishable from 128 for this flat-shaded scene, ~30% faster
     scale = render_scale()
+    if scale != 1:
+        print(f"Rendering at {BASE_RESOLUTION[0] * scale}x{BASE_RESOLUTION[1] * scale} ({scale}x)")
+
+
+def set_sheet(view=None):
+    """The output resolution, which is per-scene because a corridor gets a letterbox.
+
+    Sits apart from configure_render because everything there is scene-independent and is set
+    once for a whole batch; this is the one render setting that is not.
+    """
+    scene = bpy.context.scene
+    scale = render_scale()
     scene.render.resolution_x = BASE_RESOLUTION[0] * scale
     scene.render.resolution_y = BASE_RESOLUTION[1] * scale
-    if scale != 1:
-        print(f"Rendering at {scene.render.resolution_x}x{scene.render.resolution_y} ({scale}x)")
+    if view is None:
+        return
+    _direction, along, across = view
+    aspect = min(along / (CORRIDOR_SHEET_MARGIN * across), CORRIDOR_SHEET_MAX_ASPECT)
+    if aspect > BASE_RESOLUTION[0] / BASE_RESOLUTION[1]:
+        scene.render.resolution_y = int(round(scene.render.resolution_x / aspect))
 
 
 def render(output_path: Path):
@@ -716,8 +855,9 @@ def main():
     for geometry_path, output_path in jobs:
         data = load_geometry(geometry_path)
         clear_scene()
-        cx, cy, scene_radius, ground_size = build_scene(data)
-        setup_camera_and_light(cx, cy, scene_radius, ground_size)
+        cx, cy, scene_radius, ground_size, view = build_scene(data)
+        setup_camera_and_light(cx, cy, scene_radius, ground_size, view)
+        set_sheet(view)
         render(output_path)
         print(f"RENDER_DONE: {output_path}")
 
