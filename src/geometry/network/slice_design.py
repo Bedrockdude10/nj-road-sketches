@@ -13,6 +13,8 @@ for empty.
 """
 from __future__ import annotations
 
+from itertools import pairwise
+
 import geopandas as gpd
 from shapely import reverse
 from shapely.geometry import LineString, Point
@@ -25,6 +27,11 @@ from src.geometry.treatments import DesignState
 #: Shorter than this is a stub the crop left at the window edge, not an approach worth a leg.
 MIN_APPROACH_FT: float = 20.0
 
+#: How far a junction node may sit off a street's centreline and still be ON it. The node is
+#: interpolated along the OTHER street's centreline, so it misses this one by the angle between
+#: them; generous, because the alternative is failing to cut and drawing a leg through a junction.
+ON_STREET_FT: float = 30.0
+
 
 def slice_pavement(features: gpd.GeoDataFrame):
     """The asphalt in the window, as one geometry. What a junction gets from its corner ring."""
@@ -34,25 +41,61 @@ def slice_pavement(features: gpd.GeoDataFrame):
     return unary_union(paved) if paved else None
 
 
-def _approaches(line: LineString, node: Point) -> list[LineString]:
-    """The street, split at the junction into the approaches that RADIATE from it.
+def junction_nodes(features: gpd.GeoDataFrame) -> list[Point]:
+    """Every junction in the window, deduplicated by position.
+
+    The document records a junction once per street that meets there, so Broad x Greenwood is
+    two `crossing` rows and one node. Rounded to the foot before deduping, because the two rows
+    are interpolated along two different centrelines and land within an inch of each other
+    rather than exactly on top.
+    """
+    points = features[features["kind"] == "crossing"].geometry
+    return [Point(xy) for xy in {(round(p.x), round(p.y)) for p in points if p is not None}]
+
+
+def _approaches(line: LineString, nodes: list[Point]) -> list[LineString]:
+    """The street cut at EVERY junction on it, into the approaches that radiate from each.
 
     A Leg in this project is an approach measured outward from a node, and every placement that
     reads `offset_ft` - a near-corner sign, a stop bar, a crossing - means "this far out from the
-    junction". Handed a whole street instead, station 0 is wherever the crop happened to cut it,
-    so a sign "at the near corner" stands mid-block. That is what put a W16-21P in the
-    carriageway; it was never a bad placement rule, it was a leg that was not a leg.
+    junction". Handed a whole street, station 0 is wherever the crop happened to cut it, so a
+    sign "at the near corner" stands mid-block; that is what put a W16-21P in the carriageway.
+
+    CUT AT ALL OF THEM, not at the window's centre. A window is a piece of the network, not a
+    site that happens to be drawn wide: a 600 ft square of this borough holds four junction
+    nodes, and modelling one of them is what left the other three's ramps and stop signs
+    undrawn at 231-415 ft out. A node is only a junction for the approaches that touch it, so
+    the interior cuts are junctions and the two outer ends are just where the crop fell.
+
+    THE SEGMENTS TILE THE STREET; they never overlap. A stretch between two junctions is an
+    approach to both, and emitting it twice - once from each end - is the obvious way to give
+    both nodes their approach. It is also two derivations of one fact, which is this repo's
+    oldest bug shape (SKILLS.md 0). Measured: the reversed copy of one 291 ft stretch of Broad
+    came back with a DIFFERENT paint solution from the forward copy, shattered into 11 polygons
+    by crosswalk cuts landing at different stations, and the scene check crashed on the
+    multi-part geometry. One piece of asphalt gets one answer.
+
+    The cost is real and worth naming: a middle segment has a junction at each end but only one
+    station 0, so it is an approach for that end only. Junction-relative furniture on the other
+    end comes from the NEXT segment out, which does start there.
     """
-    at = line.project(node)
-    back, ahead = substring(line, 0.0, at), substring(line, at, line.length)
-    # Reversed so both run OUTWARD from the node, which is the direction a leg's stations count.
-    return [piece for piece in (reverse(back), ahead)
-            if isinstance(piece, LineString) and piece.length > MIN_APPROACH_FT]
+    on_line = sorted({line.project(node) for node in nodes if line.distance(node) <= ON_STREET_FT})
+    cuts = [0.0, *(at for at in on_line if MIN_APPROACH_FT < at < line.length - MIN_APPROACH_FT),
+            line.length]
+    pieces = []
+    for index, (a, b) in enumerate(pairwise(cuts)):
+        segment = substring(line, a, b)
+        if not isinstance(segment, LineString) or segment.length <= MIN_APPROACH_FT:
+            continue
+        # Reversed only where the junction is at the FAR end - the first segment, whose near end
+        # is just where the crop fell. Every other segment already starts at one.
+        pieces.append(reverse(segment) if index == 0 and len(cuts) > 2 else segment)
+    return pieces
 
 
 def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
-             node: Point) -> dict[str, Leg]:
-    """One leg per APPROACH: each named street in the window, split at the junction.
+             nodes: list[Point]) -> dict[str, Leg]:
+    """One leg per APPROACH: each named street in the window, cut at every junction on it.
 
     The clipped centreline, so a leg is exactly as long as the drawing is wide. That is the
     frame-scale rule from the other end (SKILLS.md 0b): here the crop IS the extent, so a
@@ -63,7 +106,7 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
         pieces = [approach
                   for part in getattr(row.geometry, "geoms", [row.geometry])
                   if isinstance(part, LineString) and part.length > 0
-                  for approach in _approaches(part, node)]
+                  for approach in _approaches(part, nodes)]
         for index, piece in enumerate(pieces):
             slug = str(row.name_).lower().replace(" ", "_")
             # WITHOUT A WIDTH A LEG IS NOT A STREET: every treatment sizes its section off
@@ -80,8 +123,9 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
     """The (model, state) for one slice, ready for export_scenario or plot_design_state.
 
     `features` is a slice of the document in state-plane feet - what render_slice.slice_around
-    returns. The window's own centre is the node every leg radiates from: a crop has no OSM node,
-    and centring the window on the junction you want drawn is what choosing the crop MEANS.
+    returns. EVERY junction in the window is modelled, not the one it happens to be centred on -
+    a window is a piece of the network, and a road or a node inside it that the model does not
+    carry is simply missing from the drawing.
     """
     streets = features[features["kind"] == "street"].rename(columns={"name": "name_"})
     minx, miny, maxx, maxy = features.total_bounds
@@ -96,7 +140,7 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
     traced = {row.name_: row.geometry.area / length
               for row in paved.itertuples()
               if (length := streets[streets["name_"] == row.name_].geometry.length.sum()) > 0}
-    legs = _legs_of(streets, traced, center_ft)
+    legs = _legs_of(streets, traced, junction_nodes(features))
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
     model = IntersectionModel(
