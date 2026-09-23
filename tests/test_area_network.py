@@ -217,3 +217,34 @@ def test_the_network_exports_as_one_geojson(tmp_path) -> None:
     assert set(bikeway["name"]) == {"Broad Street"}
     assert (bikeway["end_ft"] - bikeway["start_ft"]).sum() > 3000.0
     assert (bikeway["compass_side"] == "north").all(), "CORRIDOR_SIDE is the north kerb"
+
+
+def test_a_render_is_a_slice_of_the_document(tmp_path) -> None:
+    """The end of the pipeline: a 2D sheet built from the GeoJSON alone - no site, no scenario,
+    no IntersectionModel. If a marking is missing from the picture it is missing from the file.
+    """
+    from scripts.export_network import export_network
+    from scripts.render_slice import draw, load_network, slice_around, _center_ft
+
+    export_network(AREA, tmp_path)
+    network = load_network(AREA, tmp_path)
+
+    # Broad & Greenwood, the junction three site files describe between them.
+    around = slice_around(network, _center_ft("-74.7619598,40.389179"), 320.0)
+    kinds = set(around["kind"])
+    assert {"street", "kerb", "bikeway", "bollard"} <= kinds, (
+        f"a slice at the corridor's central junction should carry the facility; got {kinds}")
+
+    out = draw(around, "test", tmp_path / "slice.png")
+    assert out.exists() and out.stat().st_size > 10_000
+
+
+def test_a_slice_clips_rather_than_dropping_what_overhangs_it() -> None:
+    """A 1,050 ft bikeway run whose centre is outside the window still crosses it. Filtering by
+    centroid instead of clipping would draw a hole where the longest run should be."""
+    from scripts.render_slice import load_network, slice_around, _center_ft
+
+    network = load_network(AREA)
+    tight = slice_around(network, _center_ft("-74.7619598,40.389179"), 150.0)
+    assert not tight[tight["kind"] == "bikeway"].empty
+    assert tight.total_bounds[2] - tight.total_bounds[0] <= 301.0
