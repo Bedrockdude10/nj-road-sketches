@@ -246,6 +246,12 @@ def build_pavement_polygon(corner_fillets: dict) -> Polygon:
     if any("error" in pieces for pieces in corner_fillets.values()):
         raise ValueError("Can't build a pavement polygon - at least one corner fillet failed.")
 
+    # NO CORNERS IS AN UNCLOSABLE RING, and has to be raised as one. A crop of a street between
+    # junctions has no fillets, and `next(iter(...))` answered that with StopIteration - which
+    # SceneGeometry.resolve does not catch, so a window with no junction in it crashed the export
+    # instead of degrading to "no ring here" the way a failed corner already does.
+    if not corner_fillets:
+        raise ValueError("Can't build a pavement polygon - no corner fillets were given.")
     order = []
     remaining = dict(corner_fillets)
     name_a0, name_b0 = next(iter(remaining))

@@ -214,7 +214,9 @@ def paint_channels_local_m(paint, center_ft, leg_heading_deg=None) -> dict[str, 
 def export_scenario(model: IntersectionModel, state: DesignState, name: str, out_path: Path,
                      buildings: list[dict] | None = None, crossings: list[dict] | None = None,
                      theme: dict | None = None, traffic_control: list[dict] | None = None,
-                     street_furniture: list[dict] | None = None) -> Path:
+                     street_furniture: list[dict] | None = None, pavement=None) -> Path:
+    """`pavement` overrides the ring built from the corner fillets, for a frame that is not one
+    junction: a crop of the borough document has asphalt but no corners to close a ring around."""
     center_ft = model.center_ft
     if theme is None:
         from src.render.theme import build_default_theme
@@ -241,7 +243,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # enough out - a skewed crossing reaches further along one kerb than its centre offset
     # implies. Stop bars are resolved only at a signalized junction, the same gate
     # src/render/props.py's _traffic_signal_props/_no_turn_on_red_props use.
-    scene = SceneGeometry.resolve(model, state, crossings)
+    scene = SceneGeometry.resolve(model, state, crossings, pavement=pavement)
     pavement = scene.pavement
     if pavement is None:
         # export_scenario has always required a closed ring (build_pavement_polygon raised

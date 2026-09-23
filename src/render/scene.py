@@ -67,18 +67,19 @@ class SceneGeometry:
     drawn_kerbs: tuple = ()
 
     @classmethod
-    def resolve(cls, model: "IntersectionModel", state: "DesignState", crossings: list[dict], stop_lines: list[dict] | None = None
-                 ) -> "SceneGeometry":
+    def resolve(cls, model: "IntersectionModel", state: "DesignState", crossings: list[dict],
+                 stop_lines: list[dict] | None = None, pavement=None) -> "SceneGeometry":
         """Resolve one scenario's marking geometry. `crossings` is the fetched OSM layer.
 
         The order below is a real dependency chain, which is the other reason this belongs in
         one place: the reaches need the pavement and the marked set, the bands need the
         reaches, and the stop bars need the crosswalk offsets.
         """
-        try:
-            pavement = build_pavement_polygon(state.corner_fillets)
-        except ValueError:
-            pavement = None     # an unclosable ring is reported by check_pavement_ring
+        if pavement is None:
+            try:
+                pavement = build_pavement_polygon(state.corner_fillets)
+            except ValueError:
+                pavement = None     # an unclosable ring is reported by check_pavement_ring
         marked = frozenset(model.config["intersection"].get("existing_marked_crosswalks", []))
         offsets = resolve_crosswalk_offsets(state, crossings)
         skews = resolve_crosswalk_skews(state, crossings)
