@@ -62,13 +62,15 @@ def lane_end_face(ctx, leg_name: str, side: str):
     """
     import numpy as np
 
-    from src.geometry.markings import BIKE_LANE_SURFACE
+    from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
     from src.geometry.model import station_offset_many
 
     centerline = ctx.state.legs[leg_name].centerline
     stations, offsets = [], []
     for piece in ctx.pieces:
-        if piece.kind is not BIKE_LANE_SURFACE or piece.leg != leg_name:
+        # Either footprint: where a lane ENDS is a question about ground, not about whether the
+        # ground is painted green - see BIKE_LANE_SURFACE_KINDS.
+        if piece.kind not in BIKE_LANE_SURFACE_KINDS or piece.leg != leg_name:
             continue
         if str(piece.side) != side or piece.geometry.geom_type != "Polygon":
             continue
@@ -169,7 +171,8 @@ class ExtendBikeLaneThroughJunction(Treatment):
         from shapely.geometry import LineString, Polygon
         from shapely.ops import unary_union
 
-        from src.geometry.markings import BIKE_LANE_DOTTED_EXTENSION, BIKE_LANE_SURFACE
+        from src.geometry.markings import (BIKE_LANE_DOTTED_EXTENSION, BIKE_LANE_SURFACE,
+                                            BIKE_LANE_SURFACE_KINDS)
         from src.geometry.model import point_at
         from src.geometry.paint import LANE_EDGE_LINE_WIDTH_FT, _dash_spans
 
@@ -239,7 +242,8 @@ class ExtendBikeLaneThroughJunction(Treatment):
         # that cannot leave a sliver of green painted twice, which MarkingsDoNotCollide reads as
         # the design asserting two things about one patch of ground.
         painted = unary_union([p.geometry for p in ctx.pieces
-                                if p.kind is BIKE_LANE_SURFACE and p.geometry.geom_type == "Polygon"])
+                                if p.kind in BIKE_LANE_SURFACE_KINDS
+                                and p.geometry.geom_type == "Polygon"])
         # ONE SET OF SPANS FOR ALL THREE, which is the whole point of PaintContext.dash_phase on a
         # leg: "a lane's two edge lines and the green between them break at the same stations
         # instead of each being dashed along its own length and drifting out of phase". Here the

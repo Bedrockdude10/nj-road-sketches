@@ -233,7 +233,8 @@ class AddBikeLane(Treatment):
         asphalt a lane-narrowing buffer marks; the buffer beside it, and the parking outside it,
         hatched and ticked with the machinery already here."""
         from src.geometry.markings import (BIKE_BUFFER_FILL, BIKE_LANE_EDGE_LINE,
-                                           BIKE_LANE_SURFACE, BIKE_LANE_SYMBOL, BUFFER_EDGE_LINE,
+                                           BIKE_LANE_SURFACE, BIKE_LANE_SYMBOL,
+                                           BIKE_LANE_UNCOLOURED_SURFACE, BUFFER_EDGE_LINE,
                                            BUFFER_FILL, DAYLIGHT_EDGE_LINE, DAYLIGHT_FILL,
                                            STALL_DIVIDER)
         from src.geometry.model import (band_from_offsets, curbside_strip_polygon, inset_line_ft,
@@ -356,7 +357,14 @@ class AddBikeLane(Treatment):
         # Through ctx.add like every other marking, NOT ctx.add_surface: a surface is built
         # ground that everything else is cut around (seal_surfaces), and colouring the lane must
         # not cut the lane's own edge lines - or the buffer hatching beside it - back out.
-        ctx.add(BIKE_LANE_SURFACE, surface, leg_name, side, beyond_ft, shares_a_kerb=through)
+        #
+        # GREEN ONLY WHERE GREEN IS BEING PROPOSED. An `observed` lane is one OSM already records
+        # on this kerb, so the drawing may not colour it: green coloured pavement is a treatment,
+        # and claiming it on the Existing Conditions sheet both misstates the street and makes
+        # the proposal's own green free. Same polygon either way, because that footprint is what
+        # two invariants measure a facility by - see BIKE_LANE_SURFACE_KINDS.
+        ctx.add(BIKE_LANE_UNCOLOURED_SURFACE if self.observed else BIKE_LANE_SURFACE,
+                 surface, leg_name, side, beyond_ft, shares_a_kerb=through)
         # THE BIKE LANE SYMBOL (MUTCD Fig 9E-1). NACTO asks for one after every driveway and
         # intersection and at least every 500 ft; both halves of that rule live in
         # bike_symbol_stations_ft, so this leg, the corridor strip and the 3D export all call for
@@ -735,6 +743,25 @@ class AddTwoWayBikeLane(AddBikeLane):
         return (note + ". The NJDOT alignment does not move; every station and crossing frame is "
                 "measured from it as before. " + NJDOT_TWO_WAY_OBJECTION)
 
+    def _divider_end_ft(self, ctx, leg_name: str, side: str):
+        """`to_ft` for the yellow divider: the lane's own bound, or the turn box's near edge.
+
+        None keeps `paint_stations`' meaning of "as far as the kerb is traced", which is what
+        `to_ft` is when a facility runs the whole kerb - so a leg with no terminus is unchanged.
+        """
+        from src.geometry.treatments.bikeways.terminus import (EndTheBikeway, lane_far_end_face,
+                                                                turn_box_span_ft)
+
+        ends = [t for t in ctx.state.treatments_of(EndTheBikeway)
+                if t.target.leg == leg_name and str(t.target.side) == side]
+        if not ends:
+            return self.to_ft
+        face = lane_far_end_face(ctx, leg_name, side)
+        if face is None:
+            return self.to_ft
+        near_ft, _far_ft = turn_box_span_ft(face[0], ctx.state.municipal_limits_ft.get(leg_name))
+        return near_ft if self.to_ft is None else min(self.to_ft, near_ft)
+
     def paint(self, ctx) -> None:
         """The one-way section's markings, plus the yellow stripe down the middle of the lane."""
         from src.geometry.markings import BIKE_CONTRAFLOW_DIVIDER
@@ -777,10 +804,17 @@ class AddTwoWayBikeLane(AddBikeLane):
         # rather than left to a line style, for the reason every other dashed marking in this
         # project is: a style is a 2D property and the 3D render gets geometry, so a continuous
         # line with a dashed style renders solid.
-        axis = (kerb_parallel_line_ft(leg, side, centre_from_kerb_ft, start_ft, self.to_ft,
+        # AND IT STOPS AT THE TURN BOX, where there is one. A two-stage turn box at a terminus now
+        # sits INSIDE the facility rather than past it, so that it falls inside the municipal line
+        # (bikeways/terminus.py:turn_box_span_ft) - and a queue box holds riders of both directions
+        # at once, so a line dividing the two directions across it describes lanes that are not
+        # there. The green runs under the box; only this stripe gives way. Asked of the same
+        # function the box is drawn from, never recomputed here.
+        divider_to_ft = self._divider_end_ft(ctx, leg_name, side)
+        axis = (kerb_parallel_line_ft(leg, side, centre_from_kerb_ft, start_ft, divider_to_ft,
                                        floor_ft=centre_ft)
                  if section.hugs_kerb
-                 else inset_line_ft(leg, side, centre_ft, start_ft, self.to_ft))
+                 else inset_line_ft(leg, side, centre_ft, start_ft, divider_to_ft))
         if axis is None or axis.is_empty:
             return
         # AND IT CARRIES THROUGH EVERY DRIVEWAY, like the lane's other markings.

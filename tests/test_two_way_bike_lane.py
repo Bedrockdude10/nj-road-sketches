@@ -559,3 +559,60 @@ def test_a_lane_that_ends_early_takes_its_posts_and_its_stripes_with_it(site_mod
         f"the lane on {LEG} {SIDE} ends at station {ends_ft:.0f} ft, but these marks carry on past "
         f"it - a reader counting them would read protection over ground with no lane under it: "
         + ", ".join(f"{kind} +{past:.0f} ft" for kind, past in sorted(overrun.items())))
+
+
+@pytest.mark.parametrize("leg_length_ft", [2307.5, 5768.75])
+def test_the_terminus_box_and_its_signs_stand_off_the_boundary_not_the_sheet(leg_length_ft):
+    """A jurisdictional terminus must not move when the render frame widens.
+
+    The two figures here are the ones a reader of the sheet acts on: where the queue box is
+    painted, and where the two plates that explain it stand. Both used to come off the leg -
+    the box from the drawn lane's far end, the R9-23 from this junction's crossing offset and
+    the W9-5 from the centreline's length - and a leg is as long as the sheet is wide
+    (.claude/SKILLS.md section 0b). At 2.5x that put the box 195 ft into Hopewell Township and
+    the W9-5 3,361 ft past the line, labelling a facility that stops at the borough boundary.
+
+    So this is parametrized on the leg length and asserts the SAME stations at both: the box
+    takes the last TURN_BOX_LENGTH_FT of borough street and the signs are placed off the box.
+    A leg 2.5x longer is exactly what `ROAD_SKETCHES_FRAME_SCALE=2.5` hands the treatments.
+    """
+    from types import SimpleNamespace
+
+    from shapely.geometry import LineString
+
+    from src.geometry.targets import LegSide
+    from src.geometry.treatments.bikeways import AddTwoWayBikeLane
+    from src.geometry.treatments.bikeways.terminus import (BIKE_LANE_ENDS_ADVANCE_FT,
+                                                            EndTheBikeway, REGULATORY_SIGN,
+                                                            TURN_BOX_LENGTH_FT, WARNING_SIGN,
+                                                            bikeway_sign_entries,
+                                                            terminus_box_span_ft)
+    from src.geometry.treatments.state import DesignState
+
+    # wbroad_lanning's numbers, hand-built: the state this reads is three fields deep and a
+    # site model would drag OSM, a kerb trace and a section fit in to exercise none of them.
+    LEG, SIDE, LIMIT_FT = "w_broad_st_southwest", "left", 2307.2
+    leg = SimpleNamespace(centerline=LineString([(0, 0), (leg_length_ft, 0)]))
+    state = DesignState(
+        legs={LEG: leg}, corner_fillets={}, municipal_limits_ft={LEG: LIMIT_FT},
+        treatments=[AddTwoWayBikeLane(LegSide(LEG, SIDE), width_ft=12.0, buffer_ft=3.0),
+                    EndTheBikeway(LegSide(LEG, SIDE))])
+
+    near_ft, far_ft = terminus_box_span_ft(state, LEG, SIDE)
+    assert far_ft == pytest.approx(LIMIT_FT), (
+        f"the box's far edge is at station {far_ft:.1f} on a {leg_length_ft:.0f} ft leg, but the "
+        f"borough line is at {LIMIT_FT:.1f} - paint outside the municipality that would lay it")
+    assert near_ft == pytest.approx(LIMIT_FT - TURN_BOX_LENGTH_FT)
+
+    at = {entry["type"]: entry["offset_ft"] for entry in bikeway_sign_entries(state)
+          if entry["leg"] == LEG}
+    assert at[REGULATORY_SIGN] is not None, (
+        "the R9-23 was emitted with no station of its own, so props.py falls back to this "
+        "junction's crossing offset - 2,265 ft from the box the sign is there to explain")
+    assert at[REGULATORY_SIGN] == pytest.approx(near_ft), (
+        f"the R9-23 stands at station {at[REGULATORY_SIGN]:.1f} and the box it explains is at "
+        f"{near_ft:.1f}-{far_ft:.1f} - a sign for a queue box {abs(at[REGULATORY_SIGN] - near_ft):.0f} "
+        f"ft away from it")
+    assert at[WARNING_SIGN] == pytest.approx(near_ft - BIKE_LANE_ENDS_ADVANCE_FT), (
+        f"the W9-5 stands at station {at[WARNING_SIGN]:.1f}, which is not "
+        f"{BIKE_LANE_ENDS_ADVANCE_FT:.0f} ft in advance of the lane's end at {near_ft:.1f}")

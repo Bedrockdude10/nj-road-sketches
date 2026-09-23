@@ -442,6 +442,88 @@ next.
 
 ---
 
+### Where a two-way bikeway STARTS AND ENDS — **Verified 2026-09-15**
+
+Opened: **MUTCD 11th Edition (December 2023), Part 9**
+([source](https://mutcd.fhwa.dot.gov/pdfs/11th_Edition/part9.pdf)), §§9B.18, 9C.06, 9C.07, 9E.03,
+9E.07, 9E.09 and 9E.11.
+
+**The question this answers**, because until 2026-09-15 this project had a 4,524 ft facility with
+no statement about either of its two ends. `BROAD_ST_TWO_WAY_BIKEWAY` runs on one kerb
+(`CORRIDOR_SIDE`), so it serves riders in both directions from the north side — but a rider
+arriving at the borough line is in the general travel lane on whichever side the rules of the road
+put them, and half of them are on the wrong one. **Getting a rider ACROSS the street and onto the
+facility is the terminus problem, and it has a standard answer rather than a local invention.**
+
+#### Getting ON: the two-stage bicycle turn box
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9E.11 | 01 | Support | two-stage turn boxes "allow bicyclists the opportunity to make turns at an intersection or crossing point **instead of requiring them to merge into traffic upstream or to dismount and use a crosswalk**" |
+| 9E.11 | 04 | **Standard** | the box "**shall** be located: A. In an area between the closest through bicycle or motor vehicle movement and the parallel crosswalk … D. In an area between the through bicycle movement and a pedestrian facility **for T-intersections**" |
+| 9E.11 | 05 | **Standard** | it "**shall** consist of at least one bicycle symbol pavement marking and at least one pavement marking arrow" |
+| 9E.11 | **06** | **Standard** | "a **through** arrow in the appropriate direction **shall** be used if a two-stage turn box is used **with a two-way bikeway**" — *a turn arrow is the one-way-lane case and is wrong here* |
+| 9E.11 | 07 | **Standard** | "**shall** be bounded on all sides by a solid white line" |
+| 9E.11 | 10 | Guidance | size by engineering judgment: intersection geometry, keeping queued bicycles away from moving traffic, peak-hour volume so the box does not overflow |
+| 9E.11 | 11–12 | Option / **Standard** | green "may" be used; if used it "**shall** encompass **all** of the two-stage turn box" |
+| 9E.11 | 13 | **Standard** | where a lawful turn on red would pass through the box, "a **full-time no-turn-on-red** prohibition **shall** be provided for the crossroad approach" |
+| 9B.18 | 04 | **Standard** | where riders are *required* to use the box, the R9-23/R9-23a advance sign **shall** be mounted in advance of the intersection **and** at least one R9-23b or R9-23c **shall** be used at the intersection |
+| 9B.18 | 05–06 | **Standard** | R9-23b at the **near** side, R9-23c at the **far** side |
+
+**Figure 9E-11 is titled "Example of a Two-Stage Turn Box Location at an Intersection with a
+Two-Way Bikeway"** — this is not a treatment borrowed from the one-way case and bent to fit; the
+manual draws our exact geometry.
+
+**Two readings of the above are OURS, both Modelled.** First, 9E.11(04) locates the box against a
+crosswalk and the manual has no case for a box at a *jurisdictional* terminus, where there is no
+crossing to sit beside and the ground past it is another town's. We put the box in the last
+`TURN_BOX_LENGTH_FT` of borough street — inside the line, never past it — which is what
+`src/geometry/treatments/bikeways/terminus.py:turn_box_span_ft` and `checks.PaintInsideTheMunicipality`
+enforce. Second, 9B.18(04)'s advance-plus-at-the-intersection pair is conditioned on riders being
+*required* to use the box; they are not required here, so one R9-23b at the box's near edge is what
+is drawn (¶05: near side), with the W9-5 as the only advance plate.
+
+#### Getting OFF: the lane ends and the rider merges
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9C.07 | 01–02 | Support / Option | the Bicycle Lane Ends (W9-5) sign alerts road users "that a bicycle lane is ending and that bicycles will share or occupy the travel lane after merging"; it **may** be used in advance of the end |
+| 9C.07 | 03 | Option | the Bicycles Merging (W9-5a) sign may be used where a merge might occur, **in addition to** W9-5 |
+| 9C.07 | 04 | Guidance | **should not** be used where a lane is dropped on an approach and resumes immediately after the intersection — i.e. not at every junction along the corridor, only at a real terminus |
+| 9C.07 | 05–06 | Option | R9-20 and/or shared-lane markings **may** be installed downstream of the merge area; a W16-2aP plaque may give the distance |
+| 9E.09 | **13** | Option | the shared-lane marking may be used "where the width of the roadway is insufficient to continue a bicycle lane or separated bikeway … or it is advantageous to **terminate the bicycle lane or separated bikeway in order to provide for a shared lane**" |
+
+#### Warning the crossroad, all the way along
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9C.06 | 01 | **Standard** | when used, the Two-Way Bicycle Cross Traffic (W16-21P) plaque "**shall** be installed below a STOP or YIELD sign" |
+| 9C.06 | 04 | Guidance | it **should** be used with a STOP or YIELD sign "when a **counter-flow or two-way bicycle facility** has an approach that is counter to the customary scanning behavior of a motorist at that location" |
+| 9E.07 | 12 | **Standard** | "Turns on red **shall be prohibited** across separated bicycle lanes while bicyclists are allowed to proceed through the intersection" |
+| 9E.07 | 02 / 09 | Support | physical separation introduces "the awareness of a potentially **unexpected** conflict point for turning motor vehicles"; a two-way separated lane on one side "can introduce additional challenges and conflict points" |
+
+¶04 of 9C.06 describes **every** side street on this corridor, not only the two ends: a motorist
+stopped on a side street looks left for traffic and the contraflow half of our bikeway arrives from
+the right. That is 16 cross-street locations (`corridor_report.py`), each one a W16-21P.
+
+#### Where shared-lane markings may NOT go, which constrains the terminus
+
+| § | ¶ | force | wording |
+|---|---|---|---|
+| 9E.09 | 04 | **Standard** | sharrows **shall not** be used in "B. Bicycle lanes or in designated extensions of bicycle lanes through intersections or driveways … **E. Two-stage turn boxes** … **H. Physically-separated bikeways**" |
+| 9E.09 | 05 | **Standard** | "**Green-colored pavement shall not be applied as a background to shared-lane markings**" |
+| 9E.09 | 03 | Guidance | should not be placed where the speed limit is **40 mph or greater** — Broad St is posted 25 |
+| 9E.09 | 07–08 | Guidance | centre **≥12 ft** from the kerb face beside parallel parking; **≥4 ft** where there is no parking and the outside lane is under 14 ft |
+| 9E.09 | 09–10 | Guidance | spaced **50–250 ft** apart away from intersections; the first one **within 50 ft** downstream of an intersection |
+| 9E.03 | 06 | **Standard** | "Shared-lane markings or chevron markings **shall not** be used in bicycle lanes or bicycle lane extensions" |
+
+Every one of those is a *local* rule — a clearance, a spacing, a speed — so none of them moves with
+the render frame. That is deliberate and it is the test `.claude/SKILLS.md` §0b asks of any new
+constant; a terminus sized off "the last N ft of the leg" would have failed it.
+
+
+---
+
 ### Other MUTCD figures — *as cited*
 
 | figure | value | constant | file |
@@ -1067,6 +1149,13 @@ Listed so nobody goes looking for a standard behind them.
 | `TRACED_SECTION_START/END_FT` | 35 / 130 ft | `intersection.py` | the window a leg's *width* is a fact about |
 | `CROSSWALK_OFFSET_FROM_KERB_FT` | 8.3 ft | `model/context.py` | **not the statute** — measured, see below |
 | `MAX_CROSSWALK_FROM_MOUTH_FT` | 25 ft | `cross_streets.py` | how far outside a mouth a traced crossing is still that junction's |
+| `BICYCLE_LENGTH_FT` | 6 ft | `bikeways/terminus.py` | a bicycle, for sizing a queue — MUTCD 9E.11(10) gives no box dimension at all |
+| `TURN_BOX_QUEUE_BICYCLES` | 2 | `bikeways/terminus.py` | how deep the queue is allowed to get before its back is level with moving traffic — 9E.11(10) factor two, as a number |
+| `TURN_BOX_LENGTH_FT` | 12 ft | `bikeways/terminus.py` | the product of the two above, not a figure anyone publishes |
+| `SHARROW_INTERVAL_FT` | 150 ft | `bikeways/terminus.py` | the middle of MUTCD 9E.09(09)'s permitted 50–250 ft band, rather than either end of it |
+| `BIKE_LANE_ENDS_ADVANCE_FT` | 100 ft | `bikeways/terminus.py` | how far "in advance of" is for the W9-5 — 9C.07(01) requires the sign and gives no distance; ≈2 s of reading at 25 mph, rounded up |
+| `BOUNDARY_CONTEXT_RADIUS_M` | 130 m | `intersection/municipality.py` | not a design figure — the window the admin_level=8 boundary is looked for in, the same base every street-following layer uses |
+| `PAINT_PAST_MUNICIPALITY_TOLERANCE_FT` | 0.5 ft | `checks.py` | not a licence to spill over the line — the sub-foot noise between a surveyed boundary and a sampled centreline, which is what stationing the crossing of the two carries |
 
 > **Name clash — resolved 2026-08-17.** `CROSSWALK_SETBACK_FT` used to mean two things:
 >

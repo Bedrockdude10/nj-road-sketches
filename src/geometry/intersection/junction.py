@@ -57,6 +57,11 @@ class IntersectionModel:
     # rather than separately by the kerb openings and the DesignState. R.S. 39:4-138(e) applies
     # at every one of them - see src/geometry/cross_streets.py.
     cross_streets: dict = field(default_factory=dict)
+    # {leg name: station in feet where the leg crosses out of this municipality}, absent for a
+    # leg that never leaves town. WHERE A CORRIDOR ENDS, and the only fact here that cannot be
+    # traced off the pavement - see src/geometry/intersection/municipality.py for why the end of
+    # the drawn leg is not a substitute for it.
+    municipal_limits_ft: dict = field(default_factory=dict)
 
     @property
     def site_roadways(self) -> tuple:

@@ -57,6 +57,11 @@ LANE_WIDTH_TOLERANCE_FT = 0.05
 # past it where the strip is sampled across a curve between two traced vertices. Beyond this
 # it is painted on the footway.
 PAINT_PAST_CURB_TOLERANCE_FT = 0.25
+# A boundary is a surveyed line and a leg's centreline is sampled, so the station where the two
+# cross carries the same sub-foot noise every other stationed figure here does. Half a foot
+# absorbs that. It is NOT a licence to spill over the line: the terminus device is placed against
+# the limit (bikeways/terminus.py), so anything past it is a fault, not headroom being spent.
+PAINT_PAST_MUNICIPALITY_TOLERANCE_FT = 0.5
 # A kerbside facility's surface is built on paint_stations' ~2 ft grid, so its last station
 # landing a step or two short of the kerb's is measurement rather than amputation. Beyond this
 # the facility ended early and the drawing owes the reader a reason.
@@ -570,7 +575,7 @@ class BikewayReachesTheEndOfItsKerb(SceneCheck):
     """
 
     def run(self, scene: SceneContext) -> list[Violation]:
-        from src.geometry.markings import BIKE_LANE_SURFACE
+        from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
         from src.geometry.model import curb_station_span
         state = scene.state
         # Per kerb: the outermost station any of this facility's surface reached. Taken over the
@@ -578,7 +583,8 @@ class BikewayReachesTheEndOfItsKerb(SceneCheck):
         # the arithmetic this check exists not to trust (SKILLS 0).
         reached: dict[tuple[str, str], float] = {}
         for piece in scene.paint:
-            if piece.kind is not BIKE_LANE_SURFACE or piece.leg is None or piece.side is None:
+            if (piece.kind not in BIKE_LANE_SURFACE_KINDS
+                    or piece.leg is None or piece.side is None):
                 continue
             leg = state.legs.get(piece.leg)
             if leg is None:
@@ -827,6 +833,17 @@ class MarkingsDoNotCollide(SceneCheck):
         for line in lines:
             width_ft = stroke_width_ft(line.kind)
             if width_ft is None or line.geometry.is_empty:
+                continue
+            # A STRIPE SHORTER THAN IT IS WIDE IS NOT RUNNING ALONG ANYTHING. The fraction below
+            # asks "how much of this stripe's body is on the colour", and on a sub-width fragment
+            # the answer is decided by its two end caps rather than by where it was ruled: a
+            # 0.36 ft remnant of a 0.82 ft edge line at W Broad & Lanning's mouth came out 6% over
+            # the green, three times the tolerance, on 0.0 sq ft of paint. Skipping it is not a
+            # relaxation - the question this pass exists to ask cannot be put to a blob, and the
+            # fragment is too short to be visible in either view. What IS wrong is that the
+            # fragment exists at all, which is an openings/trimming matter and not paint over
+            # paint.
+            if line.geometry.length < width_ft:
                 continue
             # Flat caps and mitred joins, matching blender_geometry's extrusion: a stripe is a
             # ribbon of rectangles, not a rounded sausage, and a round cap would invent paint past
@@ -1101,14 +1118,15 @@ class BollardsStandInTheirBuffer(SceneCheck):
     def run(self, scene: SceneContext) -> list[Violation]:
         from shapely.ops import unary_union
 
-        from src.geometry.markings import BIKE_LANE_SURFACE
+        from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
 
         paint = scene.paint
         violations = []
         # Per kerb, so a post is only ever tested against the lane on its own side of its own leg.
         surfaces: dict[tuple, list] = {}
         for piece in paint:
-            if piece.kind is BIKE_LANE_SURFACE and piece.leg is not None and piece.side is not None:
+            if (piece.kind in BIKE_LANE_SURFACE_KINDS
+                    and piece.leg is not None and piece.side is not None):
                 surfaces.setdefault((piece.leg, piece.side), []).append(piece.geometry)
         if not surfaces:
             return violations
@@ -1438,6 +1456,57 @@ class ZonesGiveWayAtAnOpening(SceneCheck):
                         f"starts at the travel lane's edge, and a marking placed off a second "
                         f"derivation of that edge leaves the difference standing as a ribbon",
                         (inside.centroid.x, inside.centroid.y)))
+        return violations
+
+
+class PaintInsideTheMunicipality(SceneCheck):
+    """No marking may be drawn outside the municipality that would lay it.
+
+    Every terminus in this project is jurisdictional: the Broad St bikeway stops at the Hopewell
+    Borough line in both directions because nothing past it is the borough's to build, not
+    because the street stops. A drawing that carries paint over the line proposes work to a
+    municipality that cannot do it, and it does so in the one place a reader is least likely to
+    check - the far end of the sheet.
+
+    THE SOURCE IS THE BOUNDARY, NOT THE DRAWN LEG, which is the whole reason this can fail. Those
+    coincide today at both termini (2,307.2 ft against a leg configured to 2,307.5; 129.8 against
+    130.0) and coinciding is not being the same fact: a leg's length is a rendering decision
+    (.claude/SKILLS.md section 0b), so at 2.5x the same leg reaches 195 ft past the line. This
+    fired on 7 pieces before `municipal_limits_ft` existed - a two-stage turn box, its boundary
+    line, a bicycle symbol and a through arrow, all in Hopewell Township.
+
+    Silent where the municipality did not resolve, which is a `municipal_limits_ft` with no entry
+    for the leg - see src/geometry/intersection/municipality.py. A check with no datum has to say
+    nothing rather than pass everything.
+    """
+
+    def run(self, scene: SceneContext) -> list[Violation]:
+        state, paint = scene.state, scene.paint
+        limits = getattr(state, "municipal_limits_ft", None) or {}
+        if not limits:
+            return []
+        violations = []
+        for piece in paint:
+            limit_ft = limits.get(piece.leg)
+            if limit_ft is None:
+                continue
+            leg = state.legs.get(piece.leg)
+            if leg is None:
+                continue
+            coords = (piece.geometry.exterior.coords if piece.geometry.geom_type == "Polygon"
+                      else piece.geometry.coords)
+            points = np.asarray(coords, dtype=float)
+            stations, _offsets = station_offset_many(leg.centerline, points)
+            worst = float(stations.max())
+            if worst > limit_ft + PAINT_PAST_MUNICIPALITY_TOLERANCE_FT:
+                index = int(np.argmax(stations))
+                violations.append(Violation(
+                    "paint_outside_the_municipality",
+                    f"{piece.leg}: {piece.kind} reaches station {worst:.1f} ft, {worst - limit_ft:.1f} "
+                    f"ft past the municipal line at {limit_ft:.1f} ft - this is paint outside the "
+                    f"town that would lay it. A terminus is bounded by the boundary, never by how "
+                    f"far the leg happens to be drawn",
+                    tuple(points[index])))
         return violations
 
 

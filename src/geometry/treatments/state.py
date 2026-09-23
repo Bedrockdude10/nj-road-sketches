@@ -83,6 +83,10 @@ class DesignState:
     #: the two above. R.S. 39:4-138(e) applies at every intersection, not only the one the
     #: drawing is about, and a leg drawn 374 ft crosses several - see src/geometry/cross_streets.
     cross_streets: dict = field(default_factory=dict)
+    #: {leg name: station in feet where the leg leaves this municipality}, absent where it does
+    #: not. Observed like the three above, and the one thing on this state that bounds what may
+    #: be BUILT rather than what is there - see src/geometry/intersection/municipality.py.
+    municipal_limits_ft: dict = field(default_factory=dict)
     # Every Treatment applied to this design, in order (see apply) - the design as a list of
     # decisions. Every renderer reads its parameters from here, through treatment_for /
     # treatments_of / every_treatment, and provenance is written from it.
@@ -161,7 +165,10 @@ class DesignState:
                                           for name, leg_cfg in model.config["legs"].items()},
                    kerb_openings=kerb_openings_from_model(model),
                    parking_restrictions=_parking_restrictions_from_model(model),
-                   cross_streets=cross_streets_from_model(model))
+                   cross_streets=cross_streets_from_model(model),
+                   # getattr, like scene.py reads surveyed_leg_lengths: the synthetic models
+                   # in tests are hand-built and carry only the fields their case is about.
+                   municipal_limits_ft=dict(getattr(model, "municipal_limits_ft", None) or {}))
 
     def clone(self) -> "DesignState":
         return deepcopy(self)

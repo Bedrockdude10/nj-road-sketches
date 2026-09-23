@@ -8,7 +8,7 @@ import os
 import time
 from pathlib import Path
 
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 
 import requests
 
@@ -249,11 +249,18 @@ def _download_snapshot(bbox: tuple | None = None) -> list[dict]:
 
 
 def fetch_borough_osm(use_cache: bool = True, bbox: tuple | None = None) -> dict:
-    """{"nodes": {id: element}, "ways": [element]} for one whole snapshot area.
+    """{"nodes": {id: element}, "ways": [element], "relations": [element]} for one snapshot area.
 
     `bbox` selects the area; None means Hopewell Borough. Raises if any way references a
     node that is not present - a gap means a truncated download, and half a kerb is worse
     than no kerb.
+
+    RELATIONS ARE KEPT, and the only one read so far is the municipal boundary. A boundary is
+    the one fact in this project nobody can trace off the pavement: an admin_level=8 relation
+    carries the tags and its member ways carry the geometry, so dropping relations threw away
+    where the corridor ENDS while keeping every foot of street past it. See
+    `fetch_municipal_boundary`. The download already contained them - /map.json returns
+    relations whose members are in the bbox - so this costs nothing but a key.
     """
     cache_path = _snapshot_path(bbox)
     if use_cache and _cache_hit(cache_path):
@@ -267,13 +274,14 @@ def fetch_borough_osm(use_cache: bool = True, bbox: tuple | None = None) -> dict
     if key not in _MEMO:
         nodes = {el["id"]: el for el in raw if el["type"] == "node"}
         ways = [el for el in raw if el["type"] == "way"]
+        relations = [el for el in raw if el["type"] == "relation"]
         dangling = sum(1 for w in ways for nid in w.get("nodes", []) if nid not in nodes)
         if dangling:
             raise RuntimeError(
                 f"{dangling} way node reference(s) in the snapshot don't resolve - the "
                 f"download is truncated. Delete {cache_path} and re-pull; do not build geometry "
                 f"from it, the ways would come out with missing vertices.")
-        _MEMO[key] = {"nodes": nodes, "ways": ways}
+        _MEMO[key] = {"nodes": nodes, "ways": ways, "relations": relations}
     return _MEMO[key]
 
 
@@ -536,3 +544,51 @@ def fetch_stop_lines(center_wgs84: Point, radius_m: float) -> list[dict]:
                                                lambda t: t.get("road_marking") == "stop_line")
                 if len(coords) >= 2]
     return _layer("stop_lines", center_wgs84, radius_m, build)
+
+
+def fetch_municipality_containing(center_wgs84: Point, radius_m: float) -> tuple | None:
+    """(name, [ring of (lon, lat)]) for the municipality this junction stands in, or None.
+
+    WHY THIS LAYER EXISTS. Every terminus in this project is jurisdictional - the corridor stops
+    at the borough line because nothing past it is the borough's to build - and until this was
+    read, the terminus device was placed against the end of the DRAWN leg instead. Those agree
+    to 0.3 ft at W Broad & Lanning by construction (that leg is configured to the line) and they
+    are not the same fact: a leg's length is a rendering decision (.claude/SKILLS.md section 0b),
+    so on a 2.5x sheet the two-stage turn box marched 195 ft into Hopewell Township.
+
+    BY CONTAINMENT, NOT BY NAME, because the names do not line up and the failure is silent.
+    OSM calls the borough "Hopewell" while every site config says "Hopewell Borough", and the
+    neighbour it shares this corridor with is "Hopewell Township" - so a substring match returns
+    the wrong municipality and an exact match returns nothing. Which polygon holds the junction
+    needs no naming convention to be right. `admin_level=8` is New Jersey's municipality level.
+
+    A RING THAT DOES NOT CLOSE IS NOT A MUNICIPALITY, so it is dropped rather than closed for it.
+    Member ways come out of the area snapshot, and a municipality bigger than its bbox has its
+    ring clipped - which is not a smaller town but a polygon with a straight edge down the bbox,
+    that a leg can cross anywhere. Measured over the five areas here: Hopewell and Pennington
+    close from one way each, Lavallette closes in its own area and is clipped in the other, and
+    Hopewell Township (14 ways, none of them in the borough's snapshot) never appears at all.
+    A junction whose municipality does not resolve returns None, and `municipal_limit_ft` then
+    has nothing to say about that leg - the same answer as a leg that never leaves town.
+    """
+    def build():
+        snapshot = snapshot_for_site(center_wgs84, radius_m)
+        nodes, ways = snapshot["nodes"], {w["id"]: w for w in snapshot["ways"]}
+        for relation in snapshot.get("relations", []):
+            tags = relation.get("tags") or {}
+            if tags.get("boundary") != "administrative" or tags.get("admin_level") != "8":
+                continue
+            for member in relation.get("members", []):
+                if member.get("type") != "way" or member.get("role") not in ("outer", ""):
+                    continue
+                way = ways.get(member["ref"])
+                if way is None:
+                    continue
+                ring = [(nodes[nid]["lon"], nodes[nid]["lat"])
+                        for nid in way.get("nodes", []) if nid in nodes]
+                if len(ring) < 4 or ring[0] != ring[-1]:
+                    continue
+                if Polygon(ring).contains(center_wgs84):
+                    return (tags.get("name"), ring)
+        return None
+    return _layer("municipality", center_wgs84, radius_m, build)

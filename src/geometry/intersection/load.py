@@ -10,7 +10,8 @@ from shapely.ops import substring
 
 from src.sources.data_loader import load_parcels_near, load_road_network
 from src.geometry.cross_streets import cross_streets_ft
-from src.render.frame import frame_scale
+from src.geometry.intersection.municipality import municipal_limits_ft
+from src.render.frame import frame_scale, set_drawn_reach_ft
 from src.geometry.model import (
     Leg,
     assign_kerbs_to_corners,
@@ -124,6 +125,11 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     # reports the projected part separately so a stall count does not move with a camera setting.
     scale = frame_scale()
     leg_lengths = {name: length * scale for name, length in surveyed_leg_lengths.items()}
+    # EVERYTHING BELOW FETCHES CONTEXT - kerbs, roads, driveways, parking, crossings - and it has
+    # to reach as far as this model is about to DRAW, not to a fixed radius. A per-leg
+    # working_length_ft is invisible to the frame scale, so without this a long leg is drawn
+    # through empty ground; see src/render/frame.py:_drawn_reach_ft.
+    set_drawn_reach_ft(max(leg_lengths.values(), default=0.0))
     # ...and that scaled length is the WHOLE story: no second, shorter span travels with the Leg
     # for treatments to be sized over. A treatment applies to the street in the drawing, so what
     # the street can hold is asked over exactly the street the reader is looking at. Sizing over a
@@ -225,4 +231,8 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
         paved_surfaces=_paved_surfaces_ft(center, corner_fillets),
         surveyed_leg_lengths=surveyed_leg_lengths,
         cross_streets=cross_streets_ft(center, center_ft, legs),
+        # WHERE THE CORRIDOR ENDS, from the boundary rather than from the drawing - resolved at
+        # the same radius everything else along the street is, so a leg drawn to the line has
+        # the line in hand. See src/geometry/intersection/municipality.py.
+        municipal_limits_ft=municipal_limits_ft(center, legs),
     )
