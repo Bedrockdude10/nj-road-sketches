@@ -2472,7 +2472,8 @@
   "lane_narrowing_taper_lines": [],
   "lane_narrowing_hatch_lines": [],
   "corner_hatching_lines": [],
-  "parking_edge_lines": [
+  "parking_edge_lines": [],
+  "left_edge_lines": [
     [
       [-4.071567, 17.782595],
       [-3.998415, 18.386363],
@@ -3854,6 +3855,7 @@
       [1.408961, -10.54782]
     ]
   ],
+  "bike_lane_uncoloured_surface_polygons": [],
   "bike_lane_contraflow_lines": [],
   "bike_lane_symbol_polygons": [
     [
@@ -3877,8 +3879,83 @@
       [0.877903, -11.631012]
     ]
   ],
+  "turn_box_surface_polygons": [],
+  "turn_box_edge_lines": [],
+  "shared_lane_symbol_polygons": [],
   "corner_apron_polygons": [],
   "props": [
+    {
+      "type": "traffic_signal_pole",
+      "position_ft": [613098.764327, 415472.224217],
+      "heading_deg": 83.084286,
+      "arm_heading_deg": 173.084286,
+      "arm_length_ft": 35.137716,
+      "source": "confirmed (grand_central_ave_south/reese_ave_east corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): full-width mast-arm signal, pole at the real corner-fillet arc midpoint; the arm extends at a right angle to grand_central_ave_south (parallel to its crosswalk, perpendicular to its travel direction), reaching roughly to mid-roadway (arm_length_ft=35.1, half of grand_central_ave_south's real curb-to-curb width) - confirmed via street-view against a real example (NW corner's arm over West Broad St), not a diagonal reach toward the intersection center. Exactly which lane the head hangs over isn't surveyed.",
+      "position_m": [9.772136, -7.529026],
+      "arm_length_m": 10.709976
+    },
+    {
+      "type": "pedestrian_signal_head",
+      "position_ft": [613100.595292, 415474.600678],
+      "heading_deg": -37.612765,
+      "own_post": true,
+      "source": "confirmed (grand_central_ave_south/reese_ave_east corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): pedestrian head is on a SEPARATE pole from the vehicle signal; approximation: offset 3 ft along the sidewalk from the vehicle signal pole (no surveyed separate-pole location available).",
+      "position_m": [10.330214, -6.804681]
+    },
+    {
+      "type": "traffic_signal_pole",
+      "position_ft": [613104.276867, 415518.389857],
+      "heading_deg": 172.725722,
+      "arm_heading_deg": -97.274278,
+      "arm_length_ft": 17.189722,
+      "source": "confirmed (reese_ave_east/grand_central_ave_north corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): full-width mast-arm signal, pole at the real corner-fillet arc midpoint; the arm extends at a right angle to reese_ave_east (parallel to its crosswalk, perpendicular to its travel direction), reaching roughly to mid-roadway (arm_length_ft=17.2, half of reese_ave_east's real curb-to-curb width) - confirmed via street-view against a real example (NW corner's arm over West Broad St), not a diagonal reach toward the intersection center. Exactly which lane the head hangs over isn't surveyed.",
+      "position_m": [11.452358, 6.542261],
+      "arm_length_m": 5.239427
+    },
+    {
+      "type": "pedestrian_signal_head",
+      "position_ft": [613102.788784, 415520.994777],
+      "heading_deg": 29.73755,
+      "own_post": true,
+      "source": "confirmed (reese_ave_east/grand_central_ave_north corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): pedestrian head is on a SEPARATE pole from the vehicle signal; approximation: offset 3 ft along the sidewalk from the vehicle signal pole (no surveyed separate-pole location available).",
+      "position_m": [10.99879, 7.33624]
+    },
+    {
+      "type": "traffic_signal_pole",
+      "position_ft": [613024.579975, 415527.835635],
+      "heading_deg": -96.908177,
+      "arm_heading_deg": -6.908177,
+      "arm_length_ft": 34.979038,
+      "source": "confirmed (grand_central_ave_north/reese_ave_west corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): full-width mast-arm signal, pole at the real corner-fillet arc midpoint; the arm extends at a right angle to grand_central_ave_north (parallel to its crosswalk, perpendicular to its travel direction), reaching roughly to mid-roadway (arm_length_ft=35.0, half of grand_central_ave_north's real curb-to-curb width) - confirmed via street-view against a real example (NW corner's arm over West Broad St), not a diagonal reach toward the intersection center. Exactly which lane the head hangs over isn't surveyed.",
+      "position_m": [-12.839255, 9.421334],
+      "arm_length_m": 10.661611
+    },
+    {
+      "type": "pedestrian_signal_head",
+      "position_ft": [613021.192706, 415526.600156],
+      "heading_deg": 143.729101,
+      "own_post": true,
+      "source": "confirmed (grand_central_ave_north/reese_ave_west corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): pedestrian head is on a SEPARATE pole from the vehicle signal; approximation: offset 3 ft along the sidewalk from the vehicle signal pole (no surveyed separate-pole location available).",
+      "position_m": [-13.871694, 9.04476]
+    },
+    {
+      "type": "traffic_signal_pole",
+      "position_ft": [613018.681921, 415482.998615],
+      "heading_deg": -7.249246,
+      "arm_heading_deg": 82.750754,
+      "arm_length_ft": 20.432257,
+      "source": "confirmed (reese_ave_west/grand_central_ave_south corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): full-width mast-arm signal, pole at the real corner-fillet arc midpoint; the arm extends at a right angle to reese_ave_west (parallel to its crosswalk, perpendicular to its travel direction), reaching roughly to mid-roadway (arm_length_ft=20.4, half of reese_ave_west's real curb-to-curb width) - confirmed via street-view against a real example (NW corner's arm over West Broad St), not a diagonal reach toward the intersection center. Exactly which lane the head hangs over isn't surveyed.",
+      "position_m": [-14.636982, -4.24499],
+      "arm_length_m": 6.227752
+    },
+    {
+      "type": "pedestrian_signal_head",
+      "position_ft": [613019.517543, 415480.117341],
+      "heading_deg": -163.826883,
+      "own_post": true,
+      "source": "confirmed (reese_ave_west/grand_central_ave_south corner - STREET-VIEW PHOTO REVIEW, 2026-09-10, against Google Street View imagery dated Sep 2025 looking north on Grand Central Ave at Reese Ave. Not a field survey and not an OSM tag: there is no `highway=traffic_signals` node at this junction in the borough snapshot, which is why nothing in the pipeline could infer it. What the photo attests directly is the signal's EXISTENCE and its mast-arm hardware - a green vehicle head hanging over the northbound lanes from an arm on the east side, a second head on the west, and a Reese Ave street-name blade on the arm.\n): pedestrian head is on a SEPARATE pole from the vehicle signal; approximation: offset 3 ft along the sidewalk from the vehicle signal pole (no surveyed separate-pole location available).",
+      "position_m": [-14.382284, -5.123202]
+    },
     {
       "type": "bollard",
       "position_ft": [613054.40884, 415538.518083],
@@ -4206,146 +4283,145 @@
       "crosswalk_reach_right_m": 10.668,
       "crosswalk_centre_m": [-2.513272, -7.633821],
       "crosswalk_axis": [-0.120716, -0.992687],
+      "stop_bar_centre_m": [-3.028619, -11.867846],
+      "stop_bar_axis": [-0.120869, -0.992668],
       "crosswalk_style": "continental",
       "crosswalk_bar_count": 21,
-      "stop_bar_offset_m": null,
+      "stop_bar_offset_m": 12.146054,
       "stop_bar_width_m": 4.442989,
+      "stop_bar_span_m": 6.808509,
+      "stop_bar_lateral_offset_m": -1.182761,
       "centerline_style": "single_white_dashed",
-      "centerline_start_m": 9.88078,
+      "centerline_start_m": 12.146054,
       "centerline_paint_m": [
         [
-          [-3.877828, -9.482441],
-          [-3.951316, -10.085974],
-          [-3.998697, -10.475109]
+          [-4.15163, -11.731106],
+          [-4.22448, -12.328691],
+          [-4.272646, -12.723757]
         ],
         [
-          [-4.119572, -11.467777],
-          [-4.171775, -11.896397],
-          [-4.240542, -12.460433]
+          [-4.393669, -13.716407],
+          [-4.443114, -14.121964],
+          [-4.514691, -14.709056]
         ],
         [
-          [-4.361565, -13.453083],
-          [-4.392517, -13.706961],
-          [-4.466098, -14.310483],
-          [-4.482591, -14.445732]
+          [-4.635853, -15.701689],
+          [-4.661899, -15.915042],
+          [-4.734869, -16.512789],
+          [-4.757029, -16.69432]
         ],
         [
-          [-4.603708, -15.438371],
-          [-4.613349, -15.517339],
-          [-4.687023, -16.120849],
-          [-4.724885, -16.431002]
+          [-4.878206, -17.686951],
+          [-4.88081, -17.708281],
+          [-4.953833, -18.305845],
+          [-4.999513, -18.679566]
         ],
         [
-          [-4.846063, -17.423632],
-          [-4.908039, -17.931204],
-          [-4.967328, -18.416252]
+          [-5.120843, -19.672178],
+          [-5.173021, -20.09905],
+          [-5.242173, -20.664791]
         ],
         [
-          [-5.088658, -19.408865],
-          [-5.129341, -19.7417],
-          [-5.203108, -20.345199],
-          [-5.209988, -20.401477]
+          [-5.363565, -21.657395],
+          [-5.392279, -21.892158],
+          [-5.465389, -22.489887],
+          [-5.484972, -22.649998]
         ],
         [
-          [-5.331359, -21.394084],
-          [-5.350686, -21.552102],
-          [-5.424501, -22.155595],
-          [-5.452766, -22.386687]
+          [-5.606379, -23.642601],
+          [-5.611607, -23.685346],
+          [-5.684717, -24.283075],
+          [-5.727786, -24.635204]
         ],
         [
-          [-5.574173, -23.37929],
-          [-5.645944, -23.966074],
-          [-5.69558, -24.371893]
+          [-5.849193, -25.627806],
+          [-5.904045, -26.076263],
+          [-5.9706, -26.620409]
         ],
         [
-          [-5.816987, -25.364495],
-          [-5.867387, -25.776553],
-          [-5.938394, -26.357098]
+          [-6.092007, -27.613012],
+          [-6.123373, -27.869451],
+          [-6.196482, -28.467181],
+          [-6.213414, -28.605615]
         ],
         [
-          [-6.059801, -27.349701],
-          [-6.08883, -27.587032],
-          [-6.162644, -28.190525],
-          [-6.181208, -28.342304]
+          [-6.334821, -29.598218],
+          [-6.342701, -29.66264],
+          [-6.41581, -30.260369],
+          [-6.456228, -30.590821]
         ],
         [
-          [-6.302615, -29.334907],
-          [-6.310273, -29.397511],
-          [-6.384087, -30.001004],
-          [-6.424022, -30.327509]
+          [-6.577635, -31.583423],
+          [-6.635138, -32.053557],
+          [-6.699042, -32.576026]
         ],
         [
-          [-6.545429, -31.320112],
-          [-6.60553, -31.811483],
-          [-6.666836, -32.312715]
+          [-6.820449, -33.568629],
+          [-6.854466, -33.846745],
+          [-6.927576, -34.444474],
+          [-6.941856, -34.561232]
         ],
         [
-          [-6.788243, -33.305318],
-          [-6.826973, -33.621963],
-          [-6.900787, -34.225456],
-          [-6.90965, -34.297921]
+          [-7.063263, -35.553835],
+          [-7.073794, -35.639933],
+          [-7.146904, -36.237662],
+          [-7.18467, -36.546437]
         ],
         [
-          [-7.031057, -35.290523],
-          [-7.048416, -35.432442],
-          [-7.12223, -36.035935],
-          [-7.152464, -36.283126]
+          [-7.306078, -37.53904],
+          [-7.366232, -38.03085],
+          [-7.427485, -38.531643]
         ],
         [
-          [-7.273871, -37.275729],
-          [-7.343673, -37.846414],
-          [-7.395279, -38.268332]
+          [-7.548892, -39.524246],
+          [-7.58556, -39.824039],
+          [-7.658669, -40.421768],
+          [-7.670299, -40.516849]
         ],
         [
-          [-7.516686, -39.260935],
-          [-7.565116, -39.656893],
-          [-7.638093, -40.253537]
+          [-7.791706, -41.509451],
+          [-7.804888, -41.617227],
+          [-7.877997, -42.214956],
+          [-7.913113, -42.502054]
         ],
         [
-          [-7.7595, -41.24614],
-          [-7.786559, -41.467372],
-          [-7.860373, -42.070865],
-          [-7.880907, -42.238743]
+          [-8.03452, -43.494657],
+          [-8.097325, -44.008144],
+          [-8.155927, -44.48726]
         ],
         [
-          [-8.002314, -43.231346],
-          [-8.008002, -43.277851],
-          [-8.081816, -43.881344],
-          [-8.123721, -44.223949]
+          [-8.277334, -45.479863],
+          [-8.316653, -45.801332],
+          [-8.389763, -46.399061],
+          [-8.398741, -46.472465]
         ],
         [
-          [-8.245128, -45.216552],
-          [-8.303259, -45.691823],
-          [-8.366535, -46.209154]
+          [-8.520148, -47.465068],
+          [-8.535981, -47.59452],
+          [-8.609095, -48.192425],
+          [-8.641497, -48.457678]
         ],
         [
-          [-8.487942, -47.201757],
-          [-8.524702, -47.502302],
-          [-8.598534, -48.105969],
-          [-8.609331, -48.194362]
+          [-8.76275, -49.4503],
+          [-8.828146, -49.985647],
+          [-8.884004, -50.442921]
         ],
         [
-          [-8.730585, -49.186984],
-          [-8.745976, -49.312978],
-          [-8.819697, -49.916482],
-          [-8.851839, -50.179605]
+          [-9.005207, -51.435549],
+          [-9.047114, -51.779055],
+          [-9.120039, -52.376807],
+          [-9.126307, -52.428189]
         ],
         [
-          [-8.973082, -51.172228],
-          [-9.040785, -51.72718],
-          [-9.094183, -52.164868]
+          [-9.247407, -53.42083],
+          [-9.265888, -53.572311],
+          [-9.338781, -54.169714],
+          [-9.368594, -54.413459]
         ],
         [
-          [-9.215283, -53.157509],
-          [-9.261669, -53.537728],
-          [-9.335257, -54.140896],
-          [-9.336388, -54.150148]
-        ],
-        [
-          [-9.457795, -55.142751],
-          [-9.482885, -55.347882],
-          [-9.5567, -55.951375],
-          [-9.579202, -56.135354]
+          [-9.490001, -55.406062],
+          [-9.55811, -55.962903],
+          [-9.611408, -56.398665]
         ]
       ]
     },
@@ -4514,12 +4590,16 @@
       "crosswalk_reach_right_m": 5.334,
       "crosswalk_centre_m": [11.685312, -1.289329],
       "crosswalk_axis": [0.98739, -0.158308],
+      "stop_bar_centre_m": [14.938164, -1.789454],
+      "stop_bar_axis": [0.989059, -0.14752],
       "crosswalk_style": "continental",
       "crosswalk_bar_count": 11,
-      "stop_bar_offset_m": null,
+      "stop_bar_offset_m": 15.052071,
       "stop_bar_width_m": 10.478854,
+      "stop_bar_span_m": 4.739427,
+      "stop_bar_lateral_offset_m": 2.370485,
       "centerline_style": "none",
-      "centerline_start_m": 13.760971,
+      "centerline_start_m": 15.052071,
       "centerline_paint_m": []
     },
     {
@@ -4535,12 +4615,16 @@
       "crosswalk_reach_right_m": 6.2484,
       "crosswalk_centre_m": [-14.39473, 2.634131],
       "crosswalk_axis": [-0.989571, 0.144044],
+      "stop_bar_centre_m": [-17.262058, 3.023971],
+      "stop_bar_axis": [-0.992164, 0.124942],
       "crosswalk_style": "continental",
       "crosswalk_bar_count": 12,
-      "stop_bar_offset_m": null,
+      "stop_bar_offset_m": 17.506534,
       "stop_bar_width_m": 12.455504,
+      "stop_bar_span_m": 5.727752,
+      "stop_bar_lateral_offset_m": 2.865043,
       "centerline_style": "none",
-      "centerline_start_m": 16.612763,
+      "centerline_start_m": 17.506534,
       "centerline_paint_m": []
     }
   ],
@@ -4786,29 +4870,29 @@
       "kind": "roadway",
       "surveyed": false,
       "coords": [
-        [-113.442544, 21.844721],
-        [-108.866504, 21.273009],
-        [-104.290464, 20.701297],
-        [-99.714424, 20.129585],
-        [-95.138384, 19.557873],
-        [-90.562343, 18.986161],
-        [-85.986303, 18.414449],
-        [-81.410263, 17.842737],
-        [-76.834223, 17.271025],
-        [-72.258183, 16.699312],
-        [-67.682143, 16.1276],
-        [-63.106102, 15.555888],
-        [-58.530062, 14.984176],
-        [-53.954022, 14.412464],
-        [-49.377982, 13.840752],
-        [-44.801942, 13.26904],
-        [-40.225901, 12.697328],
-        [-35.649861, 12.125616],
-        [-31.073821, 11.553904],
-        [-26.497781, 10.982192],
-        [-21.921741, 10.410479],
-        [-17.408966, 9.332381],
-        [-12.690729, 9.91592],
+        [-113.442625, 21.844753],
+        [-108.866578, 21.273094],
+        [-104.290531, 20.701436],
+        [-99.714485, 20.129778],
+        [-95.138438, 19.55812],
+        [-90.562391, 18.986461],
+        [-85.986344, 18.414803],
+        [-81.410297, 17.843145],
+        [-76.834251, 17.271486],
+        [-72.258204, 16.699828],
+        [-67.682157, 16.12817],
+        [-63.10611, 15.556512],
+        [-58.530063, 14.984853],
+        [-53.954017, 14.413195],
+        [-49.37797, 13.841537],
+        [-44.801923, 13.269879],
+        [-40.225876, 12.69822],
+        [-35.649829, 12.126562],
+        [-31.073783, 11.554904],
+        [-26.497736, 10.983246],
+        [-21.921689, 10.411587],
+        [-17.408938, 9.333258],
+        [-12.690726, 9.915919],
         [-11.035677, 9.709575],
         [-11.039569, 9.690177],
         [-11.045013, 9.664259],
@@ -5018,85 +5102,85 @@
         [-14.744445, 8.999487],
         [-38.488368, 11.843584],
         [-39.969726, -0.523515],
-        [-19.036297, -3.030966],
-        [-23.628482, -3.250448],
-        [-28.204522, -2.678736],
-        [-32.780562, -2.107024],
-        [-37.356603, -1.535312],
-        [-41.932643, -0.963599],
-        [-46.508683, -0.391887],
-        [-51.084723, 0.179825],
-        [-55.660763, 0.751537],
-        [-60.236804, 1.323249],
-        [-64.812844, 1.894961],
-        [-69.388884, 2.466673],
-        [-73.964924, 3.038385],
-        [-78.540964, 3.610097],
-        [-83.117004, 4.181809],
-        [-87.693045, 4.753521],
-        [-92.269085, 5.325234],
-        [-96.845125, 5.896946],
-        [-101.421165, 6.468658],
-        [-105.997205, 7.04037],
-        [-110.573246, 7.612082],
-        [-115.149286, 8.183794],
-        [-119.725326, 8.755506],
-        [-118.018585, 22.416433],
-        [-113.442544, 21.844721]
+        [-19.041556, -3.030336],
+        [-23.628234, -3.249076],
+        [-28.204281, -2.677417],
+        [-32.780328, -2.105759],
+        [-37.356375, -1.534101],
+        [-41.932421, -0.962443],
+        [-46.508468, -0.390784],
+        [-51.084515, 0.180874],
+        [-55.660562, 0.752532],
+        [-60.236609, 1.32419],
+        [-64.812655, 1.895849],
+        [-69.388702, 2.467507],
+        [-73.964749, 3.039165],
+        [-78.540796, 3.610824],
+        [-83.116843, 4.182482],
+        [-87.692889, 4.75414],
+        [-92.268936, 5.325798],
+        [-96.844983, 5.897457],
+        [-101.42103, 6.469115],
+        [-105.997077, 7.040773],
+        [-110.573123, 7.612431],
+        [-115.14917, 8.18409],
+        [-119.725217, 8.755748],
+        [-118.018672, 22.416411],
+        [-113.442625, 21.844753]
       ]
     },
     {
       "kind": "roadway",
       "surveyed": false,
       "coords": [
-        [14.553076, 5.27625],
-        [19.214768, 5.442697],
-        [23.795782, 4.912315],
-        [28.376797, 4.381933],
-        [32.957811, 3.851551],
-        [37.538826, 3.321169],
-        [42.11984, 2.790787],
-        [46.700855, 2.260405],
-        [51.281869, 1.730023],
-        [55.862884, 1.199641],
-        [60.443898, 0.669259],
-        [65.024912, 0.138877],
-        [69.605927, -0.391505],
-        [74.186941, -0.921887],
-        [78.767956, -1.452269],
-        [83.34897, -1.982651],
-        [87.929985, -2.513033],
-        [92.510999, -3.043415],
-        [97.092014, -3.573797],
-        [101.673028, -4.104179],
-        [106.254042, -4.634561],
-        [110.835057, -5.164943],
-        [115.416071, -5.695325],
-        [119.997086, -6.225707],
+        [14.553078, 5.27625],
+        [19.214737, 5.442412],
+        [23.795752, 4.91203],
+        [28.376766, 4.381648],
+        [32.95778, 3.851266],
+        [37.538795, 3.320884],
+        [42.119809, 2.790502],
+        [46.700823, 2.26012],
+        [51.281838, 1.729738],
+        [55.862852, 1.199356],
+        [60.443866, 0.668974],
+        [65.024881, 0.138592],
+        [69.605895, -0.39179],
+        [74.186909, -0.922171],
+        [78.767924, -1.452553],
+        [83.348938, -1.982935],
+        [87.929952, -2.513317],
+        [92.510967, -3.043699],
+        [97.091981, -3.574081],
+        [101.672995, -4.104463],
+        [106.25401, -4.634845],
+        [110.835024, -5.165227],
+        [115.416039, -5.695609],
+        [119.997053, -6.225991],
         [118.413728, -19.901484],
         [113.832713, -19.371102],
         [109.251699, -18.84072],
-        [104.670684, -18.310338],
+        [104.670685, -18.310338],
         [100.08967, -17.779956],
         [95.508656, -17.249574],
-        [90.927641, -16.719192],
+        [90.927642, -16.719192],
         [86.346627, -16.18881],
-        [81.765612, -15.658428],
-        [77.184598, -15.128046],
-        [72.603583, -14.597664],
-        [68.022569, -14.067282],
-        [63.441554, -13.5369],
-        [58.86054, -13.006518],
-        [54.279525, -12.476136],
-        [49.698511, -11.945754],
-        [45.117497, -11.415372],
-        [40.536482, -10.88499],
-        [35.955468, -10.354608],
-        [31.374453, -9.824226],
-        [26.793439, -9.293844],
-        [22.212424, -8.763462],
-        [17.63141, -8.23308],
-        [13.137396, -6.951259],
+        [81.765613, -15.658428],
+        [77.184599, -15.128046],
+        [72.603584, -14.597664],
+        [68.02257, -14.067282],
+        [63.441556, -13.5369],
+        [58.860541, -13.006518],
+        [54.279527, -12.476136],
+        [49.698513, -11.945754],
+        [45.117498, -11.415372],
+        [40.536484, -10.88499],
+        [35.95547, -10.354608],
+        [31.374455, -9.824226],
+        [26.793441, -9.293844],
+        [22.212427, -8.763462],
+        [17.631412, -8.23308],
+        [13.137398, -6.951259],
         [9.879211, -6.57407],
         [9.895124, -6.575612],
         [9.919828, -6.577997],
@@ -5201,15 +5285,15 @@
         [10.787307, 5.689891],
         [10.692016, 5.731482],
         [10.652888, 5.752652],
-        [14.553076, 5.27625]
+        [14.553078, 5.27625]
       ]
     },
     {
       "kind": "roadway",
       "surveyed": false,
       "coords": [
-        [-14.568401, -5.144516],
-        [-18.914704, -3.045531],
+        [-14.568398, -5.144516],
+        [-18.912069, -3.045846],
         [-16.247839, -3.364973],
         [-16.039636, -3.388554],
         [-16.038738, -3.388656],
@@ -5419,7 +5503,7 @@
         [-13.038631, -5.297565],
         [-13.039603, -5.324199],
         [-13.040043, -5.335065],
-        [-14.568401, -5.144516]
+        [-14.568398, -5.144516]
       ]
     },
     {
@@ -5512,15 +5596,15 @@
         [-23.20568, -94.859394],
         [-22.691103, -90.276033],
         [-22.176526, -85.692672],
-        [-21.66195, -81.109311],
-        [-21.121547, -76.471628],
-        [-21.178175, -71.821361],
-        [-20.971577, -70.082372],
+        [-21.661949, -81.109311],
+        [-21.121288, -76.471086],
+        [-21.178305, -71.820746],
+        [-20.97172, -70.082363],
         [0.533471, -71.409307],
-        [1.207137, -65.848631],
-        [0.738548, -69.742879],
-        [0.192495, -74.322608],
-        [-0.008753, -78.942693],
+        [1.207337, -65.846976],
+        [0.738463, -69.743287],
+        [0.19231, -74.323003],
+        [-0.00861, -78.943143],
         [-0.537754, -83.480937],
         [-1.052331, -88.064298],
         [-1.566908, -92.647659],
@@ -5539,13 +5623,13 @@
       "surveyed": false,
       "coords": [
         [-3.829626, 70.085664],
-        [-3.284261, 74.665489],
+        [-3.284261, 74.665488],
         [-2.748934, 79.246475],
         [-2.46456, 83.856509],
-        [-1.929551, 88.472176],
-        [-1.3862, 93.052215],
-        [-0.842849, 97.632254],
-        [-0.299498, 102.212293],
+        [-1.929551, 88.472175],
+        [-1.3862, 93.052214],
+        [-0.842849, 97.632253],
+        [-0.299498, 102.212292],
         [0.243853, 106.792331],
         [0.787204, 111.37237],
         [1.330555, 115.952409],
@@ -5558,11 +5642,11 @@
         [20.266035, 95.12801],
         [19.722684, 90.547971],
         [19.179333, 85.967932],
-        [18.65137, 81.41238],
+        [18.65137, 81.412379],
         [18.59794, 76.775614],
         [18.074722, 72.333169],
         [-3.257929, 74.849039],
-        [-3.876309, 69.693633],
+        [-3.876309, 69.693634],
         [-3.829626, 70.085664]
       ]
     },
@@ -5570,8 +5654,8 @@
       "kind": "roadway",
       "surveyed": false,
       "coords": [
-        [7.946129, -10.219154],
-        [7.934657, -10.315366],
+        [7.946863, -10.212148],
+        [7.934813, -10.313268],
         [8.01464, -9.241939],
         [8.014663, -9.241625],
         [8.01471, -9.240998],
@@ -5687,8 +5771,8 @@
         [8.324948, -7.340682],
         [8.332214, -7.325251],
         [8.339615, -7.310036],
-        [8.345106, -7.299105],
-        [7.946129, -10.219154]
+        [8.344996, -7.299324],
+        [7.946863, -10.212148]
       ]
     }
   ],
