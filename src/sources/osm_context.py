@@ -589,6 +589,25 @@ def fetch_municipality_containing(center_wgs84: Point, radius_m: float) -> tuple
                 if len(ring) < 4 or ring[0] != ring[-1]:
                     continue
                 if Polygon(ring).contains(center_wgs84):
-                    return (tags.get("name"), ring)
+                    return (_qualified_municipality(tags), ring)
         return None
     return _layer("municipality", center_wgs84, radius_m, build)
+
+
+def _qualified_municipality(tags: dict) -> str | None:
+    """"Hopewell" + border_type=borough -> "Hopewell Borough", the form every config uses.
+
+    OSM names the relation for the place and puts the kind in `border_type`, so the bare name is
+    ambiguous exactly where this project needs it not to be: Hopewell Borough and Hopewell
+    Township share a corridor, and route_decision_for is keyed on (street, town). Returning
+    "Hopewell" matched neither, so a borough-wide document found 0 of 42 streets carrying the
+    decision that is written for them.
+
+    The suffix is only appended when it is not already there - the township relation is named
+    "Hopewell Township" outright, and "Hopewell Township Township" matches nothing either.
+    """
+    name = (tags.get("name") or "").strip()
+    kind = (tags.get("border_type") or "").strip()
+    if not name or not kind or name.lower().endswith(kind.lower()):
+        return name or None
+    return f"{name} {kind.title()}"

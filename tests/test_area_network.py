@@ -11,6 +11,8 @@ from shapely.geometry import LineString, Point, Polygon
 
 from src.geometry.intersection.municipality import municipal_boundary_ft
 from src.geometry.network import corridors_from_models
+from src.geometry.treatments import CorridorCalming, route_decision_for
+from src.geometry.treatments.corridor import CorridorFacility
 from src.geometry.network.area import (MIN_CORRIDOR_FT, Corridor, _named_carriageways, _pieces_of,
                                        _projected_nodes, _snapshot_center, _way_line,
                                        area_corridors)
@@ -71,6 +73,23 @@ def test_every_crossing_lands_on_the_street_it_is_filed_under(borough: list[Corr
         stations = np.asarray(corridor.cross_street_ft or [0.0])
         assert stations.min() >= 0.0 and stations.max() <= corridor.length_ft + 1.0, (
             f"{corridor.name} files a crossing off the end of its {corridor.length_ft:,.0f} ft")
+
+
+def test_the_document_carries_the_decisions_written_for_its_streets(borough: list[Corridor]) -> None:
+    """The point of the whole document: what is proposed on a street is a LOOKUP against the
+    network, not a line in a site file.
+
+    This found 0 of 42 before `_qualified_municipality`: OSM names the relation "Hopewell" and
+    puts "borough" in border_type, while every decision is keyed on "Hopewell Borough".
+    """
+    decided = {corridor.name: route_decision_for(corridor.name, corridor.municipalities[0])
+               for corridor in borough}
+    carrying = {name: decision for name, decision in decided.items() if decision is not None}
+
+    assert set(carrying) == {"Broad Street", "Princeton Avenue"}, (
+        f"the borough has two route decisions and the document found {sorted(carrying)}")
+    assert isinstance(carrying["Broad Street"], CorridorFacility)
+    assert isinstance(carrying["Princeton Avenue"], CorridorCalming)
 
 
 def test_kerb_runs_stay_inside_the_corridor_they_are_filed_on(borough: list[Corridor]) -> None:
