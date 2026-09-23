@@ -38,6 +38,9 @@ render inside the loop is a round trip that cannot answer the question you asked
   edit was the largest tool cost here (~16 runs a session), so a PreToolUse hook
   (`.claude/hooks/no_full_suite_in_loop.sh`) refuses an unnarrowed run; `FULL_SUITE=1` gets
   past it when you mean it.
+- **Never `rm` before re-exporting.** `export_all_scenarios.py` clears each exported site's
+  old `geometry_*.json` itself. `rm` needs approval here, and waiting on it once stalled a
+  session for hours while nobody was at the keyboard.
 - `scripts/whatis.py <symbol>`, ~1 s, before you write a second copy of anything: signature,
   the docstring's first line, and every call site. §1 of SKILLS.md is the list of facts that
   already have a home; this is how you find the ones that are not on it.

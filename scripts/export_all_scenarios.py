@@ -12,6 +12,9 @@ here.
     python scripts/export_all_scenarios.py /tmp/after
     python scripts/diff_exports.py /tmp/before /tmp/after
 
+Re-running into the same directory needs no `rm` first: each exported site's old
+geometry_*.json is cleared before it is rewritten, so nothing stale survives a failed scenario.
+
 Offline and against the committed OSM fixture, so it is reproducible:
 
     ROAD_SKETCHES_OFFLINE=1 ROAD_SKETCHES_OSM_CACHE=tests/fixtures/osm_cache PYTHONPATH=. \\
@@ -99,6 +102,23 @@ def export_site(site: str, out_dir: Path) -> tuple[list[Path], list[str]]:
     return written, failures
 
 
+def clear_previous_exports(out_dir: Path, sites: list[str]) -> list[str]:
+    """Delete the geometry_*.json these sites are about to rewrite; name the sites it left.
+
+    Exports overwrite by filename, so a scenario that failed or was removed this run kept its
+    old file, and diff_exports read it as unchanged. Only `geometry_*.json` under the sites
+    being exported goes, because out_dir may be output/, where the renders live beside them.
+    The return value is every OTHER site with exports here: those are from an earlier run.
+    """
+    if not out_dir.is_dir():
+        return []
+    for site in sites:
+        for stale in (out_dir / site).glob("geometry_*.json"):
+            stale.unlink()
+    return sorted(d.name for d in out_dir.iterdir()
+                  if d.is_dir() and d.name not in sites and any(d.glob("geometry_*.json")))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -114,6 +134,7 @@ def main() -> int:
     out_dir = args.out_dir.resolve()
     sites = args.site or list_sites()
     jobs = max(1, min(args.jobs, len(sites)))
+    earlier = clear_previous_exports(out_dir, sites)
 
     total = 0
     failures: list[str] = []
@@ -129,6 +150,8 @@ def main() -> int:
             status = f"  {len(site_failures)} FAILED" if site_failures else ""
             print(f"  {site:22s} {len(written)} export(s){status}")
     print(f"{total} export(s) under {out_dir}")
+    if earlier:
+        print(f"  NOTE: the exports here for {', '.join(earlier)} are from an earlier run.")
     if failures:
         print(f"\n{len(failures)} failure(s):")
         for failure in failures:
