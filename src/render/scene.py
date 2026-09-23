@@ -264,20 +264,24 @@ class SceneGeometry:
 
         return check_scene(self.context(props, paint))
 
-    def report_coverage(self, props: list[dict], paint: list) -> list:
+    def report_coverage(self, props: list[dict], paint: list,
+                        frame_radius_ft: float | None = None) -> list:
         """Print, and return, the surveyed features inside the frame that the drawing does not draw.
 
         A NOTE RATHER THAN A FAILURE, deliberately. Kerb ramps and traffic control are PROPS
-        placed per leg, so a neighbouring junction's have nowhere to come from; raising on that
-        would fail every wide render for a reason no scenario can fix, and a check that cannot go
-        green is one people learn to ignore. The crossings layer is clean at all four sites and
-        both frame scales, which is what makes the remaining two worth printing rather than a
-        permanent grumble. See src/geometry/coverage.py.
+        placed per leg, so one at a junction the drawing does not model has nowhere to come from;
+        raising on that would fail a render for a reason no scenario can fix, and a check that
+        cannot go green is one people learn to ignore. See src/geometry/coverage.py.
+
+        `frame_radius_ft` is the extent the CALLER drew, which is the only honest thing to judge
+        coverage against. Derived from the model it is the leg reach plus a margin, and for a
+        crop of the network that overshoots the window - 437 ft against a 300 ft half-width - so
+        the report demanded features the drawing was never given.
         """
         from src.geometry.coverage import coverage_gaps, describe_coverage
 
         gaps = coverage_gaps(self.model, [*paint, *self.crosswalk_bands.values(), *props,
-                                          *self.surveyed_crossing_paint()])
+                                          *self.surveyed_crossing_paint()], frame_radius_ft)
         if gaps:
             print(describe_coverage(gaps))
         return gaps

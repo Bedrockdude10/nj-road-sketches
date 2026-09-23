@@ -450,6 +450,7 @@ props:
 - pedestrian_signal_head@417978.75,565993.31
 - pedestrian_signal_head@418029.05,566040.40
 - tactile_paving_pad@417981.71,565992.62
+- tactile_paving_pad@418300.67,566166.88
 - traffic_signal_pole@417978.75,565993.31
 - traffic_signal_pole@418029.05,566040.40
 scalars:

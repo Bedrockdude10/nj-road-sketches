@@ -33,6 +33,7 @@ from src.geometry.treatments import route_decision_for
 from src.sources.osm_context import (height_from_tags, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
+from src.render.frame import Frame
 from src.render.plan_view import plot_design_state
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +127,20 @@ def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
     }
 
 
+def window_frame(features: gpd.GeoDataFrame) -> Frame:
+    """The extent the drawing covers: the WINDOW, not a radius derived from the legs.
+
+    `junction_frame` sizes itself on how far the longest leg reaches from the junction, which is
+    the right answer when the drawing is one junction and the wrong one when it is a crop: on a
+    600 ft window it returned a 437 ft half-width, so the coverage report demanded surveyed
+    features from 137 ft outside the clip the slice was built from and called them missing.
+    A Frame is already a square about a centre, so a window IS one.
+    """
+    minx, miny, maxx, maxy = features.total_bounds
+    return Frame(Point((minx + maxx) / 2, (miny + maxy) / 2),
+                 max(maxx - minx, maxy - miny) / 2)
+
+
 def context_layers(context: dict[str, list[dict]]) -> dict[str, list[dict]]:
     """The layers BOTH views take, so neither can be handed a set the other was not.
 
@@ -154,7 +169,8 @@ def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
     model, state, pavement = design_for(features)
     context = slice_context(features)
     fig, ax = plt.subplots(figsize=(11, 11))
-    plot_design_state(ax, model, state, name, pavement=pavement, sidewalks=[], **context_layers(context))
+    plot_design_state(ax, model, state, name, pavement=pavement, sidewalks=[],
+                      frame=window_frame(features), **context_layers(context))
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.png"
     fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
@@ -170,6 +186,7 @@ def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     geometry, png = out_dir / f"{name}_3d.json", out_dir / f"{name}_3d.png"
     export_scenario(model, state, name, geometry, pavement=pavement,
+                    frame=window_frame(features),
                     buildings=context["buildings"], **context_layers(context))
     render_all(find_blender(), [(geometry, png)])
     return png

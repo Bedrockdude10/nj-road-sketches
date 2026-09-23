@@ -8,6 +8,7 @@ import numpy as np
 from shapely.geometry import LineString, Point, Polygon
 
 from src.geometry.intersection import IntersectionModel
+from src.checks import PAD_MAX_DISTANCE_FROM_CURB_FT, _all_curb_lines
 from src.geometry.model import bollard_points_ft, build_pavement_polygon, leg_clearance_ft
 from src.geometry.treatments import DesignState
 from src.render.coords import wgs84_to_state_plane
@@ -66,7 +67,6 @@ CROSSING_NODE_MATCH_FT = 20.0
 TACTILE_PAD_DEPTH_FT = 2.0
 TACTILE_PAD_WIDTH_FT = 3.0
 PAD_MAX_STEP_FT = 12.0   # past this, the modelled pavement has swallowed the footway
-PAD_NEAR_JUNCTION_FT = 90.0  # a ramp belonging to THIS junction; crossings/kerbs are fetched
                               # over a much wider radius for context, and three of Columbia &
                               # Princeton's 'ramps' were 350+ ft away at a different junction
 
@@ -192,7 +192,8 @@ def pad_polygon(x: float, y: float, heading_deg: float,
     ])
 
 
-def _kerb_tactile_pad_props(kerb_ways: list, crossings: list[dict], pavement, center_ft: Point = None):
+def _kerb_tactile_pad_props(kerb_ways: list, crossings: list[dict], pavement,
+                             curbs: list | None = None):
     """One tactile pad per ATTACH NODE - a node shared by a crossing way and a
     tactile_paving kerb way - deduplicated by node id.
 
@@ -219,8 +220,6 @@ def _kerb_tactile_pad_props(kerb_ways: list, crossings: list[dict], pavement, ce
             continue
         kxs, kys = wgs84_to_state_plane.transform([c[0] for c in coords], [c[1] for c in coords])
         kerb_line = LineString(zip(kxs, kys))
-        if center_ft is not None and kerb_line.distance(center_ft) > PAD_NEAR_JUNCTION_FT:
-            continue  # a ramp at a neighbouring junction, pulled in by the context fetch radius
         for node_id in kerb.get("node_ids") or []:
             kerb_by_node[node_id] = {"kerb": kerb, "line": kerb_line}
 
@@ -245,6 +244,16 @@ def _kerb_tactile_pad_props(kerb_ways: list, crossings: list[dict], pavement, ce
                       f"Not drawn. Check this junction's widths and corner radii.")
                 continue
             heading, pos = placed
+            # IN THE DRAWING OR NOT - there is no "neighbouring junction". This was a 90 ft radius
+            # from the junction CENTRE, which can only answer "is this ramp ours" while a drawing
+            # is one junction; a window onto the network holds several, and measuring from its
+            # centre threw away real ramps at 231-415 ft as somebody else's when they were right
+            # there in the picture. A ramp marks a kerb, so the question is whether THIS drawing
+            # has a kerb for it to sit against - which is also exactly what `pad_off_the_kerb`
+            # asks, so emitter and invariant now agree by construction. The check still guards the
+            # pads `_tactile_pad_props` infers from a crossing, which are placed another way.
+            if curbs and min(curb.distance(Point(*pos)) for curb in curbs) > PAD_MAX_DISTANCE_FROM_CURB_FT:
+                continue
             props.append({
                 "type": "tactile_paving_pad", "position_ft": pos, "heading_deg": heading,
                 "pad_depth_ft": TACTILE_PAD_DEPTH_FT, "pad_width_ft": TACTILE_PAD_WIDTH_FT,
@@ -363,7 +372,8 @@ def _osm_crossing_hardware_props(state: DesignState, crossings: list[dict], node
 
     pavement = pavement if pavement is not None else _modelled_pavement(state)
 
-    kerb_pads, covered_ways = _kerb_tactile_pad_props(kerb_ways or [], crossings, pavement, center_ft)
+    kerb_pads, covered_ways = _kerb_tactile_pad_props(
+        kerb_ways or [], crossings, pavement, _all_curb_lines(state.legs, state.corner_fillets))
 
     # Which crossings already have their ramps placed from traced kerb geometry. Suppression
     # is PER CROSSING, not global: a junction can have some corners traced and some not, and

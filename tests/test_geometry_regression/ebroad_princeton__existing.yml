@@ -446,6 +446,7 @@ props:
 - pedestrian_pushbutton@420200.03,567147.42
 - pedestrian_signal_head@420158.27,567137.80
 - pedestrian_signal_head@420201.17,567146.98
+- tactile_paving_pad@420023.95,567146.31
 - tactile_paving_pad@420140.54,567179.30
 - tactile_paving_pad@420154.14,567140.28
 - tactile_paving_pad@420161.03,567136.87

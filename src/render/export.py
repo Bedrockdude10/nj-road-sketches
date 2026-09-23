@@ -215,7 +215,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                      buildings: list[dict] | None = None, crossings: list[dict] | None = None,
                      theme: dict | None = None, traffic_control: list[dict] | None = None,
                      street_furniture: list[dict] | None = None, pavement=None,
-                     kerb_ways: list[dict] | None = None) -> Path:
+                     kerb_ways: list[dict] | None = None, frame=None) -> Path:
     """Every OSM layer may be SUPPLIED rather than fetched, and a caller that supplies one wins.
 
     A junction knows its centre and a radius, so it fetches; a crop of the borough document has
@@ -271,7 +271,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
 
     # Resolved once and read twice - written into the JSON for the camera, and used to decide
     # which traced kerbs are in the picture at all. Two calls would be two chances to disagree.
-    frame = junction_frame(model)
+    frame = frame if frame is not None else junction_frame(model)
     # THE TRACED KERBS, resolved once for the same reason - written out as `kerbs` below. The
     # surveyed-crossing trim against these kerbs lives in SceneGeometry.surveyed_crossing_markings,
     # beside where the crossing's STYLE is resolved, so the two cannot use different kerbs.
@@ -299,7 +299,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     scene.assert_valid(props, paint, scenario=name)
     # What the surveyor recorded inside this frame that the drawing does not contain.
     # Printed rather than raised - see SceneGeometry.report_coverage.
-    scene.report_coverage(props, paint)
+    scene.report_coverage(props, paint, frame.radius_ft)
     paint_channels = paint_channels_local_m(
         paint, center_ft, lambda name: _leg_heading_deg(state.legs[name]))
 
