@@ -265,6 +265,38 @@ def test_the_worst_place_on_a_real_centerline_is_still_within_tolerance(turn_deg
         f"frame it was asked for, over the {worst_ft} ft budget")
 
 
+def test_a_line_that_hooks_back_stations_past_the_end_it_is_actually_past():
+    """The other case the property search will not reliably find, pinned by hand.
+
+    Hypothesis found this one and it survives only in .hypothesis/ - a clean checkout looks
+    green, because the shape needs a line whose TAIL comes back alongside its HEAD and a point
+    past the far end, and that conjunction is rare in the sampled space. It is pinned here for
+    the same reason the kink above is: the property is real and the search is not dependable.
+
+    The frame is a nearest-thing search, and the trap is deciding WHICH end a point is past
+    from that search's clamped result instead of searching the terminal rays themselves. This
+    point is 26 ft out along the far tangent, so it belongs at station 78.00 and offset 0. But
+    it is 25.77 ft from the OPENING segment against 26.00 ft from the closing one - it hooks
+    back far enough to be nearer the start - so the projection lands on the opening segment,
+    clamps to that segment's start at station 0, and the "past an end" correction then reads
+    station 0 as "behind the junction" and measures it against the START tangent: -12.40 ft.
+
+    A wrong END, not a wrong distance: nothing bounds the error, and the sign is wrong too, so
+    a point 26 ft beyond the leg reads as a point 12 ft behind the junction. Searched as rays
+    it is 0.00 ft off the far one and 22.59 ft off the near one, which is not a close call.
+    """
+    line = LineString([(0, 0), (22, 0), (27.403, 8.415), (23.242, 17.508), (13.342, 18.919)])
+    verts, _dirs, _lens, cumulative = _frame_arrays(line)
+    past_the_end = np.array([_extrapolated_point(line, verts, 1.5)])
+
+    stations, offsets = station_offset_many(line, past_the_end)
+
+    assert stations[0] == pytest.approx(1.5 * line.length, abs=EXACT_FT * line.length), (
+        f"a point 26 ft out along the far tangent stationed at {stations[0]:.2f} on a "
+        f"{cumulative[-1]:.2f} ft line - the near end's tangent, not the far end's")
+    assert offsets[0] == pytest.approx(0.0, abs=EXACT_FT * line.length)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
