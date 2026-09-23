@@ -4,6 +4,7 @@ docs/network-model.md step 4. These pin the DOCUMENT, not a render. The claim un
 an OSM-sourced corridor lands where the model-sourced one lands - what makes the two
 interchangeable and the per-site scenarios deletable.
 """
+import geopandas as gpd
 import numpy as np
 import pytest
 import shapely
@@ -187,3 +188,24 @@ def test_the_osm_axis_agrees_with_the_modelled_one(site_models: dict) -> None:
     assert compared[worst] <= MAX_DATUM_GAP_FT, (
         f"{worst}'s modelled axis sits a median {compared[worst]:.1f} ft off its OSM street. All: "
         + ", ".join(f"{n} {d:.1f} ft" for n, d in sorted(compared.items())))
+
+
+def test_the_network_exports_as_one_geojson(tmp_path) -> None:
+    """The 2D layer's output for an AREA: `scripts/export_network.py`, which a map can open and a
+    render can crop. Round-tripped rather than string-matched - a file that parses as GeoJSON but
+    loses its CRS reads as a town off the coast of Africa.
+    """
+    from scripts.export_network import WGS84_EPSG, export_network
+
+    path = export_network(AREA, tmp_path)
+    back = gpd.read_file(path)
+
+    assert back.crs.to_epsg() == WGS84_EPSG
+    assert set(back["kind"]) == {"street", "kerb", "crossing"}
+    assert (back.geometry.is_valid | back.geometry.is_empty).all()
+
+    streets = back[back["kind"] == "street"]
+    decided = dict(zip(streets["name"], streets["decision"]))
+    assert decided["Broad Street"] == "CorridorFacility"
+    assert decided["Princeton Avenue"] == "CorridorCalming"
+    assert streets[streets["name"] == "Broad Street"]["kerb_coverage"].iloc[0] > 0.5
