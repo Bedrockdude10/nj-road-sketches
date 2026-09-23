@@ -52,11 +52,18 @@ def test_a_site_in_no_area_is_refused_and_told_which_areas_exist():
 def test_a_window_straddling_an_edge_is_refused_not_half_served():
     """The failure this whole guard exists for: a context window partly outside its area
     returns the elements that happen to be inside and NOTHING for the rest, which looks
-    like geometry rather than like an error. A point just inside Hopewell's west edge with
-    a radius that reaches past it must raise, not quietly return half a junction."""
-    west_edge = Point(HOPEWELL_BBOX[0] + 0.0002, 40.3900)
+    like geometry rather than like an error. A point just inside an area's edge with a
+    radius that reaches past it must raise, not quietly return half a junction.
+
+    The NORTH edge, and not the west one this used to use. Hopewell now has a second area
+    for the W Broad corridor west of Lanning, and it overlaps the first - so a point inside
+    Hopewell's west edge is genuinely served by that neighbour, and asserting it is refused
+    would be asserting the areas do not overlap, which is a different claim and a false one.
+    Nothing reaches north of 40.3970, so that edge still tests what this is for.
+    """
+    north_edge = Point(-74.7614, HOPEWELL_BBOX[3] - 0.0002)
     with pytest.raises(SiteOutsideSnapshotError):
-        assert_within_snapshot(west_edge, 130)
+        assert_within_snapshot(north_edge, 130)
 
 
 def test_a_site_well_inside_an_area_passes():

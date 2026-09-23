@@ -24,3 +24,11 @@ pennington_borough: [-74.8120, 40.3180, -74.7830, 40.3420]   # 0.000696 sq deg
 # one-way pair 465 ft apart, so the SB carriageway's junctions are the obvious next sites and
 # an area that already contains them needs no edit - which this file forbids.
 lavallette_borough: [-74.0780, 39.9640, -74.0640, 39.9840]   # 0.000280 sq deg
+
+# W BROAD ST FROM LANNING AVE TO THE BOROUGH LINE. A separate area and not a wider
+# hopewell_borough, which this file forbids: the borough line on W Broad sits at 40.38274, SOUTH
+# of hopewell_borough's own south edge (40.3830), so the one junction that can show where the
+# corridor ends has never been inside the town's snapshot. The SW approach is 2,307 ft long -
+# the whole untraced remainder of W Broad - so this box is sized on that leg rather than on the
+# 250 m a compact junction needs.
+hopewell_wbroad_west: [-74.7790, 40.3780, -74.7570, 40.3940]  # 0.000352 sq deg

@@ -136,6 +136,7 @@ src/                       General-purpose library - NO data specific to any one
       bikeways/            Bike-lane cross-sections, the treatments that place them, their paint
         sections.py        What a bikeway IS in cross-section, and the figures that size one
         fit.py             Whether a section fits this kerb, and what it leaves for the rest
+        observed.py        The bike lane OSM says is ALREADY painted here, read off cycleway:*
         place.py           The treatments that place a bikeway, and all the paint one puts down
         divider.py         Where the travel-lane divider sits once a two-way lane has a kerbside
         bollards.py        The flex posts that make a painted lane a protected one
