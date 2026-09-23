@@ -196,7 +196,11 @@ def carriageway_geometry_ft(crossing: SurveyedCrossing, kerb_lines=None) -> Line
     # the road - keep it whole rather than trimming to a point.
     if len(hits) < 2:
         return line
-    return substring(line, min(hits), max(hits)) or line
+    # ...and two hits at the SAME station are one crossing counted twice - a way that runs along a
+    # kerb, or clips its end - which substring answers with a Point. Same policy as above: the
+    # crossing is real and only the trim is unusable, so overstate its length rather than drop it.
+    trimmed = substring(line, min(hits), max(hits))
+    return trimmed if trimmed.geom_type == "LineString" and not trimmed.is_empty else line
 
 
 def crossing_style_in(state: "DesignState", crossing: SurveyedCrossing) -> str | None:

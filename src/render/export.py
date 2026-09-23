@@ -135,6 +135,82 @@ def _split_near_far(polygons: list[Polygon], center_ft: Point, near_radius_ft: f
     return near_polys, far_polys
 
 
+def paint_channels_local_m(paint, center_ft, leg_heading_deg=None) -> dict[str, list]:
+    """Every marking channel blender_paint.py reads, from PaintPieces alone.
+
+    THE ONE SERIALIZER, and the reason a slice of the borough document renders the same paint a
+    site does: it needs no model, no DesignState and no junction - only the pieces, and a centre
+    to measure local metres from. `leg_heading_deg` resolves a piece's leg to a bearing so its
+    hatching lies along the street; a piece with no leg (a corridor's, which is stationed on a
+    road rather than an approach) takes HATCH_ANGLE_DEG, as it already did.
+    """
+
+    # Paint-only / no-curb-change proposal treatments - lane-narrowing buffers, marked
+    # parking, corner hatching, aprons. All of it is built by src/geometry/paint/, which
+    # the plan view also draws from and src/checks.py inspects, so the three cannot disagree
+    # about where a marking goes. This function's job is only to sort the pieces into the
+    # lists blender_paint.py expects and convert them to local meters.
+    def _line(piece):
+        return ring_to_local_m(piece.geometry.coords, center_ft)
+
+    # Only the OPENING rims: the hatching runs into a crossing's diagonal, which is what gives a
+    # zone its clean end there, and stops short of a driveway's fillet. See paint.RimCause.
+    rims_by_side = {}
+    for piece in paint:
+        if piece.rim is RimCause.OPENING:
+            rims_by_side.setdefault((piece.leg, piece.side), []).append(piece.geometry)
+
+    def _hatch(piece):
+        """A fill polygon becomes the diagonal strokes that actually get painted.
+
+        Every piece is phased off the intersection centre, so the straight run, the taper,
+        the daylight zone and the offcuts left by clipping around a crossing all land on one
+        continuous family of lines. Phased off each polygon's own extent instead, the
+        strokes stepped sideways at every seam and read as sheared.
+
+        THE HATCHING KEEPS HALF A SPACING OFF A RIM, so the line that closes the zone reads as its
+        edge and not as one more stroke. It has to, because a driveway fillet's chord is at the
+        hatch angle by construction - the radius is the strip's depth, so both are 45 degrees - and
+        a stroke running nearly along the sweep renders as a fork. Same idea as
+        PAINT_TO_CROSSWALK_GAP_FT one layer up.
+
+        WHOLE STROKES ONLY: a stroke either clears the sweep or is not painted. Cutting the gap out
+        of the polygon before hatching instead truncates the stroke, leaving its far half as a
+        stray mark against the kerb - worse than the fork.
+        """
+        angle_deg = (leg_heading_deg(piece.leg) + 45 if piece.leg and leg_heading_deg
+                      else HATCH_ANGLE_DEG)
+        strokes = hatch_lines_ft(piece.geometry, spacing_ft=PAINT_HATCH_SPACING_FT,
+                                  angle_deg=angle_deg,
+                                  phase_origin=(center_ft.x, center_ft.y))
+        rims = rims_by_side.get((piece.leg, piece.side))
+        if rims:
+            keep_off = unary_union(rims).buffer(PAINT_HATCH_SPACING_FT / 2)
+            strokes = [line for line in strokes if not line.intersects(keep_off)]
+        return [[pt_to_local_m(x, y, center_ft) for x, y in line.coords] for line in strokes]
+
+    def _surface(piece):
+        return ring_to_local_m(piece.geometry.exterior.coords, center_ft)
+
+    # One serializer per role, so a new marking is drawn correctly in 3D the moment it is
+    # declared, and no call site can route a sampled polyline through the straight-chord builder
+    # (0.7 ft of deviation on Broad St's daylight zone) by naming the wrong helper.
+    BY_ROLE = {Role.LINE: lambda piece: [_line(piece)],
+               Role.FILL: _hatch,
+               Role.SURFACE: lambda piece: [_surface(piece)],
+               # A coloured stretch of carriageway travels as its ring, like a surface - it has
+               # no strokes to generate. The two roles serialize the same way and are still
+               # different things: only a SURFACE is built ground the markings are cut around.
+               Role.COLOUR: lambda piece: [_surface(piece)]}
+
+    def channel_data(channel):
+        serialize = BY_ROLE[channel.role]
+        return [item for piece in in_channel(paint, channel) for item in serialize(piece)]
+
+    paint_channels = {channel.key: channel_data(channel) for channel in CHANNELS}
+    return paint_channels
+
+
 def export_scenario(model: IntersectionModel, state: DesignState, name: str, out_path: Path,
                      buildings: list[dict] | None = None, crossings: list[dict] | None = None,
                      theme: dict | None = None, traffic_control: list[dict] | None = None,
@@ -213,70 +289,8 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # What the surveyor recorded inside this frame that the drawing does not contain.
     # Printed rather than raised - see SceneGeometry.report_coverage.
     scene.report_coverage(props, paint)
-
-    # Paint-only / no-curb-change proposal treatments - lane-narrowing buffers, marked
-    # parking, corner hatching, aprons. All of it is built by src/geometry/paint/, which
-    # the plan view also draws from and src/checks.py inspects, so the three cannot disagree
-    # about where a marking goes. This function's job is only to sort the pieces into the
-    # lists blender_paint.py expects and convert them to local meters.
-    def _line(piece):
-        return ring_to_local_m(piece.geometry.coords, center_ft)
-
-    # Only the OPENING rims: the hatching runs into a crossing's diagonal, which is what gives a
-    # zone its clean end there, and stops short of a driveway's fillet. See paint.RimCause.
-    rims_by_side = {}
-    for piece in paint:
-        if piece.rim is RimCause.OPENING:
-            rims_by_side.setdefault((piece.leg, piece.side), []).append(piece.geometry)
-
-    def _hatch(piece):
-        """A fill polygon becomes the diagonal strokes that actually get painted.
-
-        Every piece is phased off the intersection centre, so the straight run, the taper,
-        the daylight zone and the offcuts left by clipping around a crossing all land on one
-        continuous family of lines. Phased off each polygon's own extent instead, the
-        strokes stepped sideways at every seam and read as sheared.
-
-        THE HATCHING KEEPS HALF A SPACING OFF A RIM, so the line that closes the zone reads as its
-        edge and not as one more stroke. It has to, because a driveway fillet's chord is at the
-        hatch angle by construction - the radius is the strip's depth, so both are 45 degrees - and
-        a stroke running nearly along the sweep renders as a fork. Same idea as
-        PAINT_TO_CROSSWALK_GAP_FT one layer up.
-
-        WHOLE STROKES ONLY: a stroke either clears the sweep or is not painted. Cutting the gap out
-        of the polygon before hatching instead truncates the stroke, leaving its far half as a
-        stray mark against the kerb - worse than the fork.
-        """
-        angle_deg = (_leg_heading_deg(state.legs[piece.leg]) + 45 if piece.leg
-                      else HATCH_ANGLE_DEG)
-        strokes = hatch_lines_ft(piece.geometry, spacing_ft=PAINT_HATCH_SPACING_FT,
-                                  angle_deg=angle_deg,
-                                  phase_origin=(center_ft.x, center_ft.y))
-        rims = rims_by_side.get((piece.leg, piece.side))
-        if rims:
-            keep_off = unary_union(rims).buffer(PAINT_HATCH_SPACING_FT / 2)
-            strokes = [line for line in strokes if not line.intersects(keep_off)]
-        return [[pt_to_local_m(x, y, center_ft) for x, y in line.coords] for line in strokes]
-
-    def _surface(piece):
-        return ring_to_local_m(piece.geometry.exterior.coords, center_ft)
-
-    # One serializer per role, so a new marking is drawn correctly in 3D the moment it is
-    # declared, and no call site can route a sampled polyline through the straight-chord builder
-    # (0.7 ft of deviation on Broad St's daylight zone) by naming the wrong helper.
-    BY_ROLE = {Role.LINE: lambda piece: [_line(piece)],
-               Role.FILL: _hatch,
-               Role.SURFACE: lambda piece: [_surface(piece)],
-               # A coloured stretch of carriageway travels as its ring, like a surface - it has
-               # no strokes to generate. The two roles serialize the same way and are still
-               # different things: only a SURFACE is built ground the markings are cut around.
-               Role.COLOUR: lambda piece: [_surface(piece)]}
-
-    def channel_data(channel):
-        serialize = BY_ROLE[channel.role]
-        return [item for piece in in_channel(paint, channel) for item in serialize(piece)]
-
-    paint_channels = {channel.key: channel_data(channel) for channel in CHANNELS}
+    paint_channels = paint_channels_local_m(
+        paint, center_ft, lambda name: _leg_heading_deg(state.legs[name]))
 
     # HOW TALL EACH BUILDING IS, from whoever recorded it. OSM has outlines here but effectively
     # no heights (0 of 1150 ways carry `height`, 7 carry `building:levels`), so the assessor's

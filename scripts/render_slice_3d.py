@@ -26,7 +26,11 @@ from shapely.geometry import Point
 
 from scripts.render_slice import (NETWORK_DIR, OUT_DIR, load_network, slice_around,
                                   slice_for_street, _center_ft)
+from src.geometry.markings import KINDS
+from src.geometry.paint import PaintPiece
 from src.render.coords import pt_to_local_m, ring_to_local_m
+from src.render.export import SIDEWALK_WIDTH_FT, paint_channels_local_m
+from src.render.mesh_utils import build_decimated_building_mesh
 
 FT_TO_M = 0.3048
 
@@ -34,17 +38,6 @@ FT_TO_M = 0.3048
 #: document came off a `barrier=kerb` way, and drawing those flush would delete the one feature
 #: a 3D still exists to show. src/render/export.py:KERB_HEIGHT_M is the tagged version.
 UNTAGGED_KERB_HEIGHT_M = 0.20
-
-#: Which `kind` in the document feeds which channel in the Blender contract. Polygons become
-#: rings, lines become polylines; `bollard` and `pavement` are shaped differently and handled
-#: in `scene_document`. A kind absent here is deliberately not in the 3D scene - `street` is the
-#: centreline (an abstraction, not a thing on the ground) and `crossing` is a bare point with no
-#: width or skew to draw, so drawing either would be an invention.
-CHANNEL_OF: dict[str, str] = {
-    "bikeway":        "bike_lane_surface_polygons",
-    "bikeway_buffer": "bike_lane_uncoloured_surface_polygons",
-    "edge_line":      "bike_lane_edge_lines",
-}
 
 
 def _rings(geom) -> list[list]:
@@ -79,9 +72,18 @@ def scene_document(features: gpd.GeoDataFrame, name: str) -> dict:
                  # its skew - and `paved_surfaces` is driveways and parking aprons, which are a
                  # parcel fact this document does not carry. The CARRIAGEWAY is `pavement_near`.
                  "surveyed_crossings": [], "paved_surfaces": [],
-                 "pavement_near": [], "kerbs": [], "props": []}
-    for channel in CHANNEL_OF.values():
-        doc[channel] = []
+                 "pavement_near": [], "kerbs": [], "props": [],
+                 "buildings": [], "sidewalks_near": []}
+
+    # ONE entry holding every bar in the slice, not one per crossing way. blender_scene draws
+    # the bars and the lines and reads nothing else off the grouping, and the document files a
+    # bar under the crossing it came from only as a `markings` tag - so regrouping here would be
+    # rebuilding a structure to hand back something that does not look at it.
+    crossing: dict = {"markings": "surveyed", "distance_m": 0.0, "bars": [], "lines": []}
+    # Rebuilt as real PaintPieces and handed to the EXPORTER'S OWN serializer, rather than
+    # mapped to channels here. A second table would be a second answer to "which channel draws
+    # this", and the channel decides the colour and the builder - see SKILLS.md section 3.
+    pieces: list[PaintPiece] = []
 
     for row in features.itertuples():
         kind, geom = row.kind, row.geometry
@@ -96,9 +98,28 @@ def scene_document(features: gpd.GeoDataFrame, name: str) -> dict:
             doc["props"].append({"type": "bollard", "heading_deg": 0.0, "drawn_by_paint": True,
                                  "position_ft": [geom.x, geom.y],
                                  "position_m": pt_to_local_m(geom.x, geom.y, center_ft)})
-        elif (channel := CHANNEL_OF.get(kind)) is not None:
-            shapes = _rings(geom) if channel.endswith("_polygons") else _lines(geom)
-            doc[channel] += [ring_to_local_m(s, center_ft) for s in shapes]
+        elif kind == "building":
+            mesh = build_decimated_building_mesh(geom, row.height_m / FT_TO_M)
+            if mesh is not None:
+                vertices, faces = mesh
+                doc["buildings"].append(
+                    {"mesh": True, "faces": faces, "height_source": "osm",
+                     "vertices_m": [[*pt_to_local_m(x, y, center_ft)[:2], z * FT_TO_M]
+                                    for x, y, z in vertices]})
+        elif kind == "crossing_bar":
+            crossing["bars"] += [ring_to_local_m(r, center_ft) for r in _rings(geom)]
+        elif kind == "crossing_line":
+            crossing["lines"] += [ring_to_local_m(c, center_ft) for c in _lines(geom)]
+        elif kind == "sidewalk":
+            doc["sidewalks_near"] += [ring_to_local_m(r, center_ft)
+                                      for r in _rings(geom.buffer(SIDEWALK_WIDTH_FT / 2))]
+        # A str and not merely present: geopandas fills the column with NaN on every row that
+        # carries no paint, so `is not None` lets a street centreline through as a marking.
+        elif isinstance(paint_kind := getattr(row, "paint_kind", None), str):
+            pieces.append(PaintPiece(kind=KINDS[paint_kind], geometry=geom))
+    doc.update(paint_channels_local_m(pieces, center_ft))
+    if crossing["bars"] or crossing["lines"]:
+        doc["surveyed_crossings"].append(crossing)
     return doc
 
 

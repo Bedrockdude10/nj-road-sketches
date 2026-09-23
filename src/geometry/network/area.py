@@ -21,7 +21,8 @@ from src.geometry.model import station_offset_many
 from src.geometry.network.corridor import Corridor, _street_name
 from src.geometry.network.kerb import KerbRun, _traced_kerb_runs
 from src.render.coords import wgs84_to_state_plane
-from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm
+from src.sources.osm_context import (DEFAULT_BUILDING_HEIGHT_M, METERS_PER_LEVEL,
+                                     SNAPSHOT_AREAS, fetch_borough_osm)
 
 Bbox = tuple[float, float, float, float]
 NodeXY = dict[int, tuple[float, float]]
@@ -190,3 +191,62 @@ def corridor_pavement(corridor: Corridor) -> Polygon | None:
     surface, _, _ = roadway_surface(corridor.centerline, stations, offsets,
                                     corridor.nominal_width_ft)
     return surface
+
+
+def _closed_ring(way: dict, xy: NodeXY) -> Polygon | None:
+    line = _way_line(way, xy)
+    return Polygon(line.coords).buffer(0) if line is not None and len(line.coords) >= 4 else None
+
+
+def _building_height_m(tags: dict) -> float:
+    """OSM's own answer where it has one, else the flat default. NOT the assessor's, which is a
+    per-parcel join a whole municipality does not justify - src/sources/assessor.py owns that."""
+    try:
+        return float(str(tags["height"]).split()[0])
+    except (KeyError, ValueError, IndexError):
+        pass
+    try:
+        return float(tags["building:levels"]) * METERS_PER_LEVEL
+    except (KeyError, ValueError):
+        return DEFAULT_BUILDING_HEIGHT_M
+
+
+def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -> dict[str, list]:
+    """The context layers - buildings, sidewalks, crossings - for a whole municipality, in feet.
+
+    Read from the SAME snapshot `area_corridors` reads, not through `fetch_buildings` and
+    friends: those take a centre and a radius, and the largest radius that fits inside the
+    declared bbox is smaller than the borough, so the corners would lose their context. An area
+    has no centre to measure from, which is the same reason `_area_kerb_ways` exists.
+
+    Buildings are (polygon, height_m); crossings are SurveyedCrossings, so the markings they get
+    are the surveyor's - `crossing_bars_ft` paints nothing on a crossing recorded as unmarked.
+    """
+    from src.geometry.surveyed import SurveyedCrossing, _markings_from_tags
+
+    bbox: Bbox = SNAPSHOT_AREAS[area]
+    snapshot = snapshot if snapshot is not None else fetch_borough_osm(bbox=bbox)
+    xy = _projected_nodes(snapshot["nodes"])
+    found = municipal_boundary_ft(Point(*_snapshot_center(bbox)))
+    if found is None:
+        raise RuntimeError(f"no admin_level=8 boundary at the centre of {area!r}")
+    _, boundary = found
+
+    out: dict[str, list] = {"buildings": [], "sidewalks": [], "crossings": []}
+    for way in snapshot["ways"]:
+        tags = way.get("tags") or {}
+        if "building" in tags:
+            ring = _closed_ring(way, xy)
+            if ring is not None and not ring.is_empty and ring.intersects(boundary):
+                out["buildings"].append((ring, _building_height_m(tags)))
+        elif tags.get("footway") == "sidewalk":
+            line = _way_line(way, xy)
+            if line is not None and line.intersects(boundary):
+                out["sidewalks"].append(line)
+        elif tags.get("footway") == "crossing":
+            line = _way_line(way, xy)
+            if line is not None and line.intersects(boundary):
+                out["crossings"].append(SurveyedCrossing(
+                    geometry=line, markings=_markings_from_tags(tags), tags=tags,
+                    leg=None, distance_ft=0.0))
+    return out
