@@ -18,6 +18,7 @@ from shapely.ops import linemerge
 from src.geometry.context_roads import is_carriageway
 from src.geometry.intersection.municipality import municipal_boundary_ft
 from src.geometry.network.corridor import Corridor, _street_name
+from src.geometry.network.kerb import KerbRun, _traced_kerb_runs
 from src.render.coords import wgs84_to_state_plane
 from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm
 
@@ -89,6 +90,32 @@ def _snapshot_center(bbox: Bbox) -> tuple[float, float]:
     return (west + east) / 2.0, (south + north) / 2.0
 
 
+def _area_kerb_ways(snapshot: dict, xy: NodeXY) -> dict[int, tuple[LineString, dict]]:
+    """{way id: (line in feet, tags)} for every traced kerb in the snapshot.
+
+    Read straight from the snapshot rather than per-junction at a radius, which is what
+    `_corridor_kerb_ways` must do. That radius is also a failure mode: ebroad_elm's 400 m window
+    reaches past the borough bbox and raises SiteOutsideSnapshotError, so the site cannot take
+    part in a corridor at all. An area has no centre to measure from, so the question disappears.
+    """
+    return {way["id"]: (line, way.get("tags") or {})
+            for way in snapshot["ways"]
+            if (way.get("tags") or {}).get("barrier") == "kerb"
+            and (line := _way_line(way, xy)) is not None}
+
+
+def _kerb_runs_for(centerline: LineString, cross_street_ft: tuple[float, ...],
+                   kerb_ways: dict[int, tuple[LineString, dict]]) -> tuple[KerbRun, ...]:
+    """This corridor's traced kerb, as one run per unbroken stretch.
+
+    `_traced_kerb_runs` already takes a centreline, ways and node stations - no model - so the
+    corridor's own crossings serve as the nodes whose corner returns suspend the heading test.
+    Every run is KERB_FROM_TRACING: there is no modelled junction here to contribute the other
+    kind, and saying so is the point of the provenance field.
+    """
+    return tuple(_traced_kerb_runs(centerline, kerb_ways, tuple(cross_street_ft)))
+
+
 def area_corridors(area: str = "hopewell_borough",
                    snapshot: dict | None = None) -> list[Corridor]:
     """Every named street inside one municipality's boundary, as a Corridor each.
@@ -120,12 +147,21 @@ def area_corridors(area: str = "hopewell_borough",
             if nid in xy:
                 by_node.setdefault(nid, set()).add(name)
 
+    kerb_ways = _area_kerb_ways(snapshot, xy)
+
     # Clipped to the boundary so `municipalities` is true of every foot: unclipped, Carter Rd put
     # 6,744 ft of Hopewell Township into a Borough document, and a route decision is keyed on town.
-    return [Corridor(name=name, centerline=piece, junctions=(), kerb_runs=(),
-                     municipalities=(boundary_name,),
-                     cross_street_ft=_cross_street_ft(piece, name, by_node, xy))
-            for name, lines in sorted(lines_by_name.items())
-            for run in _connected_runs(lines)
-            for piece in _pieces_of(run.intersection(boundary))
-            if piece.length >= MIN_CORRIDOR_FT]
+    pieces = [(name, piece)
+              for name, lines in sorted(lines_by_name.items())
+              for run in _connected_runs(lines)
+              for piece in _pieces_of(run.intersection(boundary))
+              if piece.length >= MIN_CORRIDOR_FT]
+
+    corridors = []
+    for name, piece in pieces:
+        crossings = _cross_street_ft(piece, name, by_node, xy)
+        corridors.append(Corridor(name=name, centerline=piece, junctions=(),
+                                  kerb_runs=_kerb_runs_for(piece, crossings, kerb_ways),
+                                  municipalities=(boundary_name,),
+                                  cross_street_ft=crossings))
+    return corridors

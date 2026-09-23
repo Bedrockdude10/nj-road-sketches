@@ -73,6 +73,59 @@ def test_every_crossing_lands_on_the_street_it_is_filed_under(borough: list[Corr
             f"{corridor.name} files a crossing off the end of its {corridor.length_ft:,.0f} ft")
 
 
+def test_kerb_runs_stay_inside_the_corridor_they_are_filed_on(borough: list[Corridor]) -> None:
+    for corridor in borough:
+        for run in corridor.kerb_runs:
+            assert -1.0 <= run.start_ft <= run.end_ft <= corridor.length_ft + 1.0, (
+                f"{corridor.name} has a {run.side} kerb run at {run.start_ft:,.0f}-"
+                f"{run.end_ft:,.0f} ft, off its own {corridor.length_ft:,.0f} ft")
+            assert run.is_traced, "an area corridor has no modelled junction to source kerb from"
+
+
+def test_the_document_finds_the_kerb_that_is_actually_traced(borough: list[Corridor]) -> None:
+    """Coverage is a LENGTH, not a run count. 11 of 75 runs are under 10 ft - corner-return
+    fragments the heading test lets through near a crossing - and they carry 86 ft between them,
+    while 35 runs over 100 ft carry 12,771 of the 14,515 ft. No length floor, because
+    `_traced_kerb_runs` has none and a second rule here would make the two builders disagree.
+    """
+    by_name = {corridor.name: corridor for corridor in borough}
+    broad = by_name["Broad Street"]
+    traced_ft = sum(run.length_ft for run in broad.kerb_runs)
+
+    assert traced_ft / (2 * broad.length_ft) > 0.5, (
+        f"Broad St is traced end to end in OSM, but the document found {traced_ft:,.0f} ft of "
+        f"kerb against {2 * broad.length_ft:,.0f} ft of kerbline")
+
+
+@needs_source_data
+def test_the_osm_kerb_agrees_with_the_modelled_kerb(site_models: dict) -> None:
+    """Both builders must find the same surveyor's kerb - per side, since a street's two kerbs are
+    traced independently and a swap would cancel in the total.
+
+    Compared as TOTALS: the two use different station origins, so a span-by-span diff would
+    measure the offset between the frames. Measured: Broad St 4,229/4,294 ft left and
+    4,356/4,575 right, Columbia 295/295 and 248/232, Princeton 1,189/1,191 and 1,034/1,023. The
+    OSM side runs slightly longer because it covers the whole in-borough street.
+    """
+    modelled = {c.name: c for c in corridors_from_models(site_models)}
+    osm: dict[str, list[Corridor]] = {}
+    for corridor in area_corridors(AREA):
+        osm.setdefault(corridor.name, []).append(corridor)
+
+    def traced_ft(runs, side: str) -> float:
+        return sum(run.length_ft for run in runs if run.side == side and run.is_traced)
+
+    for name in sorted(set(modelled) & set(osm)):
+        for side in ("left", "right"):
+            want = traced_ft(modelled[name].kerb_runs, side)
+            got = sum(traced_ft(c.kerb_runs, side) for c in osm[name])
+            if want < MIN_CORRIDOR_FT:
+                continue
+            assert got == pytest.approx(want, rel=0.15), (
+                f"{name} {side}: the document finds {got:,.0f} ft of traced kerb where the "
+                f"modelled corridor finds {want:,.0f} ft")
+
+
 @needs_source_data
 def test_the_osm_axis_agrees_with_the_modelled_one(site_models: dict) -> None:
     """THE GATE. Deviation of the MODELLED axis from the OSM line - the modelled corridor is the
