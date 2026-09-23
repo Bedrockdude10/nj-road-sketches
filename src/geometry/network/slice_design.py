@@ -61,8 +61,17 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
     streets = features[features["kind"] == "street"].rename(columns={"name": "name_"})
     minx, miny, maxx, maxy = features.total_bounds
     center_ft = Point((minx + maxx) / 2, (miny + maxy) / 2)
-    paved = features[features["kind"] == "pavement"]
-    legs = _legs_of(streets, dict(zip(paved["name"], paved["width_ft"])))
+    # THE TRACED WIDTH, not OSM's `width` tag. Both are in the document and they disagree -
+    # SKILLS.md section 2, the two datums - and here the choice is forced: the asphalt drawn under a slice
+    # IS corridor_pavement's, which follows the traced kerb, so a prop placed off the nominal
+    # half-width lands inside its own street's pavement and furniture_in_roadway fires. One kerb
+    # for the drawing and the placement, which is the whole of that invariant's complaint.
+    # `name_`, because itertuples gives every row a `.name` of its own - the index's.
+    paved = features[features["kind"] == "pavement"].rename(columns={"name": "name_"})
+    traced = {row.name_: row.geometry.area / length
+              for row in paved.itertuples()
+              if (length := streets[streets["name_"] == row.name_].geometry.length.sum()) > 0}
+    legs = _legs_of(streets, traced)
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
     model = IntersectionModel(
