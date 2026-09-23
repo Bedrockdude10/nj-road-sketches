@@ -122,6 +122,7 @@ src/                       General-purpose library - NO data specific to any one
       kerb_sources.py      Traced kerb out of OSM and into state-plane feet
       osm_roads.py         Tying our legs to NJDOT SRI centrelines and OSM ways
       paved.py             Driveways, parking aisles and lots
+      municipality.py      Where a leg leaves town, which is where a corridor ends
     model/                 The measurement primitives
       crs.py               Projections, and the operations only valid in one
       leg_frame.py         (station along the centreline, lateral offset from it)
@@ -141,6 +142,7 @@ src/                       General-purpose library - NO data specific to any one
         divider.py         Where the travel-lane divider sits once a two-way lane has a kerbside
         bollards.py        The flex posts that make a painted lane a protected one
         symbols.py         The bike symbol and the contraflow dash: how a lane says what it is
+        terminus.py        How a bikeway ENDS: the turn box, the sharrows and the signs
         through_junction.py  Carrying a lane across the junction: the crossbike, and the gap
       crossings.py         Refuge islands, raised crossings, crosswalk markings, crosswalk shifts
       parking.py           Marked stalls, their buffer, and the borough's parking tags
