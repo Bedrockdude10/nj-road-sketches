@@ -14,7 +14,7 @@ import numpy as np
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 from src.geometry.model import (band_from_offsets, corner_apron_annulus, corner_overlay_polygon,
-                                curb_offsets_at_stations, paint_stations, point_at,
+                                curb_offsets_at_stations, paint_stations, point_at_many,
                                 station_offset_many)
 from src.render.crosswalks import crosswalk_reach_on_leg_side_ft
 from src.geometry.paint.pieces import LANE_EDGE_LINE_WIDTH_FT
@@ -88,9 +88,9 @@ def _station_band(leg, start_ft: float, end_ft: float):
         return None
     reach_ft = abs(leg.curb_to_curb_ft or 0.0) * DASH_BAND_REACH + DASH_BAND_MARGIN_FT
     stations = np.linspace(lo, hi, max(int((hi - lo) / DASH_BAND_STEP_FT) + 2, 2))
-    left = [point_at(leg.centerline, float(s), reach_ft) for s in stations]
-    right = [point_at(leg.centerline, float(s), -reach_ft) for s in stations]
-    band = Polygon([*left, *reversed(right)])
+    left = point_at_many(leg.centerline, stations, np.full(len(stations), reach_ft))
+    right = point_at_many(leg.centerline, stations, np.full(len(stations), -reach_ft))
+    band = Polygon([*left, *right[::-1]])
     if not band.is_valid:
         band = band.buffer(0)
     return None if band.is_empty else band
@@ -186,7 +186,7 @@ def _inside_the_traced_kerb(leg, side: str, near):
     opening rim stand 0.4 ft past the traced kerb on louellen_st_west at 2.5x and
     checks.PaintInsideTheTracedKerb refuse the export.
     """
-    from src.geometry.model import curb_edge_by_station, point_at
+    from src.geometry.model import curb_edge_by_station, point_at_many
 
     coords = [xy for part in getattr(near, "geoms", [near])
               if not part.is_empty and part.geom_type in ("LineString", "Polygon")
@@ -202,8 +202,8 @@ def _inside_the_traced_kerb(leg, side: str, near):
     outer = curb_edge_by_station(leg, side, lo, hi)
     if outer is None:
         return None
-    inner = [point_at(leg.centerline, float(station), 0.0) for station in grid]
-    band = Polygon(list(outer) + list(reversed(inner)))
+    inner = point_at_many(leg.centerline, grid, np.zeros(len(grid)))
+    band = Polygon(list(outer) + list(inner[::-1]))
     if not band.is_valid:
         band = band.buffer(0)
     return None if band.is_empty else band

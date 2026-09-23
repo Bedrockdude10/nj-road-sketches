@@ -4,23 +4,23 @@ Run by hand the loop is eight commands - export the before side, export the afte
 them, run the suite - and, worse, eight judgements, the last of which is always "which of
 these failures were already here?". This runs all of it at once and prints one verdict.
 
-    scripts/verify.py --no-tests            # THE LOOP: six sites, both sides, ~22 s
-    scripts/verify.py --no-tests --site broad_st_greenwood    # one junction, ~6 s
-    scripts/verify.py --site X -k traced_curbs   # ...and the tests that could see it, ~20 s
-    scripts/verify.py                       # everything: ~2.5 min (suite at -n auto, ~70 s)
-    scripts/verify.py --jobs 0              # ...with the suite in one process: ~5 min
+    scripts/verify.py --no-tests            # THE LOOP: every site, both sides
+    scripts/verify.py --no-tests --site broad_st_greenwood    # one junction
+    scripts/verify.py --site X -k traced_curbs   # ...and the tests that could see it
+    scripts/verify.py                       # everything (suite at -n auto)
+    scripts/verify.py --jobs 0              # ...with the suite in one process
     scripts/verify.py --base main           # against another revision
     scripts/verify.py --record              # re-record the known-failure baseline
 
 ONE STEP AT A TIME, AND WHY. Every step here is a subprocess, and running the exports beside
-the suite overlapped nicely on paper: 72 s against 76 s serial. It is off anyway. This is a
+the suite overlapped nicely on paper, for a few seconds' saving. It is off anyway. This is a
 36 GB machine with Blender, an editor and more than one agent session on it, and the operator
 was watching it hit OOM while the per-worker measurements (0.21 GB an export worker, 0.27 GB a
-pytest worker) said there was room to spare. A four-second saving is not worth a run that
+pytest worker) said there was room to spare. A few seconds is not worth a run that
 cannot be trusted to finish, so the steps never overlap and the exports stay serial.
 
-THE SUITE ITSELF RUNS -n auto, as ./scripts/test.sh does. That is ~70 s against ~5 min in one
-process, which is not a four-second saving, and twelve workers at 0.27 GB are not what was
+THE SUITE ITSELF RUNS -n auto, as ./scripts/test.sh does. That is several times faster than one
+process, which is not a few seconds' saving, and twelve workers at 0.27 GB are not what was
 running the box out of memory. `--jobs 0` takes it back to one process when the machine is
 already loaded.
 
@@ -238,9 +238,8 @@ def main() -> int:
                         help="limit the EXPORT comparison to this site (repeatable)")
     parser.add_argument("-k", dest="k", help="pass through to pytest, to narrow the suite")
     parser.add_argument("--jobs", default="auto",
-                        help="pytest -n value (default auto: ~70 s across 12 workers at a "
-                             "measured 0.27 GB each, against ~5 min in one process). Pass 0 "
-                             "when the machine is already loaded.")
+                        help="pytest -n value (default auto, at a measured 0.27 GB a worker). "
+                             "Pass 0 when the machine is already loaded.")
     parser.add_argument("--no-tests", action="store_true", help="exports only")
     parser.add_argument("--no-exports", action="store_true", help="suite only")
     parser.add_argument("--record", action="store_true",
@@ -252,7 +251,7 @@ def main() -> int:
     short = ""
 
     # One at a time, cheapest first - see the module docstring. Exports before tests because
-    # they are 17 s against minutes and they run export_scenario, so a change that breaks an
+    # they are the cheaper step and they run export_scenario, so a change that breaks an
     # invariant outright shows up here before you have waited for the suite to say so.
     export_results = None
     if not args.no_exports:
@@ -340,7 +339,7 @@ def main() -> int:
               "above\n  and confirm each one is a number you meant to move.")
     elif export_results:
         print("  no export moved: no marking, prop or note changed anywhere.")
-    hint = "  (--no-tests is the ~22 s version of this)" if not (
+    hint = "  (--no-tests is the quick version of this)" if not (
         args.no_tests or args.no_exports or args.k) else ""
     print(f"  {time.perf_counter() - started:.0f}s{hint}")
     return 1 if new_failures else 0

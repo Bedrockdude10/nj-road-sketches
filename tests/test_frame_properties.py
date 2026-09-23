@@ -45,7 +45,8 @@ from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from shapely.geometry import LineString
 
-from src.geometry.model import place_in_measured_frame, point_at, station_offset_many
+from src.geometry.model import (place_in_measured_frame, point_at, point_at_many,
+                                polyline_frame, station_offset_many)
 
 # Feet. Every tolerance here is a claim about float arithmetic, not about geometry: the frame
 # is exact maths, so anything above this is a real disagreement, not accumulated error.
@@ -129,6 +130,33 @@ def test_stations_increase_along_the_line_including_past_both_ends(line, fractio
     stations, _offsets = station_offset_many(line, points)
     assert np.all(np.diff(stations) > 0), (
         f"stations not strictly increasing for fractions {ordered}: {stations}")
+
+
+@given(line=polylines(), pairs=st.lists(st.tuples(st.floats(min_value=-0.5, max_value=1.5,
+                                                           allow_nan=False), OFFSET),
+                                        min_size=1, max_size=300))
+@SETTINGS
+def test_the_vectorised_frame_is_bitwise_the_scalar_one(line, pairs):
+    """point_at_many against the scalar frame_at formula it replaced, to the last bit.
+
+    Equal, not close: the goldens pin coordinates to the decimal, so a 1-ulp drift here would
+    move exports and read as a geometry change. The reference is written out rather than
+    called, because point_at itself now goes through point_at_many. Stations run from half a
+    leg before the start to half a leg past the end, so both extrapolated rays are covered.
+    """
+    verts, seg_dir, _seg_len, cumulative = polyline_frame(line)
+    stations = [f * line.length for f, _o in pairs]
+    offsets = [o for _f, o in pairs]
+    expected = []
+    for station, offset in zip(stations, offsets):
+        i = int(np.clip(np.searchsorted(cumulative, station, side="right") - 1,
+                        0, len(seg_dir) - 1))
+        origin, tangent = verts[i] + seg_dir[i] * (station - cumulative[i]), seg_dir[i]
+        expected.append(origin + np.array([-tangent[1], tangent[0]]) * offset)
+    got = point_at_many(line, stations, offsets)
+    assert np.array_equal(got, np.array(expected)), np.abs(got - np.array(expected)).max()
+    assert np.array_equal(np.array([point_at(line, s, o) for s, o in zip(stations, offsets)]),
+                          got)
 
 
 @given(line=straight_lines(), offset=OFFSET,

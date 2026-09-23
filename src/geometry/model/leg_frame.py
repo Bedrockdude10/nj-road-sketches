@@ -825,8 +825,7 @@ def points_at_offset_ft(leg: "Leg", side: str, offset_ft: float, start_ft: float
     curb_offsets = np.abs(curb_offsets_at_stations(leg, side, stations))
     sign = 1.0 if side == "left" else -1.0
     lateral = np.minimum(offset_ft, curb_offsets)
-    return [tuple(point_at(leg.centerline, float(s), sign * float(o)))
-            for s, o in zip(stations, lateral)]
+    return [tuple(p) for p in point_at_many(leg.centerline, stations, sign * lateral)]
 
 
 # How many corrective passes place_in_measured_frame takes. Two is enough at every leg here -
@@ -875,14 +874,13 @@ def place_in_measured_frame(centerline: LineString, stations: np.ndarray,
     target_s = np.asarray(stations, dtype=float)
     target_o = np.asarray(offsets, dtype=float)
     ask_s, ask_o = target_s.copy(), target_o.copy()
-    best = np.array([point_at(centerline, float(s), float(o)) for s, o in zip(ask_s, ask_o)])
+    best = point_at_many(centerline, ask_s, ask_o)
     got_s, got_o = station_offset_many(centerline, best)
     best_error = np.hypot(got_s - target_s, got_o - target_o)
     for _ in range(_FRAME_CORRECTION_PASSES):
         ask_s = ask_s + (target_s - got_s)
         ask_o = ask_o + (target_o - got_o)
-        trial = np.array([point_at(centerline, float(s), float(o))
-                          for s, o in zip(ask_s, ask_o)])
+        trial = point_at_many(centerline, ask_s, ask_o)
         got_s, got_o = station_offset_many(centerline, trial)
         error = np.hypot(got_s - target_s, got_o - target_o)
         better = error < best_error
@@ -1104,8 +1102,26 @@ def station_offset(centerline: LineString, xy) -> tuple[float, float]:
 
 
 def point_at(centerline: LineString, station: float, offset: float) -> tuple[float, float]:
-    origin, tangent = frame_at(centerline, station)
-    return tuple(origin + np.array([-tangent[1], tangent[0]]) * offset)
+    """One point through point_at_many, so there is only ever one forward frame."""
+    return tuple(point_at_many(centerline, [station], [offset])[0])
+
+
+def point_at_many(centerline: LineString, stations, offsets) -> np.ndarray:
+    """point_at() for many (station, offset) pairs at once: an (N, 2) array of world points.
+
+    frame_at's arithmetic, elementwise and in the same order, so it is bitwise the scalar
+    answer - there is no reduction here for numpy to reassociate. It exists because
+    place_in_measured_frame places every point a sheet draws, and a Python loop over the
+    scalar version was most of the cost of drawing one.
+    """
+    verts, seg_dir, _seg_len, cumulative = polyline_frame(centerline)
+    s = np.asarray(stations, dtype=float)
+    o = np.asarray(offsets, dtype=float)
+    i = np.clip(np.searchsorted(cumulative, s, side="right") - 1, 0, len(seg_dir) - 1)
+    tangent = seg_dir[i]
+    origin = verts[i] + tangent * (s - cumulative[i])[:, None]
+    normal = np.stack([-tangent[:, 1], tangent[:, 0]], axis=1)
+    return origin + normal * o[:, None]
 
 
 def station_offset_many(centerline: LineString, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

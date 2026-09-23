@@ -6,8 +6,8 @@ and `.claude/SKILLS.md` (imported below) is the list of what agents here actuall
 ## Answer at the quantitative layer
 
 **Diagnose from numbers; render to confirm, and only at the end.** Everything this project
-draws exists first as numbers, and both of the tools below print them in seconds. The renders
-are cheap now too (~17 s a scene), so waiting on one is no longer the cost — believing it is.
+draws exists first as numbers, and both of the tools below print them. A render is cheap to
+wait on; the cost is believing it.
 A PNG is where you NOTICE a problem and never where you diagnose one: one session cropped
 renders to three wrong diagnoses in a row on a single complaint, and two of the three were
 about the wrong leg. See §0a of SKILLS.md, which is the same rule with the receipts.
@@ -17,7 +17,7 @@ render inside the loop is a round trip that cannot answer the question you asked
 
 ## Running things
 
-- **`scripts/measure_drawn.py <site> --scenario <s> --leg <leg> --all`, ~2 s.** The whole
+- **`scripts/measure_drawn.py <site> --scenario <s> --leg <leg> --all`.** The whole
   quantitative layer: what is drawn stationed against the centreline, plus `--section` (what
   the treatment thinks it placed vs the room the kerb gives), `--limiters` (all four things
   deciding where kerbside paint starts), `--gaps` (kerb minus outermost paint, station by
@@ -26,9 +26,8 @@ render inside the loop is a round trip that cannot answer the question you asked
   are the holes). Narrow with `--leg`/`--kind`; measure at the reader's `--frame-scale`, not at 1x.
 - **`scripts/verify.py` before you report done.** One command for the whole loop: exports the
   working tree and `--base` side by side, diffs them, runs the suite, and reports failures as
-  NEW / KNOWN / FIXED against a recorded baseline. `--no-tests` is ~22 s, `--no-tests --site
-  <site>` ~6 s, everything ~2.5 min (its suite runs `-n auto`, as `test.sh` does). **NEW is
-  the only number that says anything about your change** - this repo's suite is often red from
+  NEW / KNOWN / FIXED against a recorded baseline. Narrow it with `--no-tests` and `--site
+  <site>`; its suite runs `-n auto`, as `test.sh` does. **NEW is the only number that says anything about your change** - this repo's suite is often red from
   work in flight, and re-deriving whose red it is by hand was costing more than the run.
 - **`./scripts/test.sh`, never bare `pytest`.** The script pins the venv interpreter, so a
   wrong `python` on PATH cannot masquerade as a broken repo. It runs `-n auto`; pass `-n 0`
@@ -41,7 +40,7 @@ render inside the loop is a round trip that cannot answer the question you asked
 - **Never `rm` before re-exporting.** `export_all_scenarios.py` clears each exported site's
   old `geometry_*.json` itself. `rm` needs approval here, and waiting on it once stalled a
   session for hours while nobody was at the keyboard.
-- `scripts/whatis.py <symbol>`, ~1 s, before you write a second copy of anything: signature,
+- `scripts/whatis.py <symbol>` before you write a second copy of anything: signature,
   the docstring's first line, and every call site. §1 of SKILLS.md is the list of facts that
   already have a home; this is how you find the ones that are not on it.
 - `scripts/check_prose_only.py --base <rev>` proves a diff changed only comments and
