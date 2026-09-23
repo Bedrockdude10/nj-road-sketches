@@ -303,7 +303,7 @@ PAINT_FILL_EDGE = {"gold": "goldenrod", "peru": "saddlebrown", "orangered": "ora
 def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offsets: dict,
                  traffic_control: list[dict] | None, street_furniture: list[dict] | None,
                  crossings: list[dict] | None, labels: LabelPlacer, dimension_labels: bool,
-                 pavement=None):
+                 pavement=None, kerb_ways: list[dict] | None = None):
     """Draw the street furniture the 3D render will build - signals above all.
 
     This calls the SAME src/render/props.py:build_props the export does, so the plan view shows
@@ -322,7 +322,9 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     kerb_lines = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
                                           radius_ft=drawn_kerb_radius_ft())
     props = build_props(model, state, crosswalk_offsets, model.center_ft, traffic_control,
-                         street_furniture, crossings, fetch_kerbs(model.center_wgs84, radius_m=120),
+                         street_furniture, crossings,
+                         kerb_ways if kerb_ways is not None
+                         else fetch_kerbs(model.center_wgs84, radius_m=120),
                          pavement=pavement)
     _draw_paved_surfaces(ax, model.paved_surfaces)
     _draw_kerbs(ax, kerb_lines)
@@ -511,9 +513,11 @@ def draw_change_panel(fig, before: SceneMetrics, after: SceneMetrics) -> Compari
 def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: str, dimension_labels: bool = True,
                        crossings: list[dict] | None = None, sidewalks: list[dict] | None = None,
                        traffic_control: list[dict] | None = None, street_furniture: list[dict] | None = None,
-                       pavement=None):
-    """`pavement` overrides the ring built from the corner fillets, as export_scenario's does -
-    a crop of the borough document has asphalt but no corners to close a ring around."""
+                       pavement=None, kerb_ways: list[dict] | None = None):
+    """Every OSM layer may be SUPPLIED rather than fetched, exactly as export_scenario takes them,
+    so the two views cannot be drawn from different data. See that function for why a crop has to
+    supply them; `pavement` likewise overrides the ring built from corner fillets it has none of.
+    """
     if sidewalks is None:
         try:
             sidewalks = fetch_sidewalks(
@@ -644,7 +648,8 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     _draw_unmodelled_crossings(ax, scene)
     _draw_crosswalks(ax, scene, labels, dimension_labels)
     props = _draw_props(ax, model, state, scene.crosswalk_offsets, traffic_control,
-                         street_furniture, crossings, labels, dimension_labels, pavement)
+                         street_furniture, crossings, labels, dimension_labels, pavement,
+                         kerb_ways)
 
     # Every painted marking comes from src/geometry/paint/ - the same builder the 3D export
     # draws from and src/checks.py inspects. Never assembled here in parallel; the two copies

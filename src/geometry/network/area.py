@@ -21,8 +21,8 @@ from src.geometry.model import station_offset_many
 from src.geometry.network.corridor import Corridor, _street_name
 from src.geometry.network.kerb import KerbRun, _traced_kerb_runs
 from src.render.coords import wgs84_to_state_plane
-from src.sources.osm_context import (DEFAULT_BUILDING_HEIGHT_M, METERS_PER_LEVEL,
-                                     SNAPSHOT_AREAS, fetch_borough_osm)
+from src.sources.osm_context import (SNAPSHOT_AREAS, fetch_borough_osm, is_kerb,
+                                     is_street_furniture, is_traffic_control)
 
 Bbox = tuple[float, float, float, float]
 NodeXY = dict[int, tuple[float, float]]
@@ -198,36 +198,24 @@ def _closed_ring(way: dict, xy: NodeXY) -> Polygon | None:
     return Polygon(line.coords).buffer(0) if line is not None and len(line.coords) >= 4 else None
 
 
-def _building_height_m(tags: dict) -> float:
-    """OSM's own answer where it has one, else the flat default. NOT the assessor's, which is a
-    per-parcel join a whole municipality does not justify - src/sources/assessor.py owns that."""
-    try:
-        return float(str(tags["height"]).split()[0])
-    except (KeyError, ValueError, IndexError):
-        pass
-    try:
-        return float(tags["building:levels"]) * METERS_PER_LEVEL
-    except (KeyError, ValueError):
-        return DEFAULT_BUILDING_HEIGHT_M
-
-
 def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -> dict[str, list]:
-    """The context layers - buildings and crossings - for a whole municipality, in feet.
+    """Every OSM element a render reads, for a whole municipality, AS OSM RECORDS IT.
+
+    Each entry is `{"geometry": ..., "tags": {...}}` plus `node_ids` where the topology is the
+    point - geometry in feet, tags verbatim. NOTHING IS TRANSLATED HERE, which is the whole
+    design: a building's height and a crossing's markings are already functions of its tags
+    (`height_from_tags`, `_markings_from_tags`), so storing either alongside the tags makes a
+    second copy free to disagree with the first. The reader derives what it needs, once.
 
     Read from the SAME snapshot `area_corridors` reads, not through `fetch_buildings` and
     friends: those take a centre and a radius, and the largest radius that fits inside the
     declared bbox is smaller than the borough, so the corners would lose their context. An area
     has no centre to measure from, which is the same reason `_area_kerb_ways` exists.
 
-    Buildings are (polygon, height_m); crossings are SurveyedCrossings, so the markings they get
-    are the surveyor's - `crossing_bars_ft` paints nothing on a crossing recorded as unmarked.
-
-    SIDEWALKS ARE NOT A LAYER HERE, though OSM maps them: `build_sidewalk_pieces` derives the
-    footway from the design's own kerb, and a second copy read from OSM is free to disagree with
-    the drawing it sits beside. Only what cannot be derived is carried.
+    SIDEWALKS ARE NOT A LAYER, though OSM maps them: `build_sidewalk_pieces` derives the footway
+    from the design's own kerb, and a second copy read from OSM is free to disagree with the
+    drawing it sits beside. Only what cannot be derived is carried.
     """
-    from src.geometry.surveyed import SurveyedCrossing, _markings_from_tags
-
     bbox: Bbox = SNAPSHOT_AREAS[area]
     snapshot = snapshot if snapshot is not None else fetch_borough_osm(bbox=bbox)
     xy = _projected_nodes(snapshot["nodes"])
@@ -236,17 +224,26 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
         raise RuntimeError(f"no admin_level=8 boundary at the centre of {area!r}")
     _, boundary = found
 
-    out: dict[str, list] = {"buildings": [], "crossings": []}
+    out: dict[str, list] = {"buildings": [], "crossings": [], "kerb_ways": [], "nodes": []}
     for way in snapshot["ways"]:
         tags = way.get("tags") or {}
         if "building" in tags:
-            ring = _closed_ring(way, xy)
-            if ring is not None and not ring.is_empty and ring.intersects(boundary):
-                out["buildings"].append((ring, _building_height_m(tags)))
+            layer, geometry = "buildings", _closed_ring(way, xy)
         elif tags.get("footway") == "crossing":
-            line = _way_line(way, xy)
-            if line is not None and line.intersects(boundary):
-                out["crossings"].append(SurveyedCrossing(
-                    geometry=line, markings=_markings_from_tags(tags), tags=tags,
-                    leg=None, distance_ft=0.0))
+            layer, geometry = "crossings", _way_line(way, xy)
+        elif is_kerb(tags):
+            layer, geometry = "kerb_ways", _way_line(way, xy)
+        else:
+            continue
+        if geometry is not None and not geometry.is_empty and geometry.intersects(boundary):
+            # The node ids are carried because one rule reads them: a tactile pad is placed at a
+            # node SHARED by a crossing way and a tactile_paving kerb way, so the topology is the
+            # observation and the geometry alone cannot express it.
+            out[layer].append({"geometry": geometry, "tags": tags,
+                               "node_ids": tuple(way.get("nodes") or ())})
+    out["nodes"] = [{"geometry": point, "tags": tags}
+                    for node_id, node in snapshot["nodes"].items()
+                    if (is_traffic_control(tags := node.get("tags") or {})
+                        or is_street_furniture(tags))
+                    and (point := Point(xy[node_id])).intersects(boundary)]
     return out

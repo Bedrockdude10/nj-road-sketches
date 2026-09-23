@@ -14,6 +14,7 @@ state-plane feet and reprojected once at the end.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -76,26 +77,43 @@ def _paint_rows(corridor, facility, town: str) -> list[dict]:
 
 
 def _context_rows(area: str, pavement) -> list[dict]:
-    """The street's surroundings: buildings, and the crossing ways as the surveyor traced them.
+    """The street's surroundings, AS OSM RECORDS THEM: geometry plus the element's own tags.
 
     Filed with no `name` because they belong to the AREA - a building fronts whichever street it
     fronts, and deciding that here would be a join nothing downstream asked for.
 
+    THE PROPERTIES ARE THE TAGS. There is no schema of ours here to keep in step with OSM's: a
+    building's height and a crossing's markings are functions of the tags, so a `height_m` or
+    `markings` column beside them would be a second copy free to disagree - and the functions
+    that derive them (`height_from_tags`, `_markings_from_tags`) already exist and already run
+    at read time. One JSON column rather than a column per key, because the borough's tag
+    vocabulary is hundreds of keys and a sparse table of them is mostly nulls.
+
     ONLY WHAT CANNOT BE DERIVED. The crossing BARS are not stored: export_scenario paints them
-    from the way, against the surveyor's own crossing:markings, so keeping them here would be a
-    second copy free to disagree. Sidewalks are not stored either - build_sidewalk_pieces derives
-    them from the design.
+    from the way, against the surveyor's own crossing:markings. Sidewalks are not stored either -
+    build_sidewalk_pieces derives them from the design.
     """
     context = area_context(area)
     # OSM footprints are coarser than the traced kerbs, so a few sit in the carriageway. Dropped
     # rather than drawn standing in the road - src/render/export.py does the same, against the
     # same geometry. Skipped where nothing is paved, which would drop every building.
-    rows: list[dict] = [{"kind": "building", "height_m": round(height, 2), "geometry": ring}
-                        for ring, height in context["buildings"]
-                        if pavement is None or not ring.intersects(pavement)]
-    rows += [{"kind": "crossing_way", "markings": crossing.markings, "geometry": crossing.geometry}
-             for crossing in context["crossings"]]
+    rows = [_osm_row("building", item) for item in context["buildings"]
+            if pavement is None or not item["geometry"].intersects(pavement)]
+    rows += [_osm_row("crossing_way", item) for item in context["crossings"]]
+    rows += [_osm_row("kerb_way", item) for item in context["kerb_ways"]]
+    rows += [_osm_row("osm_node", item) for item in context["nodes"]]
     return rows
+
+
+def _osm_row(kind: str, item: dict) -> dict:
+    """One OSM element as one feature: its geometry, its tags, and its node ids if it has any.
+
+    `node_ids` is carried because a tactile pad is placed at a node SHARED by a crossing way and
+    a tactile_paving kerb way - the topology IS the observation, and no geometry expresses it.
+    """
+    return {"kind": kind, "tags": json.dumps(item["tags"], sort_keys=True),
+            "node_ids": ",".join(str(i) for i in item.get("node_ids") or ()),
+            "geometry": item["geometry"]}
 
 
 def network_features(area: str) -> gpd.GeoDataFrame:
@@ -168,7 +186,9 @@ def _summarise(features: gpd.GeoDataFrame) -> str:
             f"{(features['kind'] == 'bikeway').sum()} bikeway run(s) totalling "
             f"{_bikeway_ft(features):,.0f} ft, {(features['kind'] == 'bollard').sum()} bollards, "
             f"{(features['kind'] == 'building').sum()} buildings, "
-            f"{(features['kind'] == 'crossing_way').sum()} crossing ways")
+            f"{(features['kind'] == 'crossing_way').sum()} crossing ways, "
+            f"{(features['kind'] == 'kerb_way').sum()} OSM kerb ways, "
+            f"{(features['kind'] == 'osm_node').sum()} control/furniture nodes")
 
 
 def _bikeway_ft(features: gpd.GeoDataFrame) -> float:

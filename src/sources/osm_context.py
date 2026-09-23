@@ -446,55 +446,66 @@ def fetch_parking_lots(center_wgs84: Point, radius_m: float) -> list[dict]:
     return _layer("parking_lots", center_wgs84, radius_m, build)
 
 
-def fetch_traffic_control(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM traffic control nodes: highway=traffic_signals / stop / give_way / crossing.
+# WHICH OSM ELEMENTS A RENDER READS, as predicates on tags rather than as query strings.
+# There are two ways into the same data - `_nodes_near` at a radius for a junction, and a walk
+# over the whole snapshot for an area (src/geometry/network/area.py) - and a junction that drew
+# a hydrant while the area document did not carry one would be these two lists disagreeing, not
+# OSM changing. One definition, both readers.
+def is_traffic_control(tags: dict) -> bool:
+    """highway=traffic_signals / stop / give_way / crossing.
 
-    highway=crossing nodes are included because that is where OSM records the pedestrian-
-    facing detail that lives on the node rather than the way (tactile_paving,
-    button_operated, crossing:island).
+    Crossing NODES are control because that is where OSM records the pedestrian-facing detail
+    that lives on the node rather than the way (tactile_paving, button_operated, crossing:island).
     """
-    wanted = ("traffic_signals", "stop", "give_way", "crossing")
+    return tags.get("highway") in ("traffic_signals", "stop", "give_way", "crossing")
 
+
+def is_street_furniture(tags: dict) -> bool:
+    """highway=street_lamp, emergency=fire_hydrant, natural=tree.
+
+    STREET LAMPS ARE NOT MAPPED at any of this project's four sites. This exists so a place
+    where they ARE mapped gets real pole positions rather than a derived one-per-corner
+    placement, and so the absence is reported rather than papered over.
+    """
+    return (tags.get("highway") == "street_lamp" or tags.get("emergency") == "fire_hydrant"
+            or tags.get("natural") == "tree")
+
+
+def is_kerb(tags: dict) -> bool:
+    """barrier=kerb - the most direct geometry this project can get: a traced kerb IS the curb."""
+    return tags.get("barrier") == "kerb"
+
+
+def fetch_traffic_control(center_wgs84: Point, radius_m: float) -> list[dict]:
+    """OSM traffic control nodes near a junction. See `is_traffic_control`."""
     def build():
         return [{"lon": n["lon"], "lat": n["lat"], "tags": n.get("tags", {})}
-                for n in _nodes_near(center_wgs84, radius_m, lambda t: t.get("highway") in wanted)]
+                for n in _nodes_near(center_wgs84, radius_m, is_traffic_control)]
     return _layer("traffic_control", center_wgs84, radius_m, build)
 
 
 def fetch_street_furniture(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM street furniture: highway=street_lamp, emergency=fire_hydrant, natural=tree.
-
-    STREET LAMPS ARE NOT MAPPED at any of this project's four sites. This exists so a site
-    where they ARE mapped gets real pole positions rather than a derived one-per-corner
-    placement, and so the absence is reported rather than papered over.
-    """
-    def wanted(t):
-        return (t.get("highway") == "street_lamp" or t.get("emergency") == "fire_hydrant"
-                or t.get("natural") == "tree")
-
+    """OSM street furniture near a junction. See `is_street_furniture`."""
     def build():
         return [{"lon": n["lon"], "lat": n["lat"], "tags": n.get("tags", {})}
-                for n in _nodes_near(center_wgs84, radius_m, wanted)]
+                for n in _nodes_near(center_wgs84, radius_m, is_street_furniture)]
     return _layer("street_furniture", center_wgs84, radius_m, build)
 
 
 def fetch_kerbs(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped kerb lines and kerb nodes (barrier=kerb).
+    """OSM-mapped kerb lines and kerb nodes. See `is_kerb`.
 
-    The most direct geometry this project can get: a traced kerb IS the curb. Two-vertex
-    ways are kept - a straight run of kerb is two points, and dropping them threw away
-    12 of the 23 traced ways at two of these sites.
+    Two-vertex ways are kept - a straight run of kerb is two points, and dropping them threw
+    away 12 of the 23 traced ways at two of these sites.
     """
     def build():
         kerbs = [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"],
                   "node_ids": way.get("nodes", [])}
-                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                                lambda t: t.get("barrier") == "kerb")
+                 for way, coords in _ways_near(center_wgs84, radius_m, is_kerb)
                  if len(coords) >= 2]
         kerbs += [{"coords_wgs84": None, "lon": n["lon"], "lat": n["lat"],
                    "tags": n.get("tags", {}), "id": n["id"]}
-                  for n in _nodes_near(center_wgs84, radius_m,
-                                        lambda t: t.get("barrier") == "kerb")]
+                  for n in _nodes_near(center_wgs84, radius_m, is_kerb)]
         return kerbs
     return _layer("kerbs", center_wgs84, radius_m, build)
 

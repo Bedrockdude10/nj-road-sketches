@@ -14,6 +14,7 @@ property that makes the two impossible to disagree.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -29,6 +30,8 @@ import matplotlib.pyplot as plt   # after matplotlib.use: the backend must be se
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.network.slice_design import slice_design, slice_pavement
 from src.geometry.treatments import route_decision_for
+from src.sources.osm_context import (height_from_tags, is_street_furniture,
+                                     is_traffic_control)
 from src.render.export import export_scenario
 from src.render.plan_view import plot_design_state
 
@@ -71,26 +74,66 @@ def _parts(geom):
 
 
 def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
-    """The document's own context, in the shape the OSM fetchers return it.
+    """The document's own OSM context, in the shape the OSM fetchers return it.
 
-    Passed to the renderers so they do NOT fetch: `fetch_buildings` and friends take a centre and
-    a radius, and the largest radius fitting the declared snapshot bbox is smaller than the
+    Same keys, same dicts, so nothing downstream can tell a slice from a junction - and the
+    renderers never fetch. That matters twice over: `fetch_buildings` and friends take a centre
+    and a radius, and the largest radius fitting the declared snapshot bbox is smaller than the
     borough, so a slice near its edge would silently lose its surroundings.
+
+    The tags are OSM's own, carried verbatim through the document, so everything derived FROM
+    them - a building's height, a crossing's markings - is derived here by the same functions a
+    site uses rather than read from a column that could disagree.
     """
     wgs84 = features.to_crs(WGS84_EPSG)
-    buildings = wgs84[wgs84["kind"] == "building"]
-    crossings = wgs84[wgs84["kind"] == "crossing_way"]
+    # A dict OR a JSON string: GDAL tags the column as a JSON subtype on write and parses it
+    # back to a dict on read, but a document written by another driver - or read straight off
+    # disk - still carries the string. Accepting only one of the two silently emptied every tag,
+    # and an empty tag dict fails every predicate rather than raising.
+    def tags_of(row) -> dict:
+        tags = getattr(row, "tags", None)
+        return tags if isinstance(tags, dict) else json.loads(tags) if isinstance(tags, str) else {}
+
+    of_kind = lambda kind: wgs84[wgs84["kind"] == kind].itertuples()
+
+    def ways(kind: str, geom_type: str):
+        return [(row, tags_of(row), part)
+                for row in of_kind(kind) for part in _parts(row.geometry)
+                if part.geom_type == geom_type]
+
+    def node_ids(row) -> list[int]:
+        return [int(i) for i in str(row.node_ids).split(",") if i.strip().isdigit()]
+
+    nodes = [(tags_of(row), part) for row in of_kind("osm_node")
+             for part in _parts(row.geometry) if part.geom_type == "Point"]
     return {
-        "buildings": [{"coords_wgs84": list(part.exterior.coords), "height_m": row.height_m,
-                       "height_source": "osm", "tags": {}}
-                      for row in buildings.itertuples() for part in _parts(row.geometry)
-                      if part.geom_type == "Polygon"],
-        "crossings": [{"coords_wgs84": list(part.coords), "node_ids": [],
-                       "tags": {"crossing:markings": row.markings}
-                                if isinstance(row.markings, str) else {}}
-                      for row in crossings.itertuples() for part in _parts(row.geometry)
-                      if part.geom_type == "LineString"],
+        # height_m None where nobody recorded one, which is what fetch_buildings means by it -
+        # "nobody said" is a different answer from the default, and export.py looks elsewhere.
+        "buildings": [{"coords_wgs84": list(part.exterior.coords), "tags": tags,
+                       "height_m": (found := height_from_tags(tags)) and found[0],
+                       "height_source": found[1] if found else None}
+                      for row, tags, part in ways("building", "Polygon")],
+        "crossings": [{"coords_wgs84": list(part.coords), "tags": tags,
+                       "node_ids": node_ids(row)}
+                      for row, tags, part in ways("crossing_way", "LineString")],
+        "kerb_ways": [{"coords_wgs84": list(part.coords), "tags": tags,
+                       "id": row.Index, "node_ids": node_ids(row)}
+                      for row, tags, part in ways("kerb_way", "LineString")],
+        "traffic_control": [{"lon": p.x, "lat": p.y, "tags": t}
+                            for t, p in nodes if is_traffic_control(t)],
+        "street_furniture": [{"lon": p.x, "lat": p.y, "tags": t}
+                             for t, p in nodes if is_street_furniture(t)],
     }
+
+
+def context_layers(context: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """The layers BOTH views take, so neither can be handed a set the other was not.
+
+    `buildings` is not here only because the 2D sheet does not draw them; every other layer is
+    passed to both, which is what keeps a hydrant from existing in one view and not the other.
+    """
+    return {key: context[key]
+            for key in ("crossings", "traffic_control", "street_furniture", "kerb_ways")}
 
 
 def design_for(features: gpd.GeoDataFrame):
@@ -111,8 +154,7 @@ def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
     model, state, pavement = design_for(features)
     context = slice_context(features)
     fig, ax = plt.subplots(figsize=(11, 11))
-    plot_design_state(ax, model, state, name, crossings=context["crossings"],
-                      sidewalks=[], traffic_control=[], street_furniture=[], pavement=pavement)
+    plot_design_state(ax, model, state, name, pavement=pavement, sidewalks=[], **context_layers(context))
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.png"
     fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
@@ -128,8 +170,7 @@ def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     geometry, png = out_dir / f"{name}_3d.json", out_dir / f"{name}_3d.png"
     export_scenario(model, state, name, geometry, pavement=pavement,
-                    buildings=context["buildings"], crossings=context["crossings"],
-                    traffic_control=[], street_furniture=[])
+                    buildings=context["buildings"], **context_layers(context))
     render_all(find_blender(), [(geometry, png)])
     return png
 

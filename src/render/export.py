@@ -214,9 +214,15 @@ def paint_channels_local_m(paint, center_ft, leg_heading_deg=None) -> dict[str, 
 def export_scenario(model: IntersectionModel, state: DesignState, name: str, out_path: Path,
                      buildings: list[dict] | None = None, crossings: list[dict] | None = None,
                      theme: dict | None = None, traffic_control: list[dict] | None = None,
-                     street_furniture: list[dict] | None = None, pavement=None) -> Path:
-    """`pavement` overrides the ring built from the corner fillets, for a frame that is not one
-    junction: a crop of the borough document has asphalt but no corners to close a ring around."""
+                     street_furniture: list[dict] | None = None, pavement=None,
+                     kerb_ways: list[dict] | None = None) -> Path:
+    """Every OSM layer may be SUPPLIED rather than fetched, and a caller that supplies one wins.
+
+    A junction knows its centre and a radius, so it fetches; a crop of the borough document has
+    neither - the largest radius fitting the snapshot bbox is smaller than the borough - and
+    hands over what the document already holds. `pavement` is the same bargain for the roadway:
+    it overrides the ring built from the corner fillets, which a crop has none of.
+    """
     center_ft = model.center_ft
     if theme is None:
         from src.render.theme import build_default_theme
@@ -281,7 +287,9 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     tree_points_ft = osm_tree_points_ft(control_nodes_ft(street_furniture))
 
     props = build_props(model, state, crosswalk_offsets, center_ft, traffic_control, street_furniture,
-                         crossings, fetch_kerbs(model.center_wgs84, radius_m=KERB_RADIUS_M),
+                         crossings,
+                         kerb_ways if kerb_ways is not None
+                         else fetch_kerbs(model.center_wgs84, radius_m=KERB_RADIUS_M),
                          pavement=pavement)
     paint, props = scene.build_paint_and_posts(props)
     # Invariants, not warnings: a pad in the carriageway is a false claim about an
