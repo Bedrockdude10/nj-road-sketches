@@ -4,9 +4,9 @@ byte-for-byte equivalent to the original before leaving it in place.
 
 Why: GeoJSON carries no spatial index, so a bbox-filtered read still parses the
 entire file. Pulling the ~9 segments around one intersection out of NJDOT's 170 MB
-statewide layer costs ~2.2 s - versus ~2.5 s to read all 105,838 features, i.e. the
+statewide layer costs nearly as much as reading all 105,838 features, i.e. the
 bbox filter saves almost nothing. FlatGeobuf stores a packed Hilbert R-tree, so the
-same bbox read drops to ~0.002 s. Every phase script pays this cost at least once,
+same bbox read is orders of magnitude cheaper. Every phase script pays this cost at least once,
 and Phase 3/4 are separate processes that each pay it again.
 
 This is a one-off per data file. src/sources/data_loader.py picks the sibling up

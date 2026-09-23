@@ -38,7 +38,7 @@ nine goldens it had not so much as executed. They are reported as NOT RUN instea
 answer, which is that this run says nothing about them.
 
 WHY THE INPUTS ARE WIRED IN TWO WAYS. The before side runs in a git worktree at --base, and
-README's loop warns you to symlink the gitignored data/ into it or every run dies in 0.6 s and
+README's loop warns you to symlink the gitignored data/ into it or every run dies at once and
 you read that as a result. This does both: ROAD_SKETCHES_DATA_DIR and ROAD_SKETCHES_OSM_CACHE are passed
 as absolute paths out of THIS checkout, AND data/ is symlinked into the worktree - pointing at
 the committed clip, not at the 391 MB download. Belt and braces because the env var is only

@@ -50,7 +50,7 @@ data. The reader also cannot tell you which leg they mean from a render, and nei
 those wrong answers were about `w_broad_st_northeast` when the complaint was about
 `w_broad_st_southwest`.
 
-**So: before proposing a cause, print the numbers.** All of them are one command, ~2 s:
+**So: before proposing a cause, print the numbers.** All of them are one command:
 
 ```bash
 .venv/bin/python scripts/measure_drawn.py <site> --scenario <build_*> --leg <leg> --all

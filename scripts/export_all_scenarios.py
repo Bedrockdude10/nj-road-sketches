@@ -1,7 +1,6 @@
 """Export every site's every scenario to JSON, for diffing a refactor against itself.
 
-`scripts/build_all.py --render-3d` writes these files too, but it also pays for Blender -
-~17 s for the first scene in a process and ~5 s for each one after it, so ~1-2 minutes for
+`scripts/build_all.py --render-3d` writes these files too, but it also pays for Blender on
 every site's every scenario. This does only the part that is this project's own code, and it
 is the right part: export_scenario resolves the scene, builds the paint, builds the props and
 asserts every invariant, so a change that moves any marking, any prop or any note shows up
@@ -124,8 +123,8 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("out_dir", type=Path, help="directory to write geometry_*.json under")
     parser.add_argument("--site", action="append",
-                        help="limit to this site (repeatable) - a single-site before/after is "
-                             "~1 s, which is the loop while editing one junction")
+                        help="limit to this site (repeatable) - a single-site before/after "
+                             "is the loop while editing one junction")
     parser.add_argument("--jobs", type=int, default=MAX_BUILD_JOBS,
                         help=f"parallel worker processes (default {MAX_BUILD_JOBS} - see "
                              f"scripts/jobs.py, which is a house rule about a 36 GB machine "

@@ -5,7 +5,7 @@ turn. Measured, almost none of that time is this project's geometry; it's matplo
 and rasterizing the plan views, and Blender. Both parallelise cleanly, because sites share
 nothing but a read-only cache, so this runs `--jobs` of them at once - defaulting to the
 house cap in scripts/jobs.py, because this machine's other job costs 11 GB. Blender dominates
-a `--render-3d` run: ~17 s for the first scene in a process and ~5 s for each one after.
+a `--render-3d` run, and its startup is paid once per process, not once per scene.
 
     python scripts/build_all.py                     # 2D for every site and scenario
     python scripts/build_all.py --render-3d         # ...and the Blender renders too
@@ -323,7 +323,7 @@ def main():
         render_jobs = blender_job_limit(args.render_jobs)
         print(f"Rendering {len(blender_jobs)} scene(s) via {blender_bin} "
               f"({render_jobs} at a time, ~11 GB each)")
-        # Blender dominates the wall clock (~17 s per scene against ~0.25 s of geometry) and
+        # Blender dominates the wall clock, far ahead of the geometry, and
         # each render is an independent subprocess, so this is where parallelism pays.
         chunks = [blender_jobs[i::render_jobs] for i in range(render_jobs)]
         with ThreadPoolExecutor(max_workers=render_jobs) as pool:

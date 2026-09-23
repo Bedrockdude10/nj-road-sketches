@@ -23,7 +23,7 @@ python scripts/phase4_render_3d.py --site broad_st_greenwood   # export geometry
 To rebuild **everything** — all sites, all proposals — in one command instead of ~30:
 
 ```bash
-python scripts/build_all.py                  # 2D for every site and scenario (~9s)
+python scripts/build_all.py                  # 2D for every site and scenario
 python scripts/build_all.py --render-3d      # ...and the Blender renders
 python scripts/build_all.py --dpi 90         # faster pictures while iterating on geometry
 python scripts/build_all.py --refresh-osm    # re-pull OSM after tracing kerbs/crossings
@@ -167,11 +167,11 @@ Five seconds, and the only check that exists over there. The failure mode is not
 
 In this order, because each step is cheaper than the next:
 
-1. **Write the test first, and confirm it fails against the pre-change code** (`git stash`, or a worktree — if a worktree, symlink the gitignored `data/` in, or every run crashes in 0.6 s and you will read that as a result).
-2. **`scripts/verify.py`** — steps 3 and 4 below, at once, with one verdict. It exports the working tree and `--base` in parallel, diffs them key by key, runs the suite, and splits the failures into NEW and KNOWN against a baseline in `output/.verify/`. ~55 s for six sites and 707 tests; `--no-tests --site <site>` is ~4 s while editing one junction. The before side runs in a reused worktree with the inputs wired in both ways (see its docstring), so the trap in step 1 is already handled there.
-3. `scripts/export_all_scenarios.py /tmp/before` → change → `/tmp/after` → `scripts/diff_exports.py`. Six sites, ~4 s across `--jobs` workers, key by key. This runs `export_scenario`, so it resolves the scene, builds the paint and props and asserts every invariant. Reach for it directly when you want the two trees kept, or a `--site` subset verify.py is not driving.
+1. **Write the test first, and confirm it fails against the pre-change code** (`git stash`, or a worktree — if a worktree, symlink the gitignored `data/` in, or every run crashes at once and you will read that as a result).
+2. **`scripts/verify.py`** — steps 3 and 4 below, at once, with one verdict. It exports the working tree and `--base` in parallel, diffs them key by key, runs the suite, and splits the failures into NEW and KNOWN against a baseline in `output/.verify/`. Use `--no-tests --site <site>` while editing one junction. The before side runs in a reused worktree with the inputs wired in both ways (see its docstring), so the trap in step 1 is already handled there.
+3. `scripts/export_all_scenarios.py /tmp/before` → change → `/tmp/after` → `scripts/diff_exports.py`. Every site, key by key. This runs `export_scenario`, so it resolves the scene, builds the paint and props and asserts every invariant. Reach for it directly when you want the two trees kept, or a `--site` subset verify.py is not driving.
 4. `scripts/test.sh` — includes the lint pass and the golden comparison, so there is no separate linting step. `.venv/bin/ruff check src scripts tests conftest.py` is the sub-second version while editing.
-5. `scripts/build_all.py --render-3d`, then **look at the PNGs** — the only check on the Blender seam. Blender costs ~17 s for the first scene in a process and ~5 s for each one after, so this is a minute or two, not the twenty a stale note here once implied.
+5. `scripts/build_all.py --render-3d`, then **look at the PNGs** — the only check on the Blender seam. Blender renders every scene in one process, so its startup is paid once per run, not once per scene.
 
 And the habit under all of it: **measure the geometry you just built.** Print its extent, its area, its distance to the thing it should touch. Every geometry bug in this repo's history was found by measuring and missed by looking.
 
@@ -206,7 +206,7 @@ The corollary that keeps recurring is a bug shape: a feature matched by *"anywhe
 
 - `NJ_Roadway_Network.geojson` (170 MB) — NJDOT's **statewide** SRI/SLD linear-referencing roadway layer (despite the folder name, not pre-clipped). Has jurisdiction/route-ID fields but **no lane count, width, or surface type** — which is why Phase 2 needs the SLD PDF plus field measurements.
 
-  **Convert this once, before anything else:** `python scripts/convert_road_network.py`. GeoJSON carries no spatial index, so a bbox-filtered read still parses the whole file (~2.2 s versus ~2.5 s for all 105,838 features). The script writes a FlatGeobuf sibling with a packed Hilbert R-tree, dropping that read to ~0.002 s and `load_intersection_model()` from ~2.5 s to ~0.10 s — and every phase script pays that cost at least once. It verifies the copy is WKB-identical before keeping it, the `.geojson` stays canonical, and `src/sources/data_loader.py` picks up the sibling automatically and ignores it if stale. The `.fgb` is gitignored: rebuild it, don't commit it.
+  **Convert this once, before anything else:** `python scripts/convert_road_network.py`. GeoJSON carries no spatial index, so a bbox-filtered read still parses the whole file and costs nearly as much as reading every feature. The script writes a FlatGeobuf sibling with a packed Hilbert R-tree, which makes that read, and so `load_intersection_model()`, orders of magnitude cheaper — and every phase script pays that cost at least once. It verifies the copy is WKB-identical before keeping it, the `.geojson` stays canonical, and `src/sources/data_loader.py` picks up the sibling automatically and ignores it if stale. The `.fgb` is gitignored: rebuild it, don't commit it.
 - `00000518__8.000-11.000.pdf` — NJDOT Straight Line Diagram for Route 518 (Broad St), MP 8.000–11.000. Our intersection is **MP 10.30**. Read it by rendering locally at high DPI (`pdftoppm -r 400 file.pdf page`) and cropping; the pdf-viewer tool's screenshot is too low-res for the tick labels.
 - `MercerCountyParcels.*` — Mercer County parcel polygons, for ROW/corner context and Greenwood Ave's width estimate. `MUN=1105` is Hopewell Borough.
 - `MercerTaxList.dbf` — MOD-IV property tax records, joined by PIN to those parcels. `BLDG_DESC` is the assessor's shorthand for what stands on the lot and is where **building heights** come from.
@@ -267,7 +267,7 @@ The Blender side cannot import `src`, so its own reasoning cannot live in a modu
 
 **General:**
 
-- Render engine `BLENDER_EEVEE_NEXT` (the only one in Blender 4.3). Samples 64, dropped from 128 — visually indistinguishable here, ~30% faster. Full render, both scenarios, warm caches: ~13 s.
+- Render engine `BLENDER_EEVEE_NEXT` (the only one in Blender 4.3). Samples 64, dropped from 128 — visually indistinguishable here, and faster.
 - Blender's Python has no network access and no access to this venv. All fetching happens beforehand; only local file paths reach the exported JSON.
 - **Blender does NOT put a `--python` script's own directory on `sys.path`** (unlike plain `python script.py`) — confirmed empirically. `blender_scene.py` inserts it manually before importing its siblings.
 - **Marking height must exceed pavement height** — pavement extrudes 0.05 m, markings 0.06, or they render buried inside it.

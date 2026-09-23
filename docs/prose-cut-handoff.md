@@ -111,7 +111,7 @@ Written and self-tested: it parses both revisions, strips docstrings, compares n
 **Exit 0 means no behaviour changed and the suite is not required.** Exit 1 names files whose code
 moved.
 
-**This is the speed unlock** — a prose lane's inner loop is a ~1 s AST check, not a 31 s suite. Run
+**This is the speed unlock** — a prose lane's inner loop is an AST check, not the suite. Run
 the suite once per lane at the end, and once on the merged result.
 
 ### Four exceptions — do not cut blind
@@ -166,7 +166,7 @@ Shared files, and everything downstream depends on it. Do not parallelise.
 | 0.5 | Write `scripts/measure_drawn.py` — given a site/scenario, print drawn coordinates stationed against the leg centreline (`station_offset_many`). §0's "measure the drawn output" is the most-skipped rule *because invoking it costs recall*. Make it one command. | new |
 | 0.6 | Commit `scripts/check_prose_only.py` (untracked at handoff). | — |
 
-**Exit:** suite green in ~31 s, `CLAUDE.md` loads the guide, both scripts run. **Tag the commit** —
+**Exit:** suite green, `CLAUDE.md` loads the guide, both scripts run. **Tag the commit** —
 every lane branches from it.
 
 ## 7. Phase 1 — parallel. Lanes own disjoint files.
@@ -225,7 +225,7 @@ worth keeping. Run `./scripts/test.sh` **once** before handing the lane back, no
 
 Phase 0 serial (1 agent) → **Phase 1 nine agents at once** (A1, A2, B, C, D, E, F, R, S; X waits) →
 Phase 2 serial (1 agent). Critical path is Phase 0, the longest lane (~22k prose words), then Phase 2.
-The prose lanes verify in ~1 s instead of 31 s, which is what makes nine of them practical.
+The prose lanes verify with an AST check instead of the suite, which is what makes nine of them practical.
 
 **Two rules keep this from going wrong:** never edit a file another lane owns, and never delete a
 sentence you cannot replace with a shorter true one.
