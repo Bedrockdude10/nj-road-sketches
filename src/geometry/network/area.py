@@ -212,7 +212,7 @@ def _building_height_m(tags: dict) -> float:
 
 
 def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -> dict[str, list]:
-    """The context layers - buildings, sidewalks, crossings - for a whole municipality, in feet.
+    """The context layers - buildings and crossings - for a whole municipality, in feet.
 
     Read from the SAME snapshot `area_corridors` reads, not through `fetch_buildings` and
     friends: those take a centre and a radius, and the largest radius that fits inside the
@@ -221,6 +221,10 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
 
     Buildings are (polygon, height_m); crossings are SurveyedCrossings, so the markings they get
     are the surveyor's - `crossing_bars_ft` paints nothing on a crossing recorded as unmarked.
+
+    SIDEWALKS ARE NOT A LAYER HERE, though OSM maps them: `build_sidewalk_pieces` derives the
+    footway from the design's own kerb, and a second copy read from OSM is free to disagree with
+    the drawing it sits beside. Only what cannot be derived is carried.
     """
     from src.geometry.surveyed import SurveyedCrossing, _markings_from_tags
 
@@ -232,17 +236,13 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
         raise RuntimeError(f"no admin_level=8 boundary at the centre of {area!r}")
     _, boundary = found
 
-    out: dict[str, list] = {"buildings": [], "sidewalks": [], "crossings": []}
+    out: dict[str, list] = {"buildings": [], "crossings": []}
     for way in snapshot["ways"]:
         tags = way.get("tags") or {}
         if "building" in tags:
             ring = _closed_ring(way, xy)
             if ring is not None and not ring.is_empty and ring.intersects(boundary):
                 out["buildings"].append((ring, _building_height_m(tags)))
-        elif tags.get("footway") == "sidewalk":
-            line = _way_line(way, xy)
-            if line is not None and line.intersects(boundary):
-                out["sidewalks"].append(line)
         elif tags.get("footway") == "crossing":
             line = _way_line(way, xy)
             if line is not None and line.intersects(boundary):

@@ -207,6 +207,9 @@ output/.cache/
 # plan views and the phase 3 before/after plots - IS committed: small, diffable, and the
 # 2D plan view is the reviewable artifact this project checks its 3D renders against.
 output/**/phase4_render_*.png
+# Same rule for a slice's 3D still, which render_slice.py --3d writes beside its 2D sheet:
+# the sheet and the geometry JSON are committed, the picture built from them is not.
+output/slices/*_3d.png
 
 .DS_Store
 .DS_Store

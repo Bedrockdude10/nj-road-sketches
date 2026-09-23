@@ -36,9 +36,6 @@ OUT_DIR = REPO_ROOT / "output" / "network"
 
 WGS84_EPSG = 4326
 
-#: How far from a crossing a traced kerb can be and still be the kerb it ENDS at. A crossing way
-#: is mapped kerb to kerb, so its own length plus a little is the honest reach.
-CROSSING_KERB_REACH_FT = 30.0
 
 
 def _decision_name(road: str, municipality: str) -> str | None:
@@ -78,39 +75,26 @@ def _paint_rows(corridor, facility, town: str) -> list[dict]:
     return rows
 
 
-def _context_rows(area: str, kerbs: list, pavement) -> list[dict]:
-    """Buildings, sidewalks and crossing markings: the street's surroundings rather than the
-    street. Filed with no `name` because they belong to the AREA - a building fronts whichever
-    street it fronts, and deciding that here would be a join nothing downstream asked for.
+def _context_rows(area: str, pavement) -> list[dict]:
+    """The street's surroundings: buildings, and the crossing ways as the surveyor traced them.
 
-    The bars come from the surveyor's own `crossing:markings`, so an unmarked crossing paints
-    nothing. Trimmed against the traced kerbs the document already holds, which is why the kerbs
-    are passed in rather than re-read: two reads are two chances to disagree.
+    Filed with no `name` because they belong to the AREA - a building fronts whichever street it
+    fronts, and deciding that here would be a join nothing downstream asked for.
+
+    ONLY WHAT CANNOT BE DERIVED. The crossing BARS are not stored: export_scenario paints them
+    from the way, against the surveyor's own crossing:markings, so keeping them here would be a
+    second copy free to disagree. Sidewalks are not stored either - build_sidewalk_pieces derives
+    them from the design.
     """
-    from shapely import STRtree
-
-    from src.geometry.surveyed import crossing_bars_ft, crossing_lines_ft
-
     context = area_context(area)
-    # Only the kerbs NEAR each crossing. `carriageway_geometry_ft` trims the crossing where it
-    # meets a kerb, and handed all 75 borough-wide runs it trims against one on another street
-    # and collapses the way to a point.
-    tree = STRtree(kerbs) if kerbs else None
     # OSM footprints are coarser than the traced kerbs, so a few sit in the carriageway. Dropped
     # rather than drawn standing in the road - src/render/export.py does the same, against the
-    # same geometry. Skipped entirely where nothing is paved, which would drop every building.
+    # same geometry. Skipped where nothing is paved, which would drop every building.
     rows: list[dict] = [{"kind": "building", "height_m": round(height, 2), "geometry": ring}
                         for ring, height in context["buildings"]
                         if pavement is None or not ring.intersects(pavement)]
-    rows += [{"kind": "sidewalk", "geometry": line} for line in context["sidewalks"]]
-    for crossing in context["crossings"]:
-        marks = crossing.markings
-        near = ([kerbs[i] for i in tree.query(crossing.geometry.buffer(CROSSING_KERB_REACH_FT))]
-                if tree is not None else [])
-        rows += [{"kind": "crossing_bar", "markings": marks, "geometry": bar}
-                 for bar in crossing_bars_ft(crossing, near)]
-        rows += [{"kind": "crossing_line", "markings": marks, "geometry": line}
-                 for line in crossing_lines_ft(crossing, near)]
+    rows += [{"kind": "crossing_way", "markings": crossing.markings, "geometry": crossing.geometry}
+             for crossing in context["crossings"]]
     return rows
 
 
@@ -157,8 +141,7 @@ def network_features(area: str) -> gpd.GeoDataFrame:
             rows += _paint_rows(corridor, facility, town)
 
     paved = [r["geometry"] for r in rows if r["kind"] == "pavement"]
-    rows += _context_rows(area, [r["geometry"] for r in rows if r["kind"] == "kerb"],
-                          unary_union(paved) if paved else None)
+    rows += _context_rows(area, unary_union(paved) if paved else None)
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
 
@@ -185,8 +168,7 @@ def _summarise(features: gpd.GeoDataFrame) -> str:
             f"{(features['kind'] == 'bikeway').sum()} bikeway run(s) totalling "
             f"{_bikeway_ft(features):,.0f} ft, {(features['kind'] == 'bollard').sum()} bollards, "
             f"{(features['kind'] == 'building').sum()} buildings, "
-            f"{(features['kind'] == 'sidewalk').sum()} sidewalks, "
-            f"{(features['kind'] == 'crossing_bar').sum()} crossing bars")
+            f"{(features['kind'] == 'crossing_way').sum()} crossing ways")
 
 
 def _bikeway_ft(features: gpd.GeoDataFrame) -> float:

@@ -14,11 +14,16 @@ for empty.
 from __future__ import annotations
 
 import geopandas as gpd
+from shapely import reverse
 from shapely.geometry import LineString, Point
+from shapely.ops import substring
 
 from src.geometry.intersection.junction import IntersectionModel
 from src.geometry.model import Leg, NJ_STATE_PLANE_FT
 from src.geometry.treatments import DesignState
+
+#: Shorter than this is a stub the crop left at the window edge, not an approach worth a leg.
+MIN_APPROACH_FT: float = 20.0
 
 
 def slice_pavement(features: gpd.GeoDataFrame):
@@ -29,18 +34,37 @@ def slice_pavement(features: gpd.GeoDataFrame):
     return unary_union(paved) if paved else None
 
 
-def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float]) -> dict[str, Leg]:
-    """One leg per named street in the window, keyed by a slug of its name.
+def _approaches(line: LineString, node: Point) -> list[LineString]:
+    """The street, split at the junction into the approaches that RADIATE from it.
 
-    The street's CLIPPED centreline, so a leg is exactly as long as the drawing is wide. That is
-    the frame-scale rule from the other end (SKILLS.md 0b): here the crop IS the extent, so a
+    A Leg in this project is an approach measured outward from a node, and every placement that
+    reads `offset_ft` - a near-corner sign, a stop bar, a crossing - means "this far out from the
+    junction". Handed a whole street instead, station 0 is wherever the crop happened to cut it,
+    so a sign "at the near corner" stands mid-block. That is what put a W16-21P in the
+    carriageway; it was never a bad placement rule, it was a leg that was not a leg.
+    """
+    at = line.project(node)
+    back, ahead = substring(line, 0.0, at), substring(line, at, line.length)
+    # Reversed so both run OUTWARD from the node, which is the direction a leg's stations count.
+    return [piece for piece in (reverse(back), ahead)
+            if isinstance(piece, LineString) and piece.length > MIN_APPROACH_FT]
+
+
+def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
+             node: Point) -> dict[str, Leg]:
+    """One leg per APPROACH: each named street in the window, split at the junction.
+
+    The clipped centreline, so a leg is exactly as long as the drawing is wide. That is the
+    frame-scale rule from the other end (SKILLS.md 0b): here the crop IS the extent, so a
     treatment applies to all of the street in the picture by construction.
     """
     legs: dict[str, Leg] = {}
     for row in streets.itertuples():
-        for index, piece in enumerate(getattr(row.geometry, "geoms", [row.geometry])):
-            if not isinstance(piece, LineString) or piece.length <= 0:
-                continue
+        pieces = [approach
+                  for part in getattr(row.geometry, "geoms", [row.geometry])
+                  if isinstance(part, LineString) and part.length > 0
+                  for approach in _approaches(part, node)]
+        for index, piece in enumerate(pieces):
             slug = str(row.name_).lower().replace(" ", "_")
             # WITHOUT A WIDTH A LEG IS NOT A STREET: every treatment sizes its section off
             # curb_to_curb_ft, and a leg missing it refuses the facility with "no width -
@@ -56,7 +80,8 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
     """The (model, state) for one slice, ready for export_scenario or plot_design_state.
 
     `features` is a slice of the document in state-plane feet - what render_slice.slice_around
-    returns. The centre is the window's own, not a junction node: a crop has no node.
+    returns. The window's own centre is the node every leg radiates from: a crop has no OSM node,
+    and centring the window on the junction you want drawn is what choosing the crop MEANS.
     """
     streets = features[features["kind"] == "street"].rename(columns={"name": "name_"})
     minx, miny, maxx, maxy = features.total_bounds
@@ -71,7 +96,7 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
     traced = {row.name_: row.geometry.area / length
               for row in paved.itertuples()
               if (length := streets[streets["name_"] == row.name_].geometry.length.sum()) > 0}
-    legs = _legs_of(streets, traced)
+    legs = _legs_of(streets, traced, center_ft)
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
     model = IntersectionModel(

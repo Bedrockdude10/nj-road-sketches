@@ -224,7 +224,7 @@ def test_a_render_is_a_slice_of_the_document(tmp_path) -> None:
     no IntersectionModel. If a marking is missing from the picture it is missing from the file.
     """
     from scripts.export_network import export_network
-    from scripts.render_slice import draw, load_network, slice_around, _center_ft
+    from scripts.render_slice import _center_ft, draw_2d, load_network, slice_around
 
     export_network(AREA, tmp_path)
     network = load_network(AREA, tmp_path)
@@ -235,7 +235,7 @@ def test_a_render_is_a_slice_of_the_document(tmp_path) -> None:
     assert {"street", "kerb", "bikeway", "bollard"} <= kinds, (
         f"a slice at the corridor's central junction should carry the facility; got {kinds}")
 
-    out = draw(around, "test", tmp_path / "slice.png")
+    out = draw_2d(around, "test", tmp_path)
     assert out.exists() and out.stat().st_size > 10_000
 
 
@@ -243,17 +243,27 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     """The other end of the same pipeline: the local-metre document blender_scene.py consumes,
     built from the GeoJSON alone. Asserted rather than rendered because Blender is a minute and
     a subprocess - what can go wrong HERE is the translation, and that is all in the numbers.
+
+    Through `export_scenario`, which is the point: there is no second serializer for the network
+    path to drift from. A slice reaches Blender by being a (model, state) pair like any other.
     """
+    import json
     import math
 
     from scripts.export_network import export_network
-    from scripts.render_slice import load_network, slice_around, _center_ft
-    from scripts.render_slice_3d import scene_document
+    from scripts.render_slice import _center_ft, design_for, load_network, slice_around, slice_context
+    from src.render.export import export_scenario
 
     export_network(AREA, tmp_path)
     around = slice_around(load_network(AREA, tmp_path),
                           _center_ft("-74.7619598,40.389179"), 320.0)
-    doc = scene_document(around, "test")
+    model, state, pavement = design_for(around)
+    context = slice_context(around)
+    out = tmp_path / "slice_3d.json"
+    export_scenario(model, state, "test", out, pavement=pavement,
+                    buildings=context["buildings"], crossings=context["crossings"],
+                    traffic_control=[], street_furniture=[])
+    doc = json.loads(out.read_text())
 
     # blender_scene.REQUIRED_KEYS, copied rather than imported: that module runs in Blender's
     # interpreter and .importlinter forbids reaching into it from here.

@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-"""Draw a 2D sheet from a SLICE of a network GeoJSON. No site, no scenario, no model.
-
-A "site" here is a window onto the borough document, so a sheet is a crop plus a scale:
+"""Render a 2D sheet and a 3D still from a SLICE of a network GeoJSON. No site, no scenario file.
 
     scripts/render_slice.py --street "Broad Street"
-    scripts/render_slice.py --around -74.76196,40.38918 --radius-ft 300 --name broad_greenwood
+    scripts/render_slice.py --around=-74.76196,40.38918 --radius-ft 300 --name broad_greenwood --3d
 
-Everything drawn comes from the file `scripts/export_network.py` wrote. Nothing is recomputed
-here - if a marking is missing from the picture it is missing from the document, which is the
+A "site" here is a window onto the borough document, so a drawing is a crop plus a decision:
+`slice_design` turns the crop into the (model, state) pair this project's renderers already
+take, `route_decision_for` says what is proposed along each street in it, and `plot_design_state`
+and `export_scenario` draw it. Nothing about the geometry is computed here - if a marking is
+missing from the picture it is missing from the document or from the treatment, which is the
 property that makes the two impossible to disagree.
 """
 from __future__ import annotations
@@ -26,24 +27,16 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt   # after matplotlib.use: the backend must be set first
 
 from src.geometry.model import NJ_STATE_PLANE_FT
+from src.geometry.network.slice_design import slice_design, slice_pavement
+from src.geometry.treatments import route_decision_for
+from src.render.export import export_scenario
+from src.render.plan_view import plot_design_state
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 NETWORK_DIR = REPO_ROOT / "output" / "network"
 OUT_DIR = REPO_ROOT / "output" / "slices"
 
-#: Matched to src/render/plan_view.py so a slice and a junction sheet read as the same drawing.
-STYLE: dict[str, dict] = {
-    "street":         dict(color="#9a9a9a", linewidth=0.8, linestyle=(0, (6, 4)), zorder=1),
-    "kerb":           dict(color="#2b2b2b", linewidth=1.4, zorder=4),
-    "bikeway":        dict(color="mediumseagreen", alpha=0.45, zorder=2),
-    "bikeway_buffer": dict(color="#c8c8c8", alpha=0.7, zorder=2),
-    "edge_line":      dict(color="seagreen", linewidth=1.6, zorder=3),
-    "bollard":        dict(color="darkorange", markersize=2.5, zorder=6),
-    "crossing":       dict(color="#4a4a4a", markersize=3.0, marker="+", zorder=5),
-}
-DRAW_ORDER = ("street", "bikeway", "bikeway_buffer", "kerb", "edge_line", "crossing", "bollard")
-
-FT_PER_IN = 120.0
+WGS84_EPSG = 4326
 
 
 def load_network(area: str, network_dir: Path = NETWORK_DIR) -> gpd.GeoDataFrame:
@@ -72,32 +65,78 @@ def slice_for_street(network: gpd.GeoDataFrame, street: str, pad_ft: float = 80.
     return gpd.clip(network, named.union_all().buffer(pad_ft).envelope)
 
 
-def draw(features: gpd.GeoDataFrame, title: str, out_path: Path) -> Path:
-    minx, miny, maxx, maxy = features.total_bounds
-    fig, ax = plt.subplots(figsize=((maxx - minx) / FT_PER_IN, (maxy - miny) / FT_PER_IN))
+def _parts(geom):
+    """A clip can split one footprint or way into several; each is its own record."""
+    return [g for g in getattr(geom, "geoms", [geom]) if g is not None and not g.is_empty]
 
-    for kind in DRAW_ORDER:
-        part = features[features["kind"] == kind]
-        if part.empty:
-            continue
-        style = dict(STYLE[kind])
-        if part.geom_type.isin(("Point", "MultiPoint")).all():
-            part.plot(ax=ax, marker=style.pop("marker", "o"), linestyle="none", **style)
-        else:
-            part.plot(ax=ax, **style)
 
-    ax.set_title(title, fontsize=9, loc="left")
-    ax.set_aspect("equal")
-    ax.set_axis_off()
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_path, dpi=200, bbox_inches="tight", facecolor="white")
+def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
+    """The document's own context, in the shape the OSM fetchers return it.
+
+    Passed to the renderers so they do NOT fetch: `fetch_buildings` and friends take a centre and
+    a radius, and the largest radius fitting the declared snapshot bbox is smaller than the
+    borough, so a slice near its edge would silently lose its surroundings.
+    """
+    wgs84 = features.to_crs(WGS84_EPSG)
+    buildings = wgs84[wgs84["kind"] == "building"]
+    crossings = wgs84[wgs84["kind"] == "crossing_way"]
+    return {
+        "buildings": [{"coords_wgs84": list(part.exterior.coords), "height_m": row.height_m,
+                       "height_source": "osm", "tags": {}}
+                      for row in buildings.itertuples() for part in _parts(row.geometry)
+                      if part.geom_type == "Polygon"],
+        "crossings": [{"coords_wgs84": list(part.coords), "node_ids": [],
+                       "tags": {"crossing:markings": row.markings}
+                                if isinstance(row.markings, str) else {}}
+                      for row in crossings.itertuples() for part in _parts(row.geometry)
+                      if part.geom_type == "LineString"],
+    }
+
+
+def design_for(features: gpd.GeoDataFrame):
+    """(model, state, pavement) for a slice, with every route decision in it applied.
+
+    EVERY street in the window is offered its decision, not one named street: that is what makes
+    this a network drawing rather than a site. A street with no decision simply gets none back.
+    """
+    model, state = slice_design(features)
+    for street in sorted({leg.name for leg in model.legs.values()}):
+        decision = route_decision_for(street, features["municipality"].dropna().iloc[0])
+        if decision is not None:
+            state = decision.apply_to(state, model)
+    return model, state, slice_pavement(features)
+
+
+def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
+    model, state, pavement = design_for(features)
+    context = slice_context(features)
+    fig, ax = plt.subplots(figsize=(11, 11))
+    plot_design_state(ax, model, state, name, crossings=context["crossings"],
+                      sidewalks=[], traffic_control=[], street_furniture=[], pavement=pavement)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{name}.png"
+    fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-    return out_path
+    return out
+
+
+def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path) -> Path:
+    from scripts.phase4_render_3d import find_blender, render_all
+
+    model, state, pavement = design_for(features)
+    context = slice_context(features)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    geometry, png = out_dir / f"{name}_3d.json", out_dir / f"{name}_3d.png"
+    export_scenario(model, state, name, geometry, pavement=pavement,
+                    buildings=context["buildings"], crossings=context["crossings"],
+                    traffic_control=[], street_furniture=[])
+    render_all(find_blender(), [(geometry, png)])
+    return png
 
 
 def _center_ft(lonlat: str) -> Point:
     lon, lat = (float(v) for v in lonlat.split(","))
-    return gpd.GeoSeries([Point(lon, lat)], crs=4326).to_crs(NJ_STATE_PLANE_FT).iloc[0]
+    return gpd.GeoSeries([Point(lon, lat)], crs=WGS84_EPSG).to_crs(NJ_STATE_PLANE_FT).iloc[0]
 
 
 def main() -> None:
@@ -108,10 +147,12 @@ def main() -> None:
     parser.add_argument("--around", help="lon,lat to centre a square window on")
     parser.add_argument("--radius-ft", type=float, default=300.0)
     parser.add_argument("--name", help="output stem (default: derived from the slice)")
+    parser.add_argument("--network-dir", type=Path, default=NETWORK_DIR)
     parser.add_argument("--out-dir", type=Path, default=OUT_DIR)
+    parser.add_argument("--3d", dest="three_d", action="store_true", help="also render in 3D")
     args = parser.parse_args()
 
-    network = load_network(args.area)
+    network = load_network(args.area, args.network_dir)
     if args.street:
         features, stem = slice_for_street(network, args.street), args.street.lower().replace(" ", "_")
     elif args.around:
@@ -122,9 +163,12 @@ def main() -> None:
 
     if features.empty:
         raise SystemExit("that slice is empty - nothing to draw")
+    stem = args.name or stem
     counts = ", ".join(f"{n} {k}" for k, n in features["kind"].value_counts().items())
     print(f"{stem}: {len(features)} feature(s) - {counts}")
-    print(f"wrote {draw(features, stem, args.out_dir / f'{args.name or stem}.png')}")
+    print(f"wrote {draw_2d(features, stem, args.out_dir)}")
+    if args.three_d:
+        print(f"wrote {draw_3d(features, stem, args.out_dir)}")
 
 
 if __name__ == "__main__":

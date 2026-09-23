@@ -352,7 +352,8 @@ def _tactile_pad_props(line: LineString, pavement, leg_name: str, heading: float
 
 
 def _osm_crossing_hardware_props(state: DesignState, crossings: list[dict], nodes_ft: list[dict],
-                                  kerb_ways: list | None = None, center_ft: Point = None) -> list[dict]:
+                                  kerb_ways: list | None = None, center_ft: Point = None,
+                                  pavement=None) -> list[dict]:
     """Pushbuttons, RRFBs and tactile paving pads for every crossing we can match to a leg.
 
     Reuses the same matcher the crosswalk geometry uses, so a crossing credited to a leg
@@ -360,13 +361,7 @@ def _osm_crossing_hardware_props(state: DesignState, crossings: list[dict], node
     """
     from src.render.crosswalks import match_crossing_lines_to_legs  # local: avoids an import cycle
 
-    try:
-        pavement = build_pavement_polygon(state.corner_fillets)
-    except (ValueError, KeyError, StopIteration):
-        # A junction whose pavement ring can't be built (see build_pavement_polygon's
-        # acute-corner diagnosis) still gets its pushbuttons and beacons; only the pads,
-        # which need the roadway edge, are skipped.
-        pavement = None
+    pavement = pavement if pavement is not None else _modelled_pavement(state)
 
     kerb_pads, covered_ways = _kerb_tactile_pad_props(kerb_ways or [], crossings, pavement, center_ft)
 
@@ -489,6 +484,23 @@ def _leg_sign_position_ft(leg, offset_ft: float, side: str,
     lateral = to_curb + SIGN_SIDEWALK_SETBACK_FT
     pos = _step_outward_clear(base, n, lateral, pavement, extra_ft=SIGN_SIDEWALK_SETBACK_FT)
     return (tuple(pos) if pos is not None else None), heading
+
+
+def _modelled_pavement(state: DesignState):
+    """The roadway a derived prop has to stand clear of, when the caller did not supply one.
+
+    THE CALLER'S WINS, because only the caller knows how much road is in the picture. A
+    junction's is its corner-fillet ring, which covers every approach at the node and so
+    catches a sign stepped sideways off one leg into another's carriageway. A slice has no
+    fillets and no node, and a ring built from none of them is not "no roadway" - it is the
+    reason a W16-21P stood in Blackwell Avenue: `_step_outward_clear` was handed None, found
+    nothing to clear, and left the sign where half a nominal width put it. The slice passes
+    its own traced asphalt instead, which is the same statement about more road.
+    """
+    try:
+        return build_pavement_polygon(state.corner_fillets)
+    except (ValueError, KeyError, StopIteration):
+        return None
 
 
 def _step_outward_clear(base, direction, lateral_ft: float, pavement, extra_ft: float = 0.0,
@@ -977,7 +989,8 @@ def _daylight_device_props(state: DesignState, offsets_ft: dict, so_far: list[di
 
 def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, center_ft: Point,
                  traffic_control: list[dict] | None = None, street_furniture: list[dict] | None = None,
-                 crossings: list[dict] | None = None, kerb_ways: list | None = None) -> list[dict]:
+                 crossings: list[dict] | None = None, kerb_ways: list | None = None,
+                 pavement=None) -> list[dict]:
     """All street-furniture props for one scenario export: a streetlight at every corner
     (always), the junction's traffic control, and any site- or scenario-specific extras.
 
@@ -1013,16 +1026,12 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, 
     """
     furniture_ft = control_nodes_ft(street_furniture)  # same lon/lat -> point_ft conversion
     control_ft = control_nodes_ft(traffic_control)
-    # The real modelled roadway, so every sign can be placed clear of IT rather than clear
-    # of a nominal half-width that the traced kerb often exceeds near a corner.
-    try:
-        pavement = build_pavement_polygon(state.corner_fillets)
-    except ValueError:
-        pavement = None
+    pavement = pavement if pavement is not None else _modelled_pavement(state)
     props = (
         _osm_streetlight_props(furniture_ft)
         + _osm_control_props(state, control_ft, pavement)
-        + _osm_crossing_hardware_props(state, crossings or [], control_ft, kerb_ways, center_ft)
+        + _osm_crossing_hardware_props(state, crossings or [], control_ft, kerb_ways, center_ft,
+                                        pavement)
         + _hydrant_props(furniture_ft)
         + _traffic_signal_props(model, state, center_ft, pavement)
         + _no_turn_on_red_props(model, state, offsets_ft, pavement)
