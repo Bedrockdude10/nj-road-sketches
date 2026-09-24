@@ -312,6 +312,42 @@ def test_a_leg_with_no_osm_tag_keeps_the_default():
     assert DesignState.from_model(FakeModel()).centerline_style("untagged") == "single_yellow_dashed"
 
 
+def test_speed_limit_precedence_is_per_leg_osm_over_corridor_wide_config():
+    """The same shape as centerline_style's precedence, with one difference: there is no
+    DEFAULT_SPEED_LIMIT_MPH sentinel to catch a config entry that repeats the repo default,
+    because config.yaml's speed_limit_mph is always a real number someone typed by reading a
+    tag - so it never loses to OSM for being a placeholder. It loses for being the wrong FRAME:
+    it is one number for a whole corridor, while maxspeed is per leg, and wbroad_louellen's own
+    config is the real case - 25 for the Broad St corridor while Louellen Street's own OSM tag
+    is 30.
+    """
+    class FakeModel:
+        config = {"corridor": {"speed_limit_mph": 25}, "legs": {
+            "agrees": {}, "disagrees": {}, "untagged": {},
+        }}
+        legs = {}
+        corner_fillets = {}
+        leg_osm_tags = {"agrees": {"maxspeed": "25 mph"}, "disagrees": {"maxspeed": "30 mph"}}
+
+    state = DesignState.from_model(FakeModel())
+    assert state.speed_limit_mph("agrees") == 25
+    assert state.speed_limit_mph("disagrees") == 30, "OSM's per-leg tag must beat the corridor figure"
+    assert state.speed_limit_mph("untagged") == 25, "the corridor figure is the fallback, not nothing"
+
+
+def test_speed_limit_is_none_where_neither_source_states_one():
+    """None is a refusal EndTheBikeway's sharrow gate already knows how to read - not a slow
+    guess and not the corridor figure invented for a leg with no corridor at all (a slice has no
+    "corridor" key in its config; see slice_design.py)."""
+    class FakeModel:
+        config = {"legs": {"untagged": {}}}
+        legs = {}
+        corner_fillets = {}
+        leg_osm_tags = {}
+
+    assert DesignState.from_model(FakeModel()).speed_limit_mph("untagged") is None
+
+
 @needs_source_data
 @pytest.mark.parametrize("site", SITES)
 def test_stop_bars_use_the_surveyed_position(site, site_models):

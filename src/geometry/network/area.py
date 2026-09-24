@@ -36,6 +36,15 @@ MIN_CORRIDOR_FT: float = 100.0
 #: a parallel street's node projects onto this axis and reports a junction that is not there.
 ON_AXIS_FT: float = 1.0
 
+#: `access` values that say a way is not the public's to redesign - a corridor carries a route
+#: decision, and a route decision presumes anyone may use the road. `private` and `customers` say
+#: so explicitly (Eaton Court: "Private service road on private property"). `permissive` and
+#: `yes` are still open to the public, so they stay in. `unknown` asserts nothing, so it defaults
+#: open too - an absent statement is not a restriction. This is NOT a carriageway gate: the way is
+#: still real asphalt (`is_carriageway` in src/geometry/context_roads.py still says yes, and
+#: `_context_roadways_ft` still draws it), only ineligible to become a Corridor.
+NOT_PUBLIC_ACCESS = frozenset({"private", "customers"})
+
 
 def _projected_nodes(nodes: dict[int, dict]) -> NodeXY:
     """Every node in state-plane feet, transformed in one call."""
@@ -48,10 +57,19 @@ def _projected_nodes(nodes: dict[int, dict]) -> NodeXY:
 
 def _named_carriageways(snapshot: dict) -> list[tuple[str, dict]]:
     """(normalised name, way) per named carriageway. A corridor is keyed on its name, so an
-    unnamed service road has nothing to be part of."""
+    unnamed service road has nothing to be part of.
+
+    Gated on `access` HERE, not in `is_carriageway`: `is_carriageway` is also what
+    `_context_roadways_ft` (src/geometry/intersection/paved.py) uses to draw context roadways, so
+    excluding a private way there would erase real asphalt from the picture. A private road is
+    still asphalt; it is just not a corridor - nothing about it is the borough's to redesign, so
+    it gets no route decision and no `street`/`pavement` row, but it stays in the document as its
+    own `osm_roads` row and still gets drawn as context. See `NOT_PUBLIC_ACCESS` above.
+    """
     return [(_street_name(tags["name"]), way)
             for way in snapshot["ways"]
-            if (tags := way.get("tags") or {}).get("name") and is_carriageway(tags)]
+            if (tags := way.get("tags") or {}).get("name") and is_carriageway(tags)
+            and tags.get("access") not in NOT_PUBLIC_ACCESS]
 
 
 def _way_line(way: dict, xy: NodeXY) -> LineString | None:

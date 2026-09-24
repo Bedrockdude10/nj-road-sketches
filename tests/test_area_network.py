@@ -10,13 +10,14 @@ import pytest
 import shapely
 from shapely.geometry import LineString, Point, Polygon
 
+from src.geometry.context_roads import is_carriageway
 from src.geometry.intersection.municipality import municipal_boundary_ft
 from src.geometry.network import corridors_from_models
 from src.geometry.treatments import CorridorCalming, route_decision_for
 from src.geometry.treatments.corridor import CorridorFacility
-from src.geometry.network.area import (MIN_CORRIDOR_FT, Corridor, _named_carriageways, _pieces_of,
-                                       _projected_nodes, _snapshot_center, _way_line,
-                                       area_corridors)
+from src.geometry.network.area import (MIN_CORRIDOR_FT, NOT_PUBLIC_ACCESS, Corridor,
+                                       _named_carriageways, _pieces_of, _projected_nodes,
+                                       _snapshot_center, _way_line, area_corridors)
 from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm
 from tests.conftest import needs_source_data
 
@@ -67,6 +68,51 @@ def test_a_street_osm_holds_in_pieces_stays_whole(borough: list[Corridor]) -> No
     eaton = [corridor for corridor in borough if corridor.name == "Eaton Place"]
     assert len(eaton) > 1
     assert sum(corridor.length_ft for corridor in eaton) > 900.0
+
+
+def test_a_private_way_never_becomes_a_corridor(borough: list[Corridor]) -> None:
+    """Eaton Court is `access=private, highway=service` on private property, per its own OSM
+    tags - real asphalt, but nobody's to redesign. It must carry no route decision, so it gets no
+    Corridor, and therefore no `street`/`pavement` row in the exported document."""
+    assert not any(corridor.name == "Eaton Court" for corridor in borough)
+
+
+def test_named_carriageways_excludes_private_access_but_leaves_is_carriageway_alone() -> None:
+    """The gate is on the CORRIDOR list, not on `is_carriageway`: `is_carriageway` is also what
+    draws real context-roadway asphalt (src/geometry/intersection/paved.py), so gating it there
+    would erase Eaton Court's pavement from the picture rather than just its route decision."""
+    private_way = {"tags": {"name": "Eaton Court", "highway": "service", "access": "private"}}
+    customers_way = {"tags": {"name": "Plaza Drive", "highway": "service", "access": "customers"}}
+    permissive_way = {"tags": {"name": "Farm Lane", "highway": "track", "access": "permissive"}}
+    public_way = {"tags": {"name": "Model Ave", "highway": "residential"}}
+    snapshot = {"ways": [private_way, customers_way, permissive_way, public_way]}
+
+    names = {name for name, _way in _named_carriageways(snapshot)}
+    assert names == {"Farm Lane", "Model Ave"}
+    assert {"private", "customers"} == NOT_PUBLIC_ACCESS
+    assert is_carriageway(private_way["tags"]), "still real asphalt for context roadways"
+
+
+def test_a_private_road_stays_in_the_document_as_osm_roads(tmp_path) -> None:
+    """The document is lossless: Eaton Court keeps its full tags as an `osm_roads` row even
+    though it gets no `street` or `pavement` row of its own.
+
+    `tags` round-trips through GeoJSON as a dict, not the `json.dumps` string `_osm_row` wrote -
+    the GeoJSON driver decodes a JSON-shaped string property back into an object on read.
+    """
+    from scripts.export_network import export_network
+
+    path = export_network(AREA, tmp_path)
+    back = gpd.read_file(path)
+
+    assert not (back[back["kind"] == "street"]["name"] == "Eaton Court").any()
+    assert not (back[back["kind"] == "pavement"]["name"] == "Eaton Court").any()
+
+    roads = back[back["kind"] == "osm_roads"]
+    assert any(t.get("name") == "Eaton Court" and t.get("access") == "private"
+              for t in roads["tags"]), (
+        "Eaton Court must still be findable as osm_roads - only its street/pavement rows go away"
+    )
 
 
 def test_every_crossing_lands_on_the_street_it_is_filed_under(borough: list[Corridor]) -> None:

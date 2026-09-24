@@ -9,6 +9,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 
 
+from src.geometry.context_roads import osm_maxspeed_mph
 from src.geometry.cross_streets import cross_streets_from_model
 from src.geometry.kerbs import kerb_openings_from_model
 from src.geometry.targets import LegTarget, Side
@@ -108,6 +109,11 @@ class DesignState:
     # of recomputing a different one and disagreeing with it - the same failure divider_ft's own
     # docstring already recounts once happening to the lane-width label.
     target_lane_room_ft: dict = field(default_factory=dict)
+    # leg name -> the posted speed limit in mph, or None where neither OSM nor config states
+    # one. An OBSERVED FACT like existing_centerline_styles above - resolved once in from_model,
+    # by the same by-provenance precedence, so every consumer (EndTheBikeway's sharrow gate)
+    # reads one answer instead of each re-deriving it. Ask through speed_limit_mph().
+    speed_limits_mph: dict = field(default_factory=dict)
 
     def refuse(self, leg_name: str, side: str, refusal: FacilityRefusal) -> None:
         """Record that this kerb was measured over `refusal`'s span and cannot take the facility.
@@ -159,8 +165,34 @@ class DesignState:
                           f"otherwise.")
             else:
                 centerline_styles[name] = DEFAULT_CENTERLINE_STYLE
+        # SAME SHAPE, DIFFERENT FRAME. maxspeed is a direct per-leg statutory fact, same standing
+        # as overtaking=no above, and it wins whenever it parses. But there is no repo-default
+        # placeholder to catch here the way DEFAULT_CENTERLINE_STYLE does: config.yaml's
+        # speed_limit_mph is a real number on every site (each one a transcription of the same
+        # tag this now reads directly - e.g. sites/wbroad_lanning/config.yaml). What makes it
+        # the weaker source is scope, not honesty - it is CORRIDOR-level, one number for a whole
+        # config, while maxspeed is PER LEG, and a corridor can carry more than one posted speed
+        # (nj31_wdelaware's config states 35 for NJ 31, over a W Delaware Ave leg OSM tags 25).
+        # EndTheBikeway's sharrow gate is asked per leg-side, so the per-leg tag is the truer
+        # frame and config is only the fallback for a leg OSM says nothing about.
+        corridor_speed = (model.config.get("corridor") or {}).get("speed_limit_mph")
+        speed_limits_mph = {}
+        for name in model.config["legs"]:
+            raw_speed = osm_tags.get(name, {}).get("maxspeed")
+            observed_speed = osm_maxspeed_mph(raw_speed)
+            if observed_speed is not None:
+                speed_limits_mph[name] = observed_speed
+                if corridor_speed is not None and corridor_speed != observed_speed:
+                    print(f"  NOTE: {name} is tagged maxspeed={raw_speed!r} in OSM "
+                          f"({observed_speed} mph) - using it over config.yaml's corridor-level "
+                          f"speed_limit_mph={corridor_speed}, which is one number for the whole "
+                          f"corridor and may not be what THIS leg is posted. Set a per-leg "
+                          f"override if {corridor_speed} is the one that should govern here.")
+            else:
+                speed_limits_mph[name] = corridor_speed
         return cls(legs=deepcopy(model.legs), corner_fillets=deepcopy(model.corner_fillets),
                    existing_centerline_styles=centerline_styles,
+                   speed_limits_mph=speed_limits_mph,
                    traffic_heads_toward={name: leg_cfg.get("traffic_heads_toward")
                                           for name, leg_cfg in model.config["legs"].items()},
                    kerb_openings=kerb_openings_from_model(model),
@@ -188,6 +220,16 @@ class DesignState:
         if treatment is not None:
             return treatment.style
         return self.existing_centerline_styles.get(leg_name, DEFAULT_CENTERLINE_STYLE)
+
+    def speed_limit_mph(self, leg_name: str) -> int | None:
+        """The posted speed on this leg, or None if neither OSM nor config states one.
+
+        None is a refusal, not a default: EndTheBikeway's SHARROW_MAX_SPEED_MPH gate already
+        treats an unstated speed as licensing no sharrows, so this must not invent one. See
+        from_model for where the answer is resolved and why OSM's per-leg tag outranks
+        config.yaml's corridor-level figure.
+        """
+        return self.speed_limits_mph.get(leg_name)
 
     def travel_lane_divider_shift(self, leg_name: str) -> tuple[float, str] | None:
         """How far off the alignment this leg's centreline paint sits, and toward which side.

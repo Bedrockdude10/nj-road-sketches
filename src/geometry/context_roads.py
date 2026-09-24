@@ -86,6 +86,34 @@ def osm_width_ft(raw) -> float | None:
         return None
 
 
+KMH_TO_MPH = 0.62137119
+
+
+def osm_maxspeed_mph(raw) -> int | None:
+    """An OSM maxspeed value in MPH, or None where it is absent or not a plain number.
+
+    Modelled on osm_width_ft right above: OSM's default unit is km/h unless the value carries
+    one, and the only unit worth handling here is the " mph" a US mapper states explicitly - see
+    the borough document, where every posted speed is written that way ("25 mph"). A bare number
+    is therefore km/h per the OSM wiki and gets converted, honestly, rather than assumed to
+    already be mph. Anything else - a range, "walk", "none", "signals", "urban" - returns None
+    rather than a guess: the one production reader of this (EndTheBikeway's sharrow gate,
+    SHARROW_MAX_SPEED_MPH) already treats an unstated speed as a refusal, so a None here means
+    "nobody stated one" and not "assume it's slow".
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if text.lower().endswith("mph"):
+        text, factor = text[:-3].strip(), 1.0
+    else:
+        text, factor = text, KMH_TO_MPH
+    try:
+        return round(float(text) * factor)
+    except ValueError:
+        return None
+
+
 def assumed_width_ft(tags: dict) -> float:
     """How wide to draw a street nobody traced.
 

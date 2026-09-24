@@ -16,8 +16,33 @@ from shapely.geometry import LineString
 
 from src.geometry.context_roads import (MIN_TRACED_FRACTION, ROADWAY_DEFAULT_WIDTH_FT,
                                         assign_kerbs_to_roads, assumed_width_ft, is_carriageway,
-                                        kerb_points, roadway_surface)
+                                        kerb_points, osm_maxspeed_mph, roadway_surface)
 from tests.conftest import SITES, needs_source_data
+
+
+# --------------------------------------------------------------------------
+# osm_maxspeed_mph: the borough document's own unit, honestly converted
+# --------------------------------------------------------------------------
+
+def test_a_us_tagged_speed_is_read_directly():
+    """"25 mph" is how every posted speed in the borough document is written - see the 34 ways
+    the borough carries at exactly this value."""
+    assert osm_maxspeed_mph("25 mph") == 25
+    assert osm_maxspeed_mph("40 mph") == 40
+
+
+def test_a_bare_number_is_kmh_per_the_osm_spec_and_gets_converted():
+    """No unit means km/h, not mph - converting nothing here would overstate every such tag by
+    about 60%, which licenses sharrows (SHARROW_MAX_SPEED_MPH) a real posting would refuse."""
+    assert osm_maxspeed_mph("30") == round(30 * 0.62137119)
+
+
+def test_unparseable_values_return_none_not_a_guess():
+    """A range, a word, or nothing stated - none of these license a guess. The sharrow gate this
+    feeds already treats None as a refusal, so returning anything else here would be inventing a
+    speed nobody posted."""
+    for raw in (None, "walk", "none", "signals", "national", "30-40"):
+        assert osm_maxspeed_mph(raw) is None
 
 
 def straight_street(length_ft=400.0):

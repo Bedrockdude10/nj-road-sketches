@@ -659,3 +659,63 @@ def test_a_proposal_BESIDE_an_observed_bay_is_still_held_to_the_target():
     assert [v.check for v in found] == ["travel_lane_over_target"]
     assert "east right" in found[0].detail
 
+
+# --------------------------------------------------------------------------
+# TruckRouteLanesHoldTheAllowance: hgv=designated demands TARGET_LANE_WIDTH_FT, even untouched
+# --------------------------------------------------------------------------
+
+class _FakeHgvModel:
+    """A model carrying only what this check reads - leg_osm_tags - matching the FakeModel
+    convention test_sites.py uses for the centerline-style precedence tests."""
+
+    def __init__(self, tags: dict):
+        self.leg_osm_tags = tags
+
+
+def test_a_designated_truck_route_narrower_than_target_is_a_violation():
+    """UNTOUCHED, unlike TravelLanesKeepTheirWidth's cases: nobody painted this kerb, and the
+    finding is exactly that nobody supplied the allowance hgv=designated demands. Louellen
+    Street's own width (19.3 ft, half 9.65 ft) is not our error when nothing is designated over
+    it - test_a_naturally_narrow_street_is_not_our_error pins that - but here OSM says trucks are
+    routed over this leg, so the same 9.65 ft is this check's whole reason to exist.
+    """
+    from src.checks import TruckRouteLanesHoldTheAllowance
+
+    state = a_state({"east": a_leg(width_ft=19.3)})
+    found = run(TruckRouteLanesHoldTheAllowance(), state=state,
+                model=_FakeHgvModel({"east": {"hgv": "designated"}}))
+    # Both sides: a_leg has no traced kerb to tell them apart, so both come out at the same
+    # 9.65 ft half-width and both are under target.
+    assert [v.check for v in found] == ["truck_route_lane_too_narrow"] * 2
+
+
+def test_a_designated_truck_route_at_or_over_target_is_fine():
+    from src.checks import TruckRouteLanesHoldTheAllowance
+
+    state = a_state({"east": a_leg(width_ft=30.0)})    # half is 15 ft, over the 11 ft target
+    found = run(TruckRouteLanesHoldTheAllowance(), state=state,
+                model=_FakeHgvModel({"east": {"hgv": "designated"}}))
+    assert found == []
+
+
+def test_a_narrow_leg_with_no_hgv_tag_is_not_this_checks_business():
+    """The other half of the pair above: same 19.3 ft leg, no hgv=designated - this check has
+    nothing to say about it. TravelLanesKeepTheirWidth is what rules an untouched narrow street
+    in generally is not an error; this one only adds a floor where OSM designates trucks."""
+    from src.checks import TruckRouteLanesHoldTheAllowance
+
+    state = a_state({"east": a_leg(width_ft=19.3)})
+    found = run(TruckRouteLanesHoldTheAllowance(), state=state,
+                model=_FakeHgvModel({"east": {"highway": "residential"}}))
+    assert found == []
+
+
+def test_no_model_means_no_finding():
+    """scene.model defaults to None - the same guard CorridorFacilityCarriesEveryApproach uses -
+    because leg_osm_tags lives on the model, not the state, and a check with nothing to read
+    must say nothing rather than guess."""
+    from src.checks import TruckRouteLanesHoldTheAllowance
+
+    state = a_state({"east": a_leg(width_ft=19.3)})
+    assert run(TruckRouteLanesHoldTheAllowance(), state=state) == []
+

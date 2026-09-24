@@ -182,11 +182,15 @@ class CorridorFacility:
         # import here would close the cycle.
         from src.geometry.treatments.bikeways.terminus import EndTheBikeway
 
-        speed = ((model.config.get("corridor") or {}).get("speed_limit_mph")
-                 if getattr(model, "config", None) else None)
         for leg_name, side in carrying:
             if state.municipal_limits_ft.get(leg_name) is None:
                 continue
+            # PER LEG, NOT PER CORRIDOR. state.speed_limit_mph reads OSM's maxspeed for THIS
+            # leg first and config.yaml's corridor-level speed_limit_mph only where OSM states
+            # nothing (see DesignState.from_model) - the sharrow gate this feeds is asked per
+            # leg-side, so a single corridor-wide figure was already the wrong frame for it; it
+            # used to read right here only because every carrying leg's own tag agrees with it.
+            speed = state.speed_limit_mph(leg_name)
             try:
                 state = state.apply(EndTheBikeway(LegSide(leg_name, side),
                                                    speed_limit_mph=speed), model=model)

@@ -1098,6 +1098,66 @@ class TravelLanesHoldTheTarget(SceneCheck):
         return violations
 
 
+class TruckRouteLanesHoldTheAllowance(SceneCheck):
+    """Where OSM tags a leg hgv=designated, its travel lane must not be pinched below
+    TARGET_LANE_WIDTH_FT.
+
+    hgv=designated IS THE REASON TARGET_LANE_WIDTH_FT IS 11 FT AND NOT NACTO'S 10 - see that
+    constant's own comment in treatments/base.py. This does not add a second, truck-specific
+    target: the 11 ft every other lane check already holds every leg to already carries the
+    allowance. It only confirms that a leg OSM says trucks actually use gets the target that was
+    supposed to cover them, painted or not - a truck route is a fact about the street, like the
+    leg's own width, not a decision this design made, so this fires on an untouched leg exactly
+    as it would on a restriped one.
+
+    Distinct from TravelLanesKeepTheirWidth, which only fires where THIS design painted
+    something: a road nobody has touched being narrower than the target is not this project's
+    doing there. Here it is the finding - the allowance the design relies on is not present.
+    """
+
+    def run(self, scene: SceneContext) -> list[Violation]:
+        from src.geometry.model import narrowest_half_width_ft
+        from src.geometry.targets import BOTH_SIDES, LegSide, LegTarget
+        from src.geometry.treatments import (TARGET_LANE_WIDTH_FT, LaneNarrowing,
+                                              MarkedParking, travel_lane_width_ft)
+
+        state, model = scene.state, scene.model
+        if model is None:
+            return []
+        osm_tags = getattr(model, "leg_osm_tags", {})
+        violations = []
+        for leg_name, leg in state.legs.items():
+            if leg.curb_to_curb_ft is None:
+                continue
+            if osm_tags.get(leg_name, {}).get("hgv") != "designated":
+                continue
+            narrowing = state.treatment_for(LaneNarrowing, LegTarget(leg_name))
+            for side in BOTH_SIDES:
+                painted_ft = 0.0
+                if narrowing is not None and side in narrowing.sides:
+                    painted_ft = narrowing.stripe_width_ft
+                parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
+                if parking is not None:
+                    painted_ft = parking.depth_ft + parking.curb_offset_ft
+                lane_ft = travel_lane_width_ft(state, leg_name, side, painted_ft)
+                if painted_ft <= 0:
+                    # Nothing painted this kerb, so the lane really ends at the TRACED kerb, not
+                    # the nominal one - the same fallback TravelLanesHoldTheTarget uses and for
+                    # the same reason (see its own comment on this line).
+                    traced_ft = narrowest_half_width_ft(leg, side)
+                    if traced_ft is not None:
+                        lane_ft = min(lane_ft,
+                                      traced_ft - _divider_shift_toward_ft(state, leg_name, side))
+                if lane_ft < TARGET_LANE_WIDTH_FT - LANE_WIDTH_TOLERANCE_FT:
+                    violations.append(Violation(
+                        "truck_route_lane_too_narrow",
+                        f"{leg_name} {side} carries a {lane_ft:.1f} ft travel lane where OSM "
+                        f"tags this leg hgv=designated - under the {TARGET_LANE_WIDTH_FT:.0f} ft "
+                        f"target that is supposed to already carry the truck allowance",
+                        tuple(leg.centerline.interpolate(leg.centerline.length / 2).coords[0])))
+        return violations
+
+
 class BollardsStandInTheirBuffer(SceneCheck):
     """A flex post protecting a bike lane must stand in the BUFFER, not in the lane.
 
