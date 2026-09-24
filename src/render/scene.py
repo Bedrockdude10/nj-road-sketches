@@ -267,7 +267,8 @@ class SceneGeometry:
         return check_scene(self.context(props, paint))
 
     def report_coverage(self, props: list[dict], paint: list,
-                        frame_radius_ft: float | None = None) -> list:
+                        frame_radius_ft: float | None = None,
+                        osm: dict | None = None) -> list:
         """Print, and return, the surveyed features inside the frame that the drawing does not draw.
 
         A NOTE RATHER THAN A FAILURE, deliberately. Kerb ramps and traffic control are PROPS
@@ -279,11 +280,14 @@ class SceneGeometry:
         coverage against. Derived from the model it is the leg reach plus a margin, and for a
         crop of the network that overshoots the window - 437 ft against a 300 ft half-width - so
         the report demanded features the drawing was never given.
+
+        `osm` is the same layers the caller built the drawing from - see coverage_gaps. Unsupplied,
+        each layer fetches its own copy, same as before.
         """
         from src.geometry.coverage import coverage_gaps, describe_coverage
 
         gaps = coverage_gaps(self.model, [*paint, *self.crosswalk_bands.values(), *props,
-                                          *self.surveyed_crossing_paint()], frame_radius_ft)
+                                          *self.surveyed_crossing_paint()], frame_radius_ft, osm)
         if gaps:
             print(describe_coverage(gaps))
         return gaps

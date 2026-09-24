@@ -108,7 +108,8 @@ class Uncovered:
         return f"{self.layer}: {self.count} of {self.total} surveyed in the frame are not drawn"
 
 
-def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | None = None) -> list[Uncovered]:
+def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | None = None,
+                  osm: dict | None = None) -> list[Uncovered]:
     """Every layer where the drawing omits a surveyed feature inside its own frame.
 
     `paint` is EVERYTHING THE DRAWING PUTS ON THE GROUND - PaintPieces, bare shapely footprints,
@@ -121,6 +122,13 @@ def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | No
 
     `frame_radius_ft` defaults to the frame both views draw (src/render/frame.py:junction_frame).
     Only layers WITH a gap come back; an empty list means the drawing is faithful.
+
+    `osm` is what the drawing itself was built from - keyed `crossings`, `traffic_control`,
+    `kerb_ways`, the fetchers' own names (src/geometry/network/area.py:area_context writes this
+    dict; a slice hands it back). Auditing against a SECOND, independently fetched pull can
+    report a gap that only exists between two Overpass calls, and a crop of the borough document
+    has no centre and radius to fetch at in the first place. Unsupplied, a layer fetches exactly
+    as it always has.
     """
     # The same guard kerbs.py:kerb_openings_from_model uses, for the same reason: a model can be a
     # stand-in that carries legs and config and no OSM at all, and every geometry test in this
@@ -129,7 +137,7 @@ def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | No
         return []
     radius_ft = _frame_radius_ft(model, frame_radius_ft)
     drawing = _read_drawing(paint)
-    gaps = [layer(model, drawing, radius_ft) for layer in LAYERS]
+    gaps = [layer(model, drawing, radius_ft, osm) for layer in LAYERS]
     return [gap for gap in gaps if gap is not None]
 
 
@@ -302,7 +310,8 @@ def _uncovered(layer: str, features: list[tuple]) -> Uncovered | None:
 # The layers
 # ---------------------------------------------------------------------------
 
-def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float) -> Uncovered | None:
+def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+                  osm: dict | None = None) -> Uncovered | None:
     """Surveyed pedestrian crossings the drawing does not draw.
 
     All crossings are traced WAYS carrying their own position, length and skew, so each one
@@ -325,11 +334,14 @@ def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: floa
     angles, and buffering it would let it "cover" a fifth of each); what counts here is a drawn
     line that runs ALONG the crossing rather than across it.
     """
+    from src.geometry.intersection.paved import _supplied
     from src.sources.osm_context import fetch_crossings
 
     inside, out_ft = _in_frame(model, radius_ft)
     features, unrecorded = [], []
-    for crossing in fetch_crossings(model.center_wgs84, radius_m=radius_ft * FT_TO_M):
+    crossings = _supplied(osm, "crossings",
+                          lambda: fetch_crossings(model.center_wgs84, radius_m=radius_ft * FT_TO_M))
+    for crossing in crossings:
         line = _line_ft(crossing["coords_wgs84"])
         if not inside(line):
             continue
@@ -374,7 +386,8 @@ def _markings_label(tags: dict | None) -> str:
     return "no markings tag"
 
 
-def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float) -> Uncovered | None:
+def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+              osm: dict | None = None) -> Uncovered | None:
     """Traced kerb ways in the frame that the render does not draw. THE CONTROL CASE.
 
     Expected clean: both renderers take the same one number (drawn_kerb_radius_ft), so the
@@ -387,19 +400,22 @@ def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float) -
     from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
 
     inside, out_ft = _in_frame(model, radius_ft)
+    kerb_ways = osm.get("kerb_ways") if osm else None
     drawn_ids = {way_id for _line, _tags, way_id
                  in kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                            radius_ft=drawn_kerb_radius_ft())}
+                                            radius_ft=drawn_kerb_radius_ft(), kerbs=kerb_ways)}
     features = [(way_id in drawn_ids, out_ft(line),
                  f"traced kerb way {way_id}, {line.length:.0f} ft long, kerb={(tags or {}).get('kerb', 'untagged')}")
                 for line, tags, way_id in kerb_lines_with_tags_ft(model.center_wgs84,
                                                                   model.center_ft,
-                                                                  radius_ft=radius_ft)
+                                                                  radius_ft=radius_ft,
+                                                                  kerbs=kerb_ways)
                 if inside(line)]
     return _uncovered("kerbs", features)
 
 
-def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float) -> Uncovered | None:
+def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+                   osm: dict | None = None) -> Uncovered | None:
     """Surveyed kerb ramps - kerb ways tagged tactile_paving=yes - with no pad drawn on them.
 
     The traced KERB WAY is the ramp's geometry (OSM records a ramp as `barrier=kerb` tagged
@@ -412,9 +428,10 @@ def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: flo
 
     inside, out_ft = _in_frame(model, radius_ft)
     pads = drawing.props_of(("tactile_paving_pad",))
+    kerb_ways = osm.get("kerb_ways") if osm else None
     features = []
     for line, tags, way_id in kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                                      radius_ft=radius_ft):
+                                                      radius_ft=radius_ft, kerbs=kerb_ways):
         if (tags or {}).get("tactile_paving") != "yes" or not inside(line):
             continue
         near_ft = min((line.distance(pad) for pad in pads), default=float("inf"))
@@ -424,7 +441,8 @@ def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: flo
     return _uncovered("kerb_ramps", features)
 
 
-def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float) -> Uncovered | None:
+def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+                         osm: dict | None = None) -> Uncovered | None:
     """Surveyed stop / give-way / signal nodes with no hardware drawn for them.
 
     Matched on the prop TYPE as well as the distance, so a node is only covered by hardware of
@@ -434,12 +452,14 @@ def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_f
     which kerb its sign stands on (see _osm_control_props), and overstating the pairing would
     be worse than reporting the junction.
     """
+    from src.geometry.intersection.paved import _supplied
     from src.render.props import control_nodes_ft  # local: props imports geometry, avoid a cycle
     from src.sources.osm_context import fetch_traffic_control
 
     inside, out_ft = _in_frame(model, radius_ft)
     features = []
-    nodes = fetch_traffic_control(model.center_wgs84, radius_m=radius_ft * FT_TO_M)
+    nodes = _supplied(osm, "traffic_control",
+                      lambda: fetch_traffic_control(model.center_wgs84, radius_m=radius_ft * FT_TO_M))
     for node in control_nodes_ft(nodes):
         kind = (node.get("tags") or {}).get("highway")
         if kind not in CONTROL_KINDS:

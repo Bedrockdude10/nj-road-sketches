@@ -20,6 +20,7 @@ from shapely import reverse
 from shapely.geometry import LineString, Point, box
 from shapely.ops import substring
 
+from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.junction import IntersectionModel
 from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
 from src.geometry.intersection.paved import _paved_surfaces_ft
@@ -162,6 +163,13 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     spans = _match_legs_to_osm_roads(legs, center_wgs84, center_ft,
                                      roads=(osm or {}).get("roads")) if osm is not None else {}
     dominant = {name: max(rows, key=lambda span: span.length_ft) for name, rows in spans.items()}
+    # R.S. 39:4-138(e) applies at every cross street whether or not this slice is centred on one,
+    # so a crop that never resolves it is making a false statement about the street, not merely
+    # drawing less. Gated like `spans` and `paved_surfaces`: without `osm` there is nothing to
+    # match against, and this call would fetch by centre-and-radius over the whole window instead
+    # of reading its own layers.
+    cross_streets = (cross_streets_ft(center_wgs84, center_ft, legs, osm=osm)
+                     if osm is not None else {})
 
     model = IntersectionModel(
         # `legs` is how legs_on_road tells which approaches are on a route, and therefore the
@@ -187,5 +195,6 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
         leg_road_spans=spans,
         leg_osm_tags={name: span.tags for name, span in dominant.items()},
         leg_osm_aligned={name: span.aligned for name, span in dominant.items()},
+        cross_streets=cross_streets,
     )
     return model, DesignState(legs=legs, corner_fillets={})

@@ -297,11 +297,13 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # which would be inventing a tree nothing recorded.
     tree_points_ft = osm_tree_points_ft(control_nodes_ft(street_furniture))
 
+    # Resolved ONCE, not inline at the call below: the coverage report audits this same drawing
+    # and used to fetch its own copy, so the props and the audit of the props could be built from
+    # two different pulls. One list, both readers.
+    kerb_ways = (kerb_ways if kerb_ways is not None
+                 else fetch_kerbs(model.center_wgs84, radius_m=KERB_RADIUS_M))
     props = build_props(model, state, crosswalk_offsets, center_ft, traffic_control, street_furniture,
-                         crossings,
-                         kerb_ways if kerb_ways is not None
-                         else fetch_kerbs(model.center_wgs84, radius_m=KERB_RADIUS_M),
-                         pavement=pavement)
+                         crossings, kerb_ways, pavement=pavement)
     paint, props = scene.build_paint_and_posts(props)
     # Invariants, not warnings: a pad in the carriageway is a false claim about an
     # accessibility feature, and a curb drawn across the intersection is a false claim
@@ -310,7 +312,9 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     scene.assert_valid(props, paint, scenario=name)
     # What the surveyor recorded inside this frame that the drawing does not contain.
     # Printed rather than raised - see SceneGeometry.report_coverage.
-    scene.report_coverage(props, paint, frame.radius_ft)
+    scene.report_coverage(props, paint, frame.radius_ft,
+                           osm={"crossings": crossings, "traffic_control": traffic_control,
+                                "kerb_ways": kerb_ways})
     paint_channels = paint_channels_local_m(
         paint, center_ft, lambda name: _leg_heading_deg(state.legs[name]))
 

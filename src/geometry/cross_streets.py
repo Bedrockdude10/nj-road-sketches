@@ -227,19 +227,24 @@ def _crosswalks_of(cross: "CrossStreet", traced: list[tuple[float, tuple]]) -> t
     return tuple(out)
 
 
-def _crossing_lines_ft(center_wgs84) -> list:
+def _crossing_lines_ft(center_wgs84, osm: dict | None = None) -> list:
     """Every traced OSM crossing near this junction, in state-plane feet. [] if none reachable.
 
     Fetched at the radius the crossings are DRAWN at, so a crossing in the picture is a crossing
-    the statute is measured from.
+    the statute is measured from - unless `osm` already carries "crossings", the same bargain
+    src/geometry/intersection/paved.py:_supplied strikes: a crop of the borough document has no
+    centre-and-radius to fetch at, only the window's own layers handed back by
+    src/geometry/network/area.py:area_context.
     """
     from src.geometry.intersection import to_state_plane
+    from src.geometry.intersection.paved import _supplied
     from src.geometry.treatments.crossings import CROSSING_CONTEXT_RADIUS_M
     from src.render.frame import context_radius_m
     from src.sources.osm_context import fetch_crossings
 
     try:
-        records = fetch_crossings(center_wgs84, radius_m=context_radius_m(CROSSING_CONTEXT_RADIUS_M))
+        records = _supplied(osm, "crossings", lambda: fetch_crossings(
+            center_wgs84, radius_m=context_radius_m(CROSSING_CONTEXT_RADIUS_M)))
     except Exception:
         return []
     lines = []
@@ -252,21 +257,30 @@ def _crossing_lines_ft(center_wgs84) -> list:
     return lines
 
 
-def cross_streets_ft(center_wgs84, center_ft: Point, legs: dict) -> dict:
+def cross_streets_ft(center_wgs84, center_ft: Point, legs: dict, osm: dict | None = None) -> dict:
     """{leg name: [CrossStreet]} for every other street these legs run across.
 
     Takes the pieces rather than a model so `load_intersection_model` can call it while the
     model is still being assembled. Guarded: no OSM reachable answers "none" rather than raising.
+
+    `osm`, supplied, wins over the fetch - the same bargain `_supplied` already strikes for the
+    driveways and roadway asphalt. A configured site has a centre and a radius to fetch at; a
+    crop of the borough document has neither, only the window's own "roads"/"crossings" layers,
+    and R.S. 39:4-138(e) applies at every cross street whether or not this call can reach OSM -
+    a window that answers "none" is stating that no other street crosses it, not merely omitting
+    one from the picture.
     """
     from src.geometry.intersection import ROAD_CONTEXT_RADIUS_M, to_state_plane
+    from src.geometry.intersection.paved import _supplied
     from src.render.frame import context_radius_m
     from src.sources.osm_context import fetch_roads
 
     try:
-        ways = fetch_roads(center_wgs84, radius_m=context_radius_m(ROAD_CONTEXT_RADIUS_M))
+        ways = _supplied(osm, "roads", lambda: fetch_roads(
+            center_wgs84, radius_m=context_radius_m(ROAD_CONTEXT_RADIUS_M)))
     except Exception:
         return {}
-    crossing_lines = _crossing_lines_ft(center_wgs84)
+    crossing_lines = _crossing_lines_ft(center_wgs84, osm)
 
     out: dict[str, list[CrossStreet]] = {}
     for leg_name, leg in legs.items():
