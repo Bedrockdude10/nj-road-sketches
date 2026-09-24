@@ -17,11 +17,14 @@ from src.geometry.treatments import (CENTERLINE_IS_WHITE, DesignState, RaiseCros
                                      RefugeIsland)
 from src.provenance import PLOT_STYLE, built_width_provenance
 from src.geometry import markings
+from src.geometry.paint import stroke_width_ft
 from src.geometry.markings import require_every_kind
 from src.render.props import (DRAWN_BY_PAINT, TACTILE_PAD_DEPTH_FT, TACTILE_PAD_WIDTH_FT,
                                build_props, pad_polygon, signalization_conflicts)
 from src.render.coords import wgs84_to_state_plane
-from src.render.crosswalks import centerline_paint_ft, centerline_start_ft
+from src.render.crosswalks import (CENTERLINE_STRIPE_WIDTH_FT,
+                                   TRANSVERSE_LINE_WIDTH_FT, centerline_paint_ft,
+                                   centerline_start_ft)
 from src.render.frame import frame_covering_radius_m, junction_frame
 from src.render.labels import LabelPlacer, ft_per_point
 from src.render.scene import SceneGeometry
@@ -70,6 +73,35 @@ def _side_normal(leg, side: str, along_ft: float) -> tuple[float, float]:
     hx, hy = _leg_heading(leg, along_ft)
     sign = 1.0 if str(side) == "left" else -1.0
     return (-hy * sign, hx * sign)
+
+
+def _at_real_width(kind, geometries: list, style: dict) -> tuple[list, dict]:
+    """`geometries` given the body the paint really has, and `style` with the stroke dropped.
+
+    A STRIPE IS A THING ON THE GROUND, NOT A WEIGHT ON A SHEET. Stroking it at a fixed
+    `linewidth` makes its drawn width a function of the sheet: 1.5 pt is ~4 ft of ground on a
+    630 ft site sheet and ~1.5 ft on a 300 ft one, so the same 0.82 ft edge line reads five
+    times too wide on one and twice on the other, and half a stripe of error looks identical
+    to none. src/checks.py:MarkingsDoNotCollide says the same thing from the other side, and
+    buffers by this same stroke_width_ft to compare a line with anything else.
+
+    IN FEET RATHER THAN CONVERTED TO POINTS, because a point conversion needs the axes' limits
+    and plot_design_state sets those LAST, after every marking is drawn - labels.ft_per_point
+    read mid-build returns a plausible wrong number rather than its 0.0 sentinel, which is why
+    labels are queued and flushed at the end instead. A buffered polygon needs no frame: it is
+    the same real width at any DPI, any --frame-scale, any window.
+
+    Flat caps and mitred joins, matching checks.py - a striper's paint ends square.
+
+    A kind whose style carries a `linestyle` keeps its stroke: the dash there is COSMETIC, laid
+    over continuous geometry, and a body would silently assert a solid stripe. The dashed
+    centreline is cut into real segments upstream and does not go through here.
+    """
+    width_ft = stroke_width_ft(kind)
+    if width_ft is None or kind.covers_area or "linestyle" in style:
+        return geometries, style
+    return ([g.buffer(width_ft / 2, cap_style=2, join_style=2) for g in geometries],
+            {key: value for key, value in style.items() if key != "linewidth"})
 
 
 def _draw(ax, geometries, boundary=None, **style) -> None:
@@ -410,10 +442,13 @@ def _draw_unmodelled_crossings(ax, scene):
     if bars:
         _draw(ax, bars, facecolor="white", edgecolor="0.35", linewidth=0.4, zorder=6)
     if lines:
-        # The dark stroke goes down FIRST and slightly wider, so the white sits inside it: white
-        # on grey asphalt at a 431 ft frame is otherwise nearly invisible.
-        _draw(ax, lines, color="0.35", linewidth=2.4, zorder=5)
-        _draw(ax, lines, color="white", linewidth=1.6, zorder=6)
+        # AT THE WIDTH THE 3D RENDER LAYS THEM AT - see _at_real_width. The dark rim goes round
+        # the body rather than under a wider stroke: white on grey asphalt at a 431 ft frame is
+        # otherwise nearly invisible, and a stroke drawn "slightly wider" than a cosmetic one is
+        # a width with no meaning on the ground.
+        _draw(ax, [line.buffer(TRANSVERSE_LINE_WIDTH_FT / 2, cap_style=2, join_style=2)
+                   for line in lines],
+              facecolor="white", edgecolor="0.35", linewidth=0.4, zorder=6)
 
 
 def _draw_crosswalks(ax, scene: SceneGeometry, labels: LabelPlacer, dimension_labels: bool):
@@ -681,6 +716,7 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
         # the geometry test answered "fill" for something that is neither.
         edge = (dict(color=PAINT_FILL_EDGE[style["color"]], linewidth=1, zorder=3)
                 if kind.covers_area else None)
+        geometries, style = _at_real_width(kind, geometries, style)
         _draw(ax, geometries, boundary=edge, **style)
     if bollards:
         ax.scatter([p.x for p in bollards], [p.y for p in bollards],
@@ -733,6 +769,7 @@ def _draw_centerlines(ax, scene: SceneGeometry):
     stop bar - the same rule the export uses, not a second copy of it.
     """
     state = scene.state
+    bodies: dict[str, list] = {}
     for leg_name, leg in state.legs.items():
         # The datum: thin, grey, dotted, the full length of the leg. Deliberately
         # unobtrusive - it is a construction line, not a marking on the road.
@@ -757,8 +794,15 @@ def _draw_centerlines(ax, scene: SceneGeometry):
         # the two used to hardcode it separately (SKILLS.md section 3: the channel decides the
         # colour, and this line is the one marking that has no channel).
         colour = "white" if style in CENTERLINE_IS_WHITE else "gold"
-        for line in centerline_paint_ft(leg, start_ft, style, shift_ft, shift_side):
-            ax.plot(*line.xy, color=colour, lw=1.6 if colour == "white" else 1.2, zorder=4)
+        # AT ITS REAL WIDTH, like every other marking - see _at_real_width. This one has no
+        # channel to carry the figure, so it comes from the constant the two stripes of a
+        # double yellow are separated by: without a body, a 0.82 ft separation drawn as two
+        # 1.2 pt strokes is one stripe on any sheet wider than ~500 ft.
+        bodies.setdefault(colour, []).extend(
+            line.buffer(CENTERLINE_STRIPE_WIDTH_FT / 2, cap_style=2, join_style=2)
+            for line in centerline_paint_ft(leg, start_ft, style, shift_ft, shift_side))
+    for colour, painted in bodies.items():
+        _draw(ax, painted, color=colour, zorder=4)
 
 
 # What OSM says about kerbside parking, and what that produced. Colour is the OSM statement

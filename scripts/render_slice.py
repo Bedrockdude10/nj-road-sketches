@@ -223,7 +223,7 @@ def design_for(features: gpd.GeoDataFrame, scenario: str = "two_way_bikeway"):
     context = slice_context(features)
     model, _ = slice_design(features, osm=context)
     state = SCENARIOS[scenario](existing_conditions(model), model, features)
-    return model, state, slice_pavement(features), context
+    return model, state, slice_pavement(features, state.corner_fillets), context
 
 
 def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
@@ -235,9 +235,6 @@ def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
                       **context_layers(context))
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.png"
-    # A double yellow's strokes are 4 in apart (DOUBLE_YELLOW_GAP_FT): 1.2 px at 200 dpi over a
-    # 600 ft window, narrower than the strokes, so they merge. The geometry is a true double and
-    # the sheet cannot resolve it - raise the density rather than widening the paint.
     fig.savefig(out, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out

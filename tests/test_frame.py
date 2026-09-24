@@ -17,7 +17,7 @@ import pytest
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
 
 from src.render.coords import FT_TO_M
 from src.render.frame import LEG_REACH_TOLERANCE
@@ -158,8 +158,8 @@ def test_the_centerline_paint_follows_the_road_in_both_views(site, site_models, 
     same lines - the chord passes neither.
     """
     from src.geometry.treatments import DesignState
-    from src.render.crosswalks import (DOUBLE_YELLOW_GAP_FT, centerline_paint_ft,
-                                       centerline_start_ft)
+    from src.render.crosswalks import (DOUBLE_YELLOW_SEPARATION_FT, NARROW_LINE_WIDTH_M,
+                                       centerline_paint_ft, centerline_start_ft)
     from src.render.scene import SceneGeometry
     from src.sources.osm_context import fetch_crossings
 
@@ -183,13 +183,26 @@ def test_the_centerline_paint_follows_the_road_in_both_views(site, site_models, 
         painted_legs += 1
         if style == "double_yellow":
             assert len(lines) == 2, f"a double yellow is two stripes, got {len(lines)}"
+            # AND THEY HAVE TO CLEAR EACH OTHER. The offset check below cannot see this: its
+            # tolerance is 0.35 ft, set so a vertex on a bending offset curve still reads as
+            # following the road, and the whole separation is 0.82 ft - so a pair drawn at a
+            # third of it passed. They were, for the life of this test: 0.10 m apart with a
+            # 0.15 m stripe, overlapping into one line in every render. Measured between the
+            # two stripes rather than from the alignment, because the gap is the thing that
+            # makes a double yellow a double yellow, and it is exact.
+            a, b = LineString(lines[0]), LineString(lines[1])
+            apart_m = max(b.distance(Point(q)) for q in a.coords)
+            assert apart_m == pytest.approx(DOUBLE_YELLOW_SEPARATION_FT * FT_TO_M, abs=0.005), (
+                f"{exported['name']}: the two stripes are {apart_m:.3f} m apart centre to "
+                f"centre and each is laid {NARROW_LINE_WIDTH_M} m wide - a double yellow needs "
+                f"{DOUBLE_YELLOW_SEPARATION_FT * FT_TO_M:.3f} m to leave the gap between them")
 
         for line in lines:
             for x_m, y_m in line:
                 point = Point(model.center_ft.x + x_m / FT_TO_M,
                               model.center_ft.y + y_m / FT_TO_M)
                 off_ft = leg.centerline.distance(point)
-                expected_ft = DOUBLE_YELLOW_GAP_FT / 2 if style == "double_yellow" else 0.0
+                expected_ft = DOUBLE_YELLOW_SEPARATION_FT / 2 if style == "double_yellow" else 0.0
                 assert off_ft == pytest.approx(expected_ft, abs=0.35), (
                     f"{exported['name']}: a centerline vertex sits {off_ft:.2f} ft off the "
                     f"leg's centerline where the paint should be {expected_ft:.2f} ft off it - "

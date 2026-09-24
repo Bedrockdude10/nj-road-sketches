@@ -512,6 +512,22 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
              "kerb": str(KerbType.from_tags(tags)),
              "height_m": KERB_HEIGHT_M[KerbType.from_tags(tags)]}
             for line, tags, _way_id in drawn_kerbs_with_tags
+        ] + [
+            # AND THE CORNER RETURNS, which OSM does not trace: a kerb line is mapped along the
+            # block and stops before the corner (every kerb at all five sites starts 12-58 ft
+            # out), so the arc between two legs is built here and existed in the plan view alone
+            # - drawn at plan_view.py:624 and nowhere in 3D. The rounded corner reached the
+            # render only as the edge of the asphalt slab, with no kerb stood up along it.
+            #
+            # RAISED, because a corner return is: where it is dropped for a ramp, the ramp is a
+            # prop with its own tactile pad, not an untagged kerb. A through-street pair's
+            # straight bridge is included for the same reason the plan view draws it - it is the
+            # kerb along the side of a street running through, not a corner.
+            {"coords": ring_to_local_m(pieces["arc"].coords, center_ft),
+             "kerb": str(KerbType.RAISED),
+             "height_m": KERB_HEIGHT_M[KerbType.RAISED]}
+            for pieces in state.corner_fillets.values()
+            if "error" not in pieces and pieces.get("arc") is not None
         ],
         # The driveways the kerb openings exist for. Drawn as a narrow strip of the same asphalt
         # rather than as a marking: it is a minor carriageway, and its job in the render is to

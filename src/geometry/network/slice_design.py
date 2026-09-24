@@ -28,7 +28,7 @@ from src.geometry.intersection.load import _build_corners
 from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
 from src.geometry.intersection.paved import _paved_surfaces_ft, to_state_plane
 from src.geometry.model.traced_kerbs import corner_radii_from_kerbs
-from src.geometry.model import Leg, NJ_STATE_PLANE_FT
+from src.geometry.model import Leg, NJ_STATE_PLANE_FT, build_pavement_polygon
 from src.geometry.treatments import DesignState
 
 #: Shorter than this is a stub the crop left at the window edge, not an approach worth a leg.
@@ -40,10 +40,29 @@ MIN_APPROACH_FT: float = 20.0
 ON_STREET_FT: float = 30.0
 
 
-def slice_pavement(features: gpd.GeoDataFrame):
-    """The asphalt in the window, as one geometry. What a junction gets from its corner ring."""
+def slice_pavement(features: gpd.GeoDataFrame, corner_fillets: dict | None = None):
+    """The asphalt in the window, as one geometry. What a junction gets from its corner ring.
+
+    THE CORNER RINGS WHERE THERE ARE ANY, exactly as a site does it - trimmed kerbs stitched
+    to their arcs, which is the only thing here that ROUNDS a corner. The traced polygons are
+    one axis-aligned rectangle per street, so at a junction two of them simply cross and the
+    corner is square; unioning the ring into them keeps the square, because the rectangles are
+    the wider of the two (measured: the union absorbed all 1,432 of the ring's vertices and
+    came back with 261). A window built six fillets and drew square corners in both views for
+    exactly that reason - supplying a pavement at all is what closes SceneGeometry.resolve's
+    door to build_pavement_polygon.
+
+    The traced polygons remain the answer for a crop with no junction in it, and a street the
+    model gave no leg still reaches the drawing as a context roadway in `paved_surfaces` -
+    which is cut around whatever this returns, so the two cannot be drawn twice.
+    """
     from shapely.ops import unary_union
 
+    if corner_fillets:
+        try:
+            return build_pavement_polygon(corner_fillets)
+        except ValueError:
+            pass        # an unclosable ring is reported by check_pavement_ring, not here
     paved = list(features[features["kind"] == "pavement"].geometry)
     return unary_union(paved) if paved else None
 
@@ -285,16 +304,16 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
         center_wgs84=center_wgs84,
         center_ft=center_ft,
         legs=legs,
-        # No corner is modelled in a crop - there is no junction node to fillet around, and
-        # inventing one would put a kerb return where OSM traced none.
         corner_fillets=corner_fillets,
         parcels=empty,
         corner_parcels=empty,
         # The minor carriageways, cut to the WINDOW rather than to a radius about its centre:
         # `reach` is the drawing's own extent, so asphalt reaches the corners of the sheet
-        # instead of stopping on the circle inscribed in it. No `corner_fillets` to cut around -
-        # a crop has none - so the traced pavement stands in as the measured geometry that wins.
-        paved_surfaces=_paved_surfaces_ft(center_wgs84, osm=osm, pavement=slice_pavement(features),
+        # instead of stopping on the circle inscribed in it. Cut around the junction rings AND
+        # the traced pavement - see slice_pavement, which is the one place a window says what
+        # its asphalt is.
+        paved_surfaces=_paved_surfaces_ft(center_wgs84, osm=osm,
+                                          pavement=slice_pavement(features, corner_fillets),
                                           reach=box(minx, miny, maxx, maxy))
         if osm is not None else (),
         leg_road_spans=spans,

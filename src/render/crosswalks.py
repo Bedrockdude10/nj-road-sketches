@@ -14,6 +14,7 @@ from shapely.geometry import LineString, Polygon
 from src.render.coords import FT_TO_M, wgs84_to_state_plane
 from src.geometry.model import (crosswalk_estimate_ft, inset_line_ft, leg_clearance_ft,
                                 station_offset_many)
+from src.geometry.markings import EDGE_LINE_WIDTH_M, NARROW_LINE_WIDTH_M
 from src.geometry.targets import Everywhere, LegSide, LegTarget, Side
 from src.geometry.treatments import (CENTERLINE_IS_DASHED, VALID_CENTERLINE_STYLES,
                                      AddBikeLane, DesignState, LaneNarrowing, MarkedParking,
@@ -622,7 +623,19 @@ def centerline_start_ft(crosswalk_offset_ft: float, stop_bar_offset_ft: float | 
 
 
 # MUTCD/AASHTO proportions for a no-passing centerline: two ~6 in stripes about 4 in apart.
+#
+# THE GAP IS EDGE TO EDGE, so it is not the distance between the stripes' CENTRES - which is
+# what an offset from the alignment is. That distance is the gap PLUS one stripe width.
+# Offsetting each stripe by half the gap alone sat the two centres 0.10 m apart while both
+# renderers lay the stripe 0.15 m wide, so the pair OVERLAPPED by 0.05 m: every double yellow
+# in the project, at every site and every DPI, was drawn as one 0.25 m stripe. A separation
+# smaller than the thing being separated cannot show a gap, and no amount of resolution helps.
+#
+# The width is markings.NARROW_LINE_WIDTH_M - the same 6 in the 3D render extrudes a centerline
+# at - rather than a fourth copy of 0.15, because how wide paint is laid has one home.
 DOUBLE_YELLOW_GAP_FT = 0.1 / FT_TO_M
+CENTERLINE_STRIPE_WIDTH_FT = NARROW_LINE_WIDTH_M / FT_TO_M
+DOUBLE_YELLOW_SEPARATION_FT = CENTERLINE_STRIPE_WIDTH_FT + DOUBLE_YELLOW_GAP_FT
 # The dashed style's mark and gap. Real segments in feet rather than a dash PATTERN, so the
 # plan view and the render break the line in the same places - the same reason the bike lane's
 # dotted extension is geometry (see paint.py:_dashes_along).
@@ -641,33 +654,55 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
     """
     if style == "none" or start_ft >= leg.centerline.length:
         return []
-    if shift_ft and shift_side is not None:
-        # A TWO-WAY BIKE LANE ON ONE SIDE PUSHES THE TRAVEL LANES OFF THE ALIGNMENT, so the
-        # divider between them is no longer the alignment itself - see
+
+    def stripe(offset_ft: float) -> LineString | None:
+        """One stripe, `offset_ft` from the alignment - positive toward `shift_side`.
+
+        Through inset_line_ft rather than offset_curve, for the reason this function exists at
+        all: it is the same lateral-offset machinery the bike lane's own stripes use, on the
+        same station grid, with the same clamping inside the traced kerb. An offset curve's arc
+        length differs from the centerline's, so stationing along it is not stationing along
+        the road - exactly the divergence the single-definition rule forbids. It also RETURNS
+        THE WRONG TYPE on a bending leg: greenwood_avenue_1 comes back as a two-part
+        MultiLineString on one side, which the caller could only throw away, and a leg that
+        silently loses one of its two stripes is a single yellow again.
+
+        keep_inside_ft is half the stripe, so a road narrower than the offset asks for gets its
+        paint laid INSIDE the kerb rather than straddling it - the same datum rule as
+        everywhere else (SKILLS.md section 2), now that the stripes are far enough apart to
+        reach one.
+
+        beyond_the_tracing because a centerline runs the whole leg. Without it the station grid
+        stops where the kerb tracing does and the paint stops with it - 16 ft short on
+        greenwood_avenue, measured - and an EXTENT that moves with the survey is the trap in
+        SKILLS.md section 0b. A width may give; the length may not.
+
+        A NEGATIVE offset means the other side, not the same distance on this one. The sign is
+        resolved here rather than assumed away.
+        """
+        side = shift_side or str(Side.LEFT)
+        if offset_ft < 0:
+            side, offset_ft = str(Side(side).other), -offset_ft
+        return inset_line_ft(leg, side, offset_ft, start_ft,
+                              keep_inside_ft=CENTERLINE_STRIPE_WIDTH_FT / 2,
+                              beyond_the_tracing=True)
+
+    if style == "double_yellow":
+        # A TWO-WAY BIKE LANE ON ONE SIDE PUSHES THE TRAVEL LANES OFF THE ALIGNMENT, so the pair
+        # straddles the shifted divider rather than the alignment - see
         # treatments.travel_lane_divider_shift_ft for where the distance comes from and why the
-        # two lanes come out equal.
-        #
-        # Through inset_line_ft rather than offset_curve, for the reason this function exists at
-        # all: it is the same lateral-offset machinery the bike lane's own stripes use, on the
-        # same station grid, with the same clamping inside the traced kerb. An offset curve's arc
-        # length differs from the centerline's, so stationing along it is not stationing along
-        # the road - exactly the divergence the single-definition rule forbids.
-        # A NEGATIVE shift means the other side, not the same distance on this one. The sign is
-        # resolved here rather than assumed away.
-        if shift_ft < 0:
-            shift_side = str(Side(shift_side).other)
-            shift_ft = -shift_ft
-        painted = inset_line_ft(leg, shift_side, shift_ft, start_ft)
+        # two lanes come out equal. Zero shift is the ordinary case and needs no branch.
+        half = DOUBLE_YELLOW_SEPARATION_FT / 2
+        return [line for line in (stripe(shift_ft + half), stripe(shift_ft - half))
+                if line is not None and not line.is_empty and line.geom_type == "LineString"]
+    if shift_ft and shift_side is not None:
+        painted = stripe(shift_ft)
         if painted is None or painted.is_empty or painted.geom_type != "LineString":
             return []
     else:
         painted = shapely.ops.substring(leg.centerline, start_ft, leg.centerline.length)
     if painted.is_empty or painted.geom_type != "LineString":
         return []
-    if style == "double_yellow":
-        return [line for line in
-                (painted.offset_curve(sign * DOUBLE_YELLOW_GAP_FT / 2) for sign in (1, -1))
-                if line.geom_type == "LineString" and not line.is_empty]
     if style not in CENTERLINE_IS_DASHED:
         # THE FALLTHROUGH USED TO BE THE DASHED BRANCH, so a style this function had never heard
         # of was drawn as a yellow dashed centre line - the most confident wrong answer available,
@@ -878,6 +913,10 @@ def crosswalk_reach_to_curbs_ft(leg, center, normal, along=None,
 # and is testable - scripts/blender/blender_crosswalks.py cannot import from src/.
 CONTINENTAL_BAR_WIDTH_FT = 0.5 / FT_TO_M     # the renderer's long-standing 0.5 m bar
 CONTINENTAL_BAR_GAP_FT = 0.5 / FT_TO_M       # and 0.5 m gap between bars
+# A TRANSVERSE crossing's two lines - the other marked style, and the width the 3D render has
+# always laid them at (blender_scene.SURVEYED_CROSSING_LINE_WIDTH_M). Off EDGE_LINE_WIDTH_M
+# rather than repeating 0.25, so it moves with every other solid line if that figure ever does.
+TRANSVERSE_LINE_WIDTH_FT = EDGE_LINE_WIDTH_M / FT_TO_M
 
 
 def continental_bar_count(span_ft: float,

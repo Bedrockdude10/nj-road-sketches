@@ -163,6 +163,12 @@ KERB_WIDTH_M = 0.15
 # each, not of the pair.
 CENTERLINE_WIDTH_M = 0.15
 
+# A surveyed TRANSVERSE crossing's two lines. Named rather than left inline at the call below, so
+# test_blender_stroke_widths_match_the_channels can read it: an unnamed literal is a width nothing
+# on the src/ side can be held against, and the plan view drew these at a cosmetic 1.6 pt for as
+# long as it went unnamed. Mirrors markings.EDGE_LINE_WIDTH_M.
+SURVEYED_CROSSING_LINE_WIDTH_M = 0.25
+
 # WHICH PAINT CHANNELS ARE SAMPLED POLYLINES, and which are honestly two-point segments. Declared
 # as data rather than left implicit in the loops below, because the distinction is load-bearing and a
 # test guards it (tests/test_paint.py).
@@ -517,8 +523,8 @@ def build_scene(data: dict):
             extrude_polygon(f"surveyed_crossing_{i}_bar_{j}", ring, MARKING_CLEARANCE_M / 2,
                              marking_mat, z_base=marking_z)
         for j, line in enumerate(crossing.get("lines", [])):
-            add_paint_polyline(f"surveyed_crossing_{i}_line_{j}", line, 0.25, marking_mat,
-                                z_base=marking_z)
+            add_paint_polyline(f"surveyed_crossing_{i}_line_{j}", line,
+                                SURVEYED_CROSSING_LINE_WIDTH_M, marking_mat, z_base=marking_z)
 
     for island in data.get("refuge_islands", []):
         extrude_polygon(f"refuge_{island['name']}", island["coords"], island.get("height_m", 0.15), refuge_mat)

@@ -7,7 +7,7 @@ _acute_corner_diagnosis exists to say so in those terms."""
 
 import numpy as np
 from shapely.geometry import LineString, Point, Polygon
-from shapely.ops import substring
+from shapely.ops import substring, unary_union
 from shapely.validation import explain_validity
 from src.geometry.model.leg_frame import (_leg_bearing, line_direction, station_offset_many,
                                           unit_vector)
@@ -242,6 +242,9 @@ def build_pavement_polygon(corner_fillets: dict) -> Polygon:
     ring: the full paved footprint of the intersection, rounded corners and all.
     Requires build_corner_fillets() to have succeeded for every corner (a full
     cycle - each leg's left curb feeds one corner, its right curb the next).
+
+    ONE RING PER JUNCTION, unioned - a Polygon for a junction, a MultiPolygon for a window
+    holding several. See _junction_cycles for what this got wrong for a window.
     """
     if any("error" in pieces for pieces in corner_fillets.values()):
         raise ValueError("Can't build a pavement polygon - at least one corner fillet failed.")
@@ -252,16 +255,54 @@ def build_pavement_polygon(corner_fillets: dict) -> Polygon:
     # instead of degrading to "no ring here" the way a failed corner already does.
     if not corner_fillets:
         raise ValueError("Can't build a pavement polygon - no corner fillets were given.")
-    order = []
-    remaining = dict(corner_fillets)
-    name_a0, name_b0 = next(iter(remaining))
-    order.append(name_a0)
-    current = name_b0
-    while current != name_a0:
-        order.append(current)
-        next_pair = next(pair for pair in remaining if pair[0] == current)
-        current = next_pair[1]
+    rings = [_junction_ring(corner_fillets, order)
+             for order in _junction_cycles(corner_fillets)]
+    return rings[0] if len(rings) == 1 else unary_union(rings)
 
+
+def _junction_cycles(corner_fillets: dict) -> list[list[str]]:
+    """The legs of each junction in `corner_fillets`, in ring order, one list per junction.
+
+    ONE DICT CAN HOLD SEVERAL JUNCTIONS. build_corner_fillets is called per junction and keys
+    each corner `(leg_a, leg_b)`, wrapping, so its keys are a closed cycle over that junction's
+    legs; a WINDOW onto the network merges N of those dicts and gets N disjoint cycles
+    (src/geometry/network/slice_design.py:_corners_of). This used to walk from `next(iter(...))`
+    until it came back round, which visits exactly one of them and returns having silently
+    dropped the rest - so a crop containing Broad x Greenwood and Broad x Blackwell paved the
+    first and left the second square-cornered, with nothing raised anywhere.
+
+    Every leg name appears exactly once in position 0 - its left curb feeds exactly one corner -
+    so the successor map is a permutation and walking it from each unvisited leg enumerates the
+    cycles once each.
+    """
+    # {leg_a: leg_b} - off the KEYS, each of which is one corner's pair. `dict(corner_fillets)`
+    # is a different dict (it copies pair -> pieces) and ruff's C416 asks for exactly that.
+    successor = dict(corner_fillets.keys())
+    cycles: list[list[str]] = []
+    seen: set[str] = set()
+    for first in successor:
+        if first in seen:
+            continue
+        order, current = [first], successor[first]
+        seen.add(first)
+        while current != first:
+            if current in seen:
+                # Not a cycle through `first`, so the keys are not one corner per leg. Raised
+                # rather than walked forever, which is what the unguarded `next(...)` did.
+                raise ValueError(f"Corner fillets do not form closed rings - {current!r} is "
+                                 f"reached twice. Keys: {sorted(corner_fillets)}")
+            order.append(current)
+            seen.add(current)
+            if current not in successor:
+                raise ValueError(f"Corner fillets do not close - {current!r} ends a chain "
+                                 f"with no corner leading out of it.")
+            current = successor[current]
+        cycles.append(order)
+    return cycles
+
+
+def _junction_ring(corner_fillets: dict, order: list[str]) -> Polygon:
+    """One junction's paved footprint: its trimmed curbs and arcs stitched into a ring."""
     n = len(order)
     ring: list[tuple[float, float]] = []
     for i in range(n):

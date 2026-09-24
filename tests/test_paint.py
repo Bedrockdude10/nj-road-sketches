@@ -1465,7 +1465,7 @@ def test_blender_stroke_widths_match_the_channels():
                 # reported a marking defect that did not exist, which is worse than not running.
                 # `wanted <= set(declared)` below is what says the tables have gone missing.
     wanted = {"SAMPLED_POLYLINE_CHANNELS", "TWO_POINT_CHANNELS", "TWO_POINT_WIDTH_M",
-              "CENTERLINE_WIDTH_M"}
+              "CENTERLINE_WIDTH_M", "SURVEYED_CROSSING_LINE_WIDTH_M"}
     assert wanted <= set(declared), (
         f"blender_scene.py no longer declares {sorted(wanted - set(declared))} - the guard has "
         f"nothing to read, which is not the same as the widths agreeing")
@@ -1489,6 +1489,24 @@ def test_blender_stroke_widths_match_the_channels():
             f"{channel.key} declares a stroke width that no 3D table accounts for")
         assert channel.stroke_width_m == pytest.approx(declared["CENTERLINE_WIDTH_M"]), (
             "the contraflow stripe is drawn through the centreline path, at CENTERLINE_WIDTH_M")
+
+    # THE TWO WIDTHS THAT BELONG TO NO CHANNEL, pinned against the figures they mirror. Neither
+    # travels in a paint channel - a centerline has none at all and a surveyed crossing is
+    # context rather than a treatment - so the loops above cannot see them, and both were a
+    # bare literal in blender_scene.py with a second copy on the src/ side.
+    from src.geometry.markings import EDGE_LINE_WIDTH_M, NARROW_LINE_WIDTH_M
+    from src.render.coords import FT_TO_M
+    from src.render.crosswalks import CENTERLINE_STRIPE_WIDTH_FT, TRANSVERSE_LINE_WIDTH_FT
+
+    assert declared["CENTERLINE_WIDTH_M"] == pytest.approx(NARROW_LINE_WIDTH_M)
+    assert declared["CENTERLINE_WIDTH_M"] == pytest.approx(CENTERLINE_STRIPE_WIDTH_FT * FT_TO_M), (
+        "the plan view draws a centerline at CENTERLINE_STRIPE_WIDTH_FT and the render extrudes "
+        "it at CENTERLINE_WIDTH_M - one stripe, so one width")
+    assert declared["SURVEYED_CROSSING_LINE_WIDTH_M"] == pytest.approx(EDGE_LINE_WIDTH_M)
+    assert declared["SURVEYED_CROSSING_LINE_WIDTH_M"] == pytest.approx(
+        TRANSVERSE_LINE_WIDTH_FT * FT_TO_M), (
+        "a transverse crossing's lines are drawn at TRANSVERSE_LINE_WIDTH_FT in plan and "
+        "SURVEYED_CROSSING_LINE_WIDTH_M in 3D - one marking, so one width")
 
 
 def test_a_stall_keeps_its_clearance_from_the_driveway_return():
