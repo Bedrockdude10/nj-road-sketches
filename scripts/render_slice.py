@@ -189,7 +189,11 @@ def _route_decisions(state, model, features: gpd.GeoDataFrame):
     see CORRIDOR_SIDE), not something the crop chooses.
     """
     town = features["municipality"].dropna().iloc[0]
-    for street in sorted({leg.name for leg in model.legs.values()}):
+    # The street name off the CONFIG, not off `Leg.name` - a Leg is named for its own key, as at
+    # a site, and `config["legs"][key]["street_name"]` is the one place the street is recorded.
+    # See `legs_on_road`, which reads the same field for the same reason.
+    streets = {cfg.get("street_name") for cfg in model.config.get("legs", {}).values()}
+    for street in sorted(s for s in streets if s):
         decision = route_decision_for(street, town)
         if decision is not None:
             state = decision.apply_to(state, model)
@@ -223,7 +227,7 @@ def design_for(features: gpd.GeoDataFrame, scenario: str = "two_way_bikeway"):
 
 
 def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
-             scenario: str = "two_way_bikeway") -> Path:
+             scenario: str = "two_way_bikeway", dpi: int = 200) -> Path:
     model, state, pavement, context = design_for(features, scenario)
     fig, ax = plt.subplots(figsize=(11, 11))
     plot_design_state(ax, model, state, name, pavement=pavement,
@@ -231,7 +235,10 @@ def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
                       **context_layers(context))
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.png"
-    fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
+    # A double yellow's strokes are 4 in apart (DOUBLE_YELLOW_GAP_FT): 1.2 px at 200 dpi over a
+    # 600 ft window, narrower than the strokes, so they merge. The geometry is a true double and
+    # the sheet cannot resolve it - raise the density rather than widening the paint.
+    fig.savefig(out, dpi=dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return out
 
@@ -268,6 +275,8 @@ def main() -> None:
     parser.add_argument("--3d", dest="three_d", action="store_true", help="also render in 3D")
     parser.add_argument("--scenario", default="two_way_bikeway", choices=sorted(SCENARIOS),
                         help="which design to draw (default: two_way_bikeway)")
+    parser.add_argument("--dpi", type=int, default=200,
+                        help="2D sheet density; 600+ resolves a double yellow's 4 in gap")
     args = parser.parse_args()
 
     network = load_network(args.area, args.network_dir)
@@ -284,7 +293,7 @@ def main() -> None:
     stem = args.name or stem
     counts = ", ".join(f"{n} {k}" for k, n in features["kind"].value_counts().items())
     print(f"{stem}: {len(features)} feature(s) - {counts}")
-    print(f"wrote {draw_2d(features, stem, args.out_dir, args.scenario)}")
+    print(f"wrote {draw_2d(features, stem, args.out_dir, args.scenario, args.dpi)}")
     if args.three_d:
         print(f"wrote {draw_3d(features, stem, args.out_dir, args.scenario)}")
 

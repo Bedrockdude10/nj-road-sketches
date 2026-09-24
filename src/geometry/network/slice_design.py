@@ -21,6 +21,8 @@ from shapely.geometry import LineString, Point, box
 from shapely.ops import substring
 
 from src.geometry.cross_streets import cross_streets_ft
+from src.geometry.intersection.fitting import (_centre_legs_on_traced_kerbs, _fit_legs_to_traced_kerbs,
+                                                _join_through_legs, _widths_from_traced_kerbs)
 from src.geometry.intersection.junction import IntersectionModel
 from src.geometry.intersection.load import _build_corners
 from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
@@ -98,8 +100,8 @@ def _approaches(line: LineString, nodes: list[Point]) -> list[LineString]:
     return pieces
 
 
-def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
-             nodes: list[Point]) -> dict[str, Leg]:
+def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float], nodes: list[Point],
+             street_of: dict[str, str]) -> dict[str, Leg]:
     """One leg per APPROACH: each named street in the window, cut at every junction on it.
 
     The clipped centreline, so a leg is exactly as long as the drawing is wide. That is the
@@ -114,13 +116,22 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
                   for approach in _approaches(part, nodes)]
         for index, piece in enumerate(pieces):
             slug = str(row.name_).lower().replace(" ", "_")
+            key = slug if index == 0 else f"{slug}_{index}"
+            # `Leg.name` IS THE KEY, as it is at a site. The street name lives only in
+            # `config["legs"][key]["street_name"]`, which is where `legs_on_road` reads it and
+            # the one place it belongs. Putting the street on the Leg instead looked harmless and
+            # was not: the site path's fitters rebuild a Leg as `Leg(name=<dict key>, ...)`,
+            # which is a no-op there because the two agree - and silently renamed every leg in a
+            # window to its slug, after which `legs_on_road("Broad Street")` matched one leg of
+            # three and the two-way bikeway collapsed from 12,606 sq ft of paint to 172.
+            #
             # WITHOUT A WIDTH A LEG IS NOT A STREET: every treatment sizes its section off
             # curb_to_curb_ft, and a leg missing it refuses the facility with "no width -
             # nothing to fit a lane into" rather than failing. The document's own figure, the
             # one corridor_pavement drew the asphalt to.
-            legs[slug if index == 0 else f"{slug}_{index}"] = Leg(
-                name=str(row.name_), centerline=piece,
-                curb_to_curb_ft=width_by_name.get(str(row.name_)))
+            legs[key] = Leg(name=key, centerline=piece,
+                            curb_to_curb_ft=width_by_name.get(str(row.name_)))
+            street_of[key] = str(row.name_)
     return legs
 
 
@@ -130,25 +141,17 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
 FALLBACK_CORNER_RADIUS_FT: float = 20.0
 
 
-def _corners_of(legs: dict[str, Leg], nodes: list[Point], kerb_lines: list[LineString]) -> dict:
-    """The corner geometry for EVERY junction in the window, through the site path's own builder.
+def _grouped_by_junction(legs: dict[str, Leg], nodes: list[Point]) -> list[dict[str, Leg]]:
+    """The legs of each junction in the window, one dict per node they radiate from.
 
-    `build_corner_fillets` sorts the legs it is given by compass bearing and fillets between each
-    angularly-adjacent PAIR, wrapping around - which is right for a junction and wrong for a
-    window, because a window holds several. Handed all six legs of Broad x Greenwood and Broad x
-    Blackwell at once it would pair a Greenwood approach with a Blackwell one and round a corner
-    between two streets that never meet. So the legs are grouped by the node they radiate from
-    first, and `_build_corners` runs once per group exactly as it does for a site.
+    By the NEAREST node, not by the leg's own station 0 rounded off. Station 0 is where
+    `_approaches` cut the street, and it cuts at `line.project(node)` - a point on THAT street's
+    centreline, which misses the node by however far the two pass. Measured: Broad St's approach
+    to Blackwell starts 1.0 ft from the Blackwell node, so rounding to the foot filed it and
+    Blackwell Ave separately and built no corner between two streets that plainly meet.
 
-    Grouped by the NEAREST junction node, not by the leg's own station 0 rounded off. Station 0
-    is where `_approaches` cut the street, and it cuts at `line.project(node)` - a point on THAT
-    street's centreline, which misses the node by however far the two centrelines pass. Measured:
-    Broad St's approach to Blackwell starts 1 ft from the Blackwell node, so rounding to the foot
-    filed it and Blackwell Ave under different keys and built no corner between two streets that
-    plainly meet. Snapping to the node instead asks the question that was meant.
-
-    A leg whose station 0 is a crop edge rather than a node matches no node and is left out, so
-    it forms no corner - which is also what `build_corner_fillets` returns for a group of one.
+    A leg whose station 0 is a crop edge matches no node and is left out: it belongs to no
+    junction in this window, and everything asked of these groups is a per-junction question.
     """
     by_node: dict[int, dict[str, Leg]] = {}
     for name, leg in legs.items():
@@ -156,8 +159,52 @@ def _corners_of(legs: dict[str, Leg], nodes: list[Point], kerb_lines: list[LineS
         near = min(range(len(nodes)), key=lambda i: nodes[i].distance(start), default=None)
         if near is not None and nodes[near].distance(start) <= ON_STREET_FT:
             by_node.setdefault(near, {})[name] = leg
+    return list(by_node.values())
+
+
+def _fit_to_traced_kerbs(legs: dict[str, Leg], groups: list[dict[str, Leg]],
+                          kerb_lines: list[LineString], kerb_ways: list[tuple]) -> None:
+    """Put the window's legs through the SITE PATH's own kerb fitting, junction by junction.
+
+    A crop skipped all of it, and the cost was on the sheet twice over. Every approach of a
+    street carried ONE width - the street's whole pavement area over its whole length, so both
+    Greenwood approaches read 31.4 ft where the site measures 26.5 and 31.2 - and no leg had a
+    traced side at all, so every curb line was a plain offset from the alignment rather than the
+    kerb somebody surveyed. Width is the datum kerbside paint is placed from
+    (.claude/SKILLS.md section 2), so an over-wide leg puts its paint past its own kerb: 22.8% of
+    all paint in this window landed outside the pavement, and 11.4% of the bikeway's did.
+    Fitted, that is 1.3%, and the widths land within 0.1 ft of what the configured site measures.
+
+    PER JUNCTION, because `center_ft` is what `_fit_legs_to_traced_kerbs` measures its near set
+    against and a window holds several. Mutates the Legs in place as the site path does, in the
+    site path's order and for its reasons: the widths first, so the assignment's ratio window
+    keeps the kerbs the fit needs; then the fit; then the centring; then the through-street join.
+    `_extend_curbs_with_far_tracing` is deliberately NOT here - it fetches at a radius about a
+    junction centre, which is the one thing a window cannot ask for.
+    """
+    for group in groups:
+        for name, width_ft in _widths_from_traced_kerbs(group, kerb_lines, {}).items():
+            group[name] = legs[name] = Leg(name=legs[name].name,
+                                            centerline=group[name].centerline,
+                                            curb_to_curb_ft=width_ft)
+        node = Point(next(iter(group.values())).centerline.coords[0])
+        _fit_legs_to_traced_kerbs(group, kerb_ways, node, {})
+        _centre_legs_on_traced_kerbs(group)
+        _join_through_legs(group)
+        legs.update(group)
+
+
+def _corners_of(groups: list[dict[str, Leg]], kerb_lines: list[LineString]) -> dict:
+    """The corner geometry for EVERY junction in the window, through the site path's own builder.
+
+    ONE GROUP AT A TIME, because `build_corner_fillets` sorts the legs it is given by compass
+    bearing and fillets between each angularly-adjacent PAIR, wrapping around. That is right for
+    a junction and wrong for a window: handed all six legs of Broad x Greenwood and Broad x
+    Blackwell at once it pairs a Greenwood approach with a Blackwell one and rounds a corner
+    between two streets that never meet.
+    """
     corners: dict = {}
-    for group in by_node.values():
+    for group in groups:
         radii, _notes = corner_radii_from_kerbs(group, kerb_lines, FALLBACK_CORNER_RADIUS_FT)
         corners.update(_build_corners(group, FALLBACK_CORNER_RADIUS_FT, radii, kerb_lines))
     return corners
@@ -193,7 +240,8 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
               for row in paved.itertuples()
               if (length := streets[streets["name_"] == row.name_].geometry.length.sum()) > 0}
     nodes = junction_nodes(features)
-    legs = _legs_of(streets, traced, nodes)
+    street_of: dict[str, str] = {}
+    legs = _legs_of(streets, traced, nodes, street_of)
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
     # WHAT OSM SAYS ABOUT EACH LEG, matched off the window's own road ways. Not a layer but a
@@ -216,17 +264,24 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     # `corner_fillets={}`, and that one empty dict is upstream of most of what a slice was
     # missing: build_pavement_polygon has no ring, build_sidewalk_pieces has no edge to widen,
     # the signal hardware has no corner to stand on, and every corner return and apron is absent.
-    kerb_lines = [LineString(to_state_plane(k["coords_wgs84"]))
-                  for k in ((osm or {}).get("kerb_ways") or [])
-                  if len(k.get("coords_wgs84") or []) >= 2]
-    corner_fillets = _corners_of(legs, nodes, kerb_lines) if osm is not None else {}
+    traced = [k for k in ((osm or {}).get("kerb_ways") or [])
+              if len(k.get("coords_wgs84") or []) >= 2]
+    kerb_lines = [LineString(to_state_plane(k["coords_wgs84"])) for k in traced]
+    kerb_ways = [(line, k.get("tags") or {}, k.get("id")) for line, k in zip(kerb_lines, traced)]
+    groups = _grouped_by_junction(legs, nodes)
+    # BEFORE the corners: the fit moves the very curb lines a fillet is trimmed against, and
+    # `_centre_legs_on_traced_kerbs` bends the alignment every offset below is measured from.
+    # Same order as the site path, for the same reason.
+    if osm is not None:
+        _fit_to_traced_kerbs(legs, groups, kerb_lines, kerb_ways)
+    corner_fillets = _corners_of(groups, kerb_lines) if osm is not None else {}
 
     model = IntersectionModel(
         # `legs` is how legs_on_road tells which approaches are on a route, and therefore the
         # only reason a route decision reaches a crop at all. The street's own OSM name, so the
         # document and the decision are keyed on one string.
         config={"intersection": {},
-                "legs": {slug: {"street_name": leg.name} for slug, leg in legs.items()}},
+                "legs": {slug: {"street_name": street_of[slug]} for slug in legs}},
         center_wgs84=center_wgs84,
         center_ft=center_ft,
         legs=legs,

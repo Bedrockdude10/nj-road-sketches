@@ -621,8 +621,17 @@ def apply_osm_parking(state: DesignState, model: "IntersectionModel", depth_ft: 
         # the lane at 18 ft on E Broad, which defeats the whole point of the target - and
         # hatching beside a travel lane reads as a buffer/shoulder, the same thing the strip
         # between a parking lane and the kerb already is, not as a parking prohibition.
+        # BOTH DATUMS HAVE TO GIVE THE STALL ITS DEPTH, because one measures and the other
+        # places (.claude/SKILLS.md section 2). `room_ft` is the traced kerb and decides whether a
+        # stall FITS; `lane_edge_from_nominal_ft` is where the stall is actually DRAWN from, and
+        # the buffer between them is their difference - so a kerb with 8 ft of traced room whose
+        # nominal lane edge sits 7.1 ft out asks MarkedParking for a -0.9 ft buffer and it
+        # refuses, correctly. A site never hits it because config widths run WIDER than the
+        # traced kerb (68.0 against 51.9 on broad_st_east); a leg measured from its own kerbs
+        # does, and the answer is to hatch that side rather than to relax the refusal.
         parkable = [s for s in untouched
-                    if s not in restricted and room_ft[s] >= MIN_MARKED_PARKING_DEPTH_FT]
+                    if s not in restricted and room_ft[s] >= MIN_MARKED_PARKING_DEPTH_FT
+                    and lane_edge_from_nominal_ft >= MIN_MARKED_PARKING_DEPTH_FT]
         hatched = [s for s in untouched if s not in restricted and s not in parkable]
         for side in hatched:
             print(f"  NOTE: {leg_name} {side} is unrestricted, but only {room_ft[side]:.1f} ft is "
