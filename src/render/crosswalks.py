@@ -334,13 +334,20 @@ def _matched_crossings(legs: dict, crossings: list[dict]) -> dict:
     leg - see _crossing_skew_deg.
     """
     candidates = []
+    from src.geometry.surveyed import _markings_from_tags  # local: avoids a render<->geometry cycle
+
     for index, crossing in enumerate(crossings):
         xs, ys = wgs84_to_state_plane.transform(
             [c[0] for c in crossing["coords_wgs84"]], [c[1] for c in crossing["coords_wgs84"]]
         )
         line = LineString(zip(xs, ys))
         mid = line.interpolate(0.5, normalized=True)
-        style = OSM_MARKINGS_TO_STYLE.get(crossing["tags"].get("crossing:markings"), "lines")
+        # THROUGH _markings_from_tags, not off the modern key: before `crossing:markings` the
+        # style lived on `crossing` itself and 32 of this borough's 79 crossing ways still carry
+        # only the legacy value, so reading one key called 40% of them unmarked and defaulted them
+        # to lines. That function is the one home for the two-key rule (and for `marked` meaning
+        # lines rather than continental, which is the part a second reader would get wrong).
+        style = OSM_MARKINGS_TO_STYLE.get(_markings_from_tags(crossing["tags"]), "lines")
         for leg_name, leg in legs.items():
             centerline = leg.centerline
             along = centerline.project(mid)
@@ -425,15 +432,19 @@ def resolve_crosswalk_offsets(state: DesignState, crossings: list[dict]) -> dict
     return out
 
 
-def resolve_crosswalk_style(state: DesignState, leg_name: str) -> str:
+def resolve_crosswalk_style(state: DesignState, leg_name: str,
+                             surveyed_style: str | None = None) -> str:
     """Which of the three rendered marking styles this leg's crossing is painted in.
 
-    An UpgradeCrosswalkMarkings treatment if the design has one, else "lines" - the two simple
-    transverse boundary lines, which is what every real crossing at these four junctions is
-    tagged `crossing:markings=lines` in OSM and what an unmapped one is assumed to be. That
-    fallback is the least assumption-laden guess and not a claim about the survey; a matched
-    crossing's own tag is read in _match_crossings_to_legs (OSM_MARKINGS_TO_STYLE) but has never
-    been wired through to here, which is a gap worth closing separately rather than in passing.
+    An UpgradeCrosswalkMarkings treatment if the design has one, else WHAT THE SURVEY RECORDS,
+    else "lines" for a crossing nobody tagged.
+
+    The survey used to be missing from this chain entirely. `_match_crossings_to_legs` resolved
+    the matched crossing's style and every caller discarded it, so existing conditions drew two
+    transverse lines over 10 of 23 crossings at 4 sites that OSM records as zebra or ladder -
+    including one carrying a modern `crossing:markings=ladder`, so this was never only about the
+    legacy key. `crossing_style_in` has always read the survey for a crossing with no leg; this is
+    the per-leg half of the same rule, and the two disagreeing is what SKILLS.md section 0 is about.
 
     Here rather than in export.py so the rule has one home, the same reason
     entering_lane_width_ft does.
@@ -447,7 +458,9 @@ def resolve_crosswalk_style(state: DesignState, leg_name: str) -> str:
     treatment = state.treatment_for(UpgradeCrosswalkMarkings, LegTarget(leg_name))
     if treatment is None:
         treatment = state.treatment_for(UpgradeCrosswalkMarkings, Everywhere())
-    return treatment.style if treatment is not None else "lines"
+    if treatment is not None:
+        return treatment.style
+    return surveyed_style or "lines"
 
 
 def resolve_crosswalk_skews(state: DesignState, crossings: list[dict]) -> dict[str, float]:

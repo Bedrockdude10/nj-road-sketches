@@ -421,7 +421,8 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                 **_marking_frame_m("stop_bar", leg, stop_bar_offsets.get(leg_name), center_ft),
                 # An UpgradeCrosswalkMarkings treatment if the design has one, else "lines" -
                 # see src/render/crosswalks.py:resolve_crosswalk_style.
-                "crosswalk_style": resolve_crosswalk_style(state, leg_name),
+                "crosswalk_style": resolve_crosswalk_style(
+                    state, leg_name, scene.surveyed_crossing_styles.get(leg_name)),
                 # How many bars a continental/ladder crossing gets across that reach. Sized
                 # in src/render/crosswalks.py:continental_bar_count so the arithmetic is
                 # testable in one place; the renderer just lays out this many.

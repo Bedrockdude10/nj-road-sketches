@@ -11,12 +11,12 @@ Nothing here decides anything new - every value still comes from the same functi
 src/render/crosswalks.py it always did. The only thing this module adds is that there is one
 of each.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from shapely.geometry import Polygon
 
 from src.geometry.model import build_pavement_polygon
-from src.render.crosswalks import (CROSSWALK_DEPTH_FT, crosswalk_bands_ft, crosswalk_reaches_ft,
+from src.render.crosswalks import (_match_crossings_to_legs,CROSSWALK_DEPTH_FT, crosswalk_bands_ft, crosswalk_reaches_ft,
                                    resolve_crosswalk_offsets, resolve_crosswalk_skews,
                                    resolve_stop_bar_offsets, stop_bar_bands_ft)
 from src.sources.osm_context import fetch_stop_lines
@@ -65,6 +65,9 @@ class SceneGeometry:
     # The traced kerbs the crossings above are trimmed against, kept so a consumer that wants to
     # draw them does not fetch a second, possibly different set.
     drawn_kerbs: tuple = ()
+    # {leg: the style OSM records for its matched crossing}. Resolved here because the matcher
+    # runs here already - asking it again in a renderer is a second answer to one question.
+    surveyed_crossing_styles: dict = field(default_factory=dict)
 
     @classmethod
     def resolve(cls, model: "IntersectionModel", state: "DesignState", crossings: list[dict],
@@ -111,6 +114,8 @@ class SceneGeometry:
             # cannot disagree about which crossings exist - only about which of them belong to a leg.
             surveyed_crossings=tuple(surveyed_crossings_in_frame(model, crossings)),
             drawn_kerbs=drawn_kerbs,
+            surveyed_crossing_styles={leg: style for leg, (_a, style, _s, _l, _t)
+                                      in _match_crossings_to_legs(state.legs, crossings).items()},
         )
 
     @property

@@ -193,7 +193,7 @@ legs:
     crosswalk_reach_left_m: 3.962
     crosswalk_reach_right_m: 4.191
     crosswalk_skew_deg: 5.729
-    crosswalk_style: lines
+    crosswalk_style: continental
     far_m:
     - 37.527
     - 12.722
@@ -220,7 +220,7 @@ legs:
     crosswalk_reach_left_m: 3.962
     crosswalk_reach_right_m: 4.191
     crosswalk_skew_deg: 5.374
-    crosswalk_style: lines
+    crosswalk_style: continental
     far_m:
     - -37.754
     - -12.051
@@ -319,7 +319,7 @@ legs:
     crosswalk_reach_left_m: 5.029
     crosswalk_reach_right_m: 4.648
     crosswalk_skew_deg: -5.151
-    crosswalk_style: lines
+    crosswalk_style: continental
     far_m:
     - -15.187
     - 36.598
@@ -432,7 +432,7 @@ legs:
     crosswalk_reach_left_m: 5.105
     crosswalk_reach_right_m: 4.267
     crosswalk_skew_deg: -3.913
-    crosswalk_style: lines
+    crosswalk_style: continental
     far_m:
     - 15.174
     - -36.603
