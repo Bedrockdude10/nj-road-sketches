@@ -21,7 +21,9 @@ from src.geometry.model import station_offset_many
 from src.geometry.network.corridor import Corridor, _street_name
 from src.geometry.network.kerb import KerbRun, _traced_kerb_runs
 from src.render.coords import wgs84_to_state_plane
-from src.sources.osm_context import (SNAPSHOT_AREAS, fetch_borough_osm, is_kerb,
+from src.sources.osm_context import (SNAPSHOT_AREAS, fetch_borough_osm, is_building,
+                                     is_crossing_way, is_driveway, is_kerb, is_parking_aisle,
+                                     is_parking_lot, is_road, is_sidewalk, is_stop_line,
                                      is_street_furniture, is_traffic_control)
 
 Bbox = tuple[float, float, float, float]
@@ -198,6 +200,29 @@ def _closed_ring(way: dict, xy: NodeXY) -> Polygon | None:
     return Polygon(line.coords).buffer(0) if line is not None and len(line.coords) >= 4 else None
 
 
+#: {layer: (predicate on tags, how the geometry is built)}. THE SAME PREDICATES THE FETCHERS USE
+#: - one definition, two readers, which is the whole reason they were extracted to module level in
+#: src/sources/osm_context.py. Order matters only where a way matches twice: a parking lot is also
+#: an area, and a driveway is also a road, so the specific layers are tested before `roads`.
+#:
+#: EVERY LAYER A RENDERER READS IS HERE. That list is not a judgement call - it is whatever
+#: src/render and src/geometry ask OSM for, and anything absent is something the network path
+#: cannot draw while the site path can. Sidewalks are carried despite being derivable at a
+#: junction (`build_sidewalk_pieces` widens the corner ring) because a crop has no corner ring:
+#: the surveyed footway is the only sidewalk a window has.
+_AREA_LAYERS: tuple[tuple[str, object, str], ...] = (
+    ("buildings", is_building, "ring"),
+    ("parking_lots", is_parking_lot, "ring"),
+    ("crossings", is_crossing_way, "line"),
+    ("sidewalks", is_sidewalk, "line"),
+    ("kerb_ways", is_kerb, "line"),
+    ("driveways", is_driveway, "line"),
+    ("parking_aisles", is_parking_aisle, "line"),
+    ("stop_lines", is_stop_line, "line"),
+    ("roads", is_road, "line"),
+)
+
+
 def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -> dict[str, list]:
     """Every OSM element a render reads, for a whole municipality, AS OSM RECORDS IT.
 
@@ -211,10 +236,6 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
     friends: those take a centre and a radius, and the largest radius that fits inside the
     declared bbox is smaller than the borough, so the corners would lose their context. An area
     has no centre to measure from, which is the same reason `_area_kerb_ways` exists.
-
-    SIDEWALKS ARE NOT A LAYER, though OSM maps them: `build_sidewalk_pieces` derives the footway
-    from the design's own kerb, and a second copy read from OSM is free to disagree with the
-    drawing it sits beside. Only what cannot be derived is carried.
     """
     bbox: Bbox = SNAPSHOT_AREAS[area]
     snapshot = snapshot if snapshot is not None else fetch_borough_osm(bbox=bbox)
@@ -224,26 +245,28 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
         raise RuntimeError(f"no admin_level=8 boundary at the centre of {area!r}")
     _, boundary = found
 
-    out: dict[str, list] = {"buildings": [], "crossings": [], "kerb_ways": [], "nodes": []}
+    out: dict[str, list] = {layer: [] for layer, _p, _g in _AREA_LAYERS}
+    out["nodes"] = []
     for way in snapshot["ways"]:
         tags = way.get("tags") or {}
-        if "building" in tags:
-            layer, geometry = "buildings", _closed_ring(way, xy)
-        elif tags.get("footway") == "crossing":
-            layer, geometry = "crossings", _way_line(way, xy)
-        elif is_kerb(tags):
-            layer, geometry = "kerb_ways", _way_line(way, xy)
-        else:
+        match = next(((layer, kind) for layer, predicate, kind in _AREA_LAYERS if predicate(tags)),
+                     None)
+        if match is None:
             continue
+        layer, kind = match
+        geometry = _closed_ring(way, xy) if kind == "ring" else _way_line(way, xy)
         if geometry is not None and not geometry.is_empty and geometry.intersects(boundary):
             # The node ids are carried because one rule reads them: a tactile pad is placed at a
             # node SHARED by a crossing way and a tactile_paving kerb way, so the topology is the
             # observation and the geometry alone cannot express it.
-            out[layer].append({"geometry": geometry, "tags": tags,
+            out[layer].append({"geometry": geometry, "tags": tags, "id": way.get("id"),
                                "node_ids": tuple(way.get("nodes") or ())})
-    out["nodes"] = [{"geometry": point, "tags": tags}
+    # `is_kerb` is in here as well as in the WAY sweep above: OSM tags a dropped kerb on the node
+    # where the footway meets the street, and `fetch_kerbs` returns ways and nodes in one list for
+    # that reason. A node carries its own id, which is how it is matched back to a crossing way.
+    out["nodes"] = [{"geometry": point, "tags": tags, "id": node_id}
                     for node_id, node in snapshot["nodes"].items()
                     if (is_traffic_control(tags := node.get("tags") or {})
-                        or is_street_furniture(tags))
+                        or is_street_furniture(tags) or is_kerb(tags))
                     and (point := Point(xy[node_id])).intersects(boundary)]
     return out

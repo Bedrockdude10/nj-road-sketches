@@ -46,7 +46,8 @@ class ExtraProp(Treatment):
                 "side": str(self.side), "note": self.note}
 
 
-def build_sidewalk_pieces(state: DesignState, sidewalk_width_ft: float = 6) -> list[Polygon]:
+def build_sidewalk_pieces(state: DesignState, sidewalk_width_ft: float = 6,
+                           pavement=None) -> list[Polygon]:
     """A sidewalk band hugging the real kerb, all the way round the junction.
 
     Built by widening each piece of the ACTUAL pavement boundary - the same (trimmed_a, arc,
@@ -58,24 +59,32 @@ def build_sidewalk_pieces(state: DesignState, sidewalk_width_ft: float = 6) -> l
     Emitted as separate pieces rather than one ring: the renderer draws a polygon from its
     exterior only (scripts/blender/blender_scene.py:extrude_polygon), so a ring-with-a-hole would
     come out as a slab over the whole intersection.
+
+    A SUPPLIED `pavement` is walked at its own boundary, because the edges above are the corner
+    ring's and a crop of the network has no corner ring - so a window drew 0 sidewalk pieces
+    while the 2D sheet beside it drew the surveyed footway, which is the seam this project
+    refuses to leave open. Same construction either way: widen the roadway's real edge, cut the
+    roadway back out.
     """
-    try:
-        pavement = build_pavement_polygon(state.corner_fillets)
-    except ValueError:
-        return []   # no closed roadway to lay a sidewalk against
+    if pavement is None:
+        try:
+            pavement = build_pavement_polygon(state.corner_fillets)
+        except ValueError:
+            return []   # no closed roadway to lay a sidewalk against
+        edges = [parts[key] for parts in state.corner_fillets.values() if "error" not in parts
+                 for key in ("trimmed_a", "arc", "trimmed_b") if parts.get(key) is not None]
+    else:
+        edges = [line for part in getattr(pavement, "geoms", [pavement])
+                 for line in [part.exterior, *part.interiors]]
 
     pieces = []
-    for _corner, parts in state.corner_fillets.items():
-        if "error" in parts:
+    for edge in edges:
+        if edge.is_empty or edge.length <= 0:
             continue
-        for key in ("trimmed_a", "arc", "trimmed_b"):
-            edge = parts.get(key)
-            if edge is None or edge.is_empty or edge.length <= 0:
-                continue
-            # Flat caps: a round cap would spill a half-disc past the end of each leg.
-            band = edge.buffer(sidewalk_width_ft, cap_style=2).difference(pavement)
-            if band.is_empty:
-                continue
-            pieces.extend(g for g in getattr(band, "geoms", [band])
-                          if g.geom_type == "Polygon" and g.is_valid and not g.is_empty)
+        # Flat caps: a round cap would spill a half-disc past the end of each leg.
+        band = edge.buffer(sidewalk_width_ft, cap_style=2).difference(pavement)
+        if band.is_empty:
+            continue
+        pieces.extend(g for g in getattr(band, "geoms", [band])
+                      if g.geom_type == "Polygon" and g.is_valid and not g.is_empty)
     return pieces

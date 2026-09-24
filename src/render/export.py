@@ -215,7 +215,8 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                      buildings: list[dict] | None = None, crossings: list[dict] | None = None,
                      theme: dict | None = None, traffic_control: list[dict] | None = None,
                      street_furniture: list[dict] | None = None, pavement=None,
-                     kerb_ways: list[dict] | None = None, frame=None) -> Path:
+                     kerb_ways: list[dict] | None = None, frame=None,
+                     stop_lines: list[dict] | None = None) -> Path:
     """Every OSM layer may be SUPPLIED rather than fetched, and a caller that supplies one wins.
 
     A junction knows its centre and a radius, so it fetches; a crop of the borough document has
@@ -249,7 +250,9 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # enough out - a skewed crossing reaches further along one kerb than its centre offset
     # implies. Stop bars are resolved only at a signalized junction, the same gate
     # src/render/props.py's _traffic_signal_props/_no_turn_on_red_props use.
-    scene = SceneGeometry.resolve(model, state, crossings, pavement=pavement)
+    supplied_pavement = pavement
+    scene = SceneGeometry.resolve(model, state, crossings, stop_lines=stop_lines,
+                                   pavement=pavement)
     pavement = scene.pavement
     if pavement is None:
         # export_scenario has always required a closed ring (build_pavement_polygon raised
@@ -262,7 +265,11 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     crosswalk_reaches = scene.crosswalk_reaches
     stop_bar_offsets = scene.stop_bar_offsets
     marked_crosswalks = scene.marked_crosswalks
-    sidewalk_pieces = build_sidewalk_pieces(state, sidewalk_width_ft=SIDEWALK_WIDTH_FT)
+    # `pavement` only where the caller supplied the roadway: a junction's band is built off its
+    # corner ring, and passing the resolved pavement there would widen the WHOLE ring including
+    # the far end of every leg. A crop has no ring, so its own roadway is the only edge there is.
+    sidewalk_pieces = build_sidewalk_pieces(state, sidewalk_width_ft=SIDEWALK_WIDTH_FT,
+                                             pavement=supplied_pavement)
 
     # OSM building footprints are independent of (and coarser than) our SLD/field-measured
     # curb geometry - a few end up drawn overlapping the actual pavement. Drop those rather

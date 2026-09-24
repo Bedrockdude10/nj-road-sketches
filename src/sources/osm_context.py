@@ -359,7 +359,7 @@ def fetch_buildings(center_wgs84: Point, radius_m: float) -> list[dict]:
     """
     def build():
         out = []
-        for way, coords in _ways_near(center_wgs84, radius_m, lambda t: "building" in t):
+        for way, coords in _ways_near(center_wgs84, radius_m, is_building):
             if len(coords) < 3:
                 continue
             tags = way.get("tags") or {}
@@ -371,6 +371,49 @@ def fetch_buildings(center_wgs84: Point, radius_m: float) -> list[dict]:
     return _layer("buildings", center_wgs84, radius_m, build)
 
 
+# WHICH OSM ELEMENTS A RENDER READS, as predicates on tags rather than as query strings.
+# There are two ways into the same data - `_ways_near`/`_nodes_near` at a radius for a junction,
+# and a walk over the whole snapshot for an area (src/geometry/network/area.py) - and a junction
+# that drew a driveway while the area document did not carry one would be these two lists
+# disagreeing, not OSM changing. One definition, both readers.
+#
+# THE NODE PREDICATES WERE EXTRACTED AND THE WAY PREDICATES WERE NOT, and that asymmetry is what
+# the area document was missing: `area_context` matched buildings, crossings and kerbs by hand and
+# had no idea the other six layers existed, so a slice rendered 0 paved surfaces where the same
+# junction as a site rendered 33. A layer a fetcher knows about and the document does not is a
+# layer the network path cannot draw.
+def is_building(tags: dict) -> bool:
+    return "building" in tags
+
+
+def is_crossing_way(tags: dict) -> bool:
+    return tags.get("footway") == "crossing"
+
+
+def is_sidewalk(tags: dict) -> bool:
+    return tags.get("footway") == "sidewalk"
+
+
+def is_driveway(tags: dict) -> bool:
+    return tags.get("highway") == "service" and tags.get("service") == "driveway"
+
+
+def is_parking_aisle(tags: dict) -> bool:
+    return tags.get("highway") == "service" and tags.get("service") == "parking_aisle"
+
+
+def is_parking_lot(tags: dict) -> bool:
+    return tags.get("amenity") == "parking"
+
+
+def is_stop_line(tags: dict) -> bool:
+    return tags.get("road_marking") == "stop_line"
+
+
+def is_road(tags: dict) -> bool:
+    return "highway" in tags
+
+
 def fetch_crossings(center_wgs84: Point, radius_m: float) -> list[dict]:
     """OSM-mapped pedestrian crossings (footway=crossing ways) - real surveyed crosswalk
     lines rather than a geometric estimate of where one probably is.
@@ -379,7 +422,7 @@ def fetch_crossings(center_wgs84: Point, radius_m: float) -> list[dict]:
         return [{"coords_wgs84": coords, "tags": way.get("tags", {}),
                  "node_ids": way.get("nodes", [])}
                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                               lambda t: t.get("footway") == "crossing")
+                                               is_crossing_way)
                 if len(coords) >= 2]
     return _layer("crossings", center_wgs84, radius_m, build)
 
@@ -393,7 +436,7 @@ def fetch_sidewalks(center_wgs84: Point, radius_m: float) -> list[dict]:
     def build():
         return [{"coords_wgs84": coords, "tags": way.get("tags", {})}
                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                               lambda t: t.get("footway") == "sidewalk")
+                                               is_sidewalk)
                 if len(coords) >= 2]
     return _layer("sidewalks", center_wgs84, radius_m, build)
 
@@ -409,8 +452,7 @@ def fetch_driveways(center_wgs84: Point, radius_m: float) -> list[dict]:
     def build():
         return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                               lambda t: t.get("highway") == "service"
-                                               and t.get("service") == "driveway")
+                                               is_driveway)
                 if len(coords) >= 2]
     return _layer("driveways", center_wgs84, radius_m, build)
 
@@ -425,8 +467,7 @@ def fetch_parking_aisles(center_wgs84: Point, radius_m: float) -> list[dict]:
     def build():
         return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                               lambda t: t.get("highway") == "service"
-                                               and t.get("service") == "parking_aisle")
+                                               is_parking_aisle)
                 if len(coords) >= 2]
     return _layer("parking_aisles", center_wgs84, radius_m, build)
 
@@ -441,16 +482,11 @@ def fetch_parking_lots(center_wgs84: Point, radius_m: float) -> list[dict]:
     def build():
         return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                               lambda t: t.get("amenity") == "parking")
+                                               is_parking_lot)
                 if len(coords) >= 4]
     return _layer("parking_lots", center_wgs84, radius_m, build)
 
 
-# WHICH OSM ELEMENTS A RENDER READS, as predicates on tags rather than as query strings.
-# There are two ways into the same data - `_nodes_near` at a radius for a junction, and a walk
-# over the whole snapshot for an area (src/geometry/network/area.py) - and a junction that drew
-# a hydrant while the area document did not carry one would be these two lists disagreeing, not
-# OSM changing. One definition, both readers.
 def is_traffic_control(tags: dict) -> bool:
     """highway=traffic_signals / stop / give_way / crossing.
 
@@ -538,7 +574,7 @@ def fetch_roads(center_wgs84: Point, radius_m: float) -> list[dict]:
     """
     def build():
         return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
-                for way, coords in _ways_near(center_wgs84, radius_m, lambda t: "highway" in t)
+                for way, coords in _ways_near(center_wgs84, radius_m, is_road)
                 if len(coords) >= 2]
     return _layer("roads", center_wgs84, radius_m, build)
 
@@ -552,7 +588,7 @@ def fetch_stop_lines(center_wgs84: Point, radius_m: float) -> list[dict]:
     def build():
         return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
                 for way, coords in _ways_near(center_wgs84, radius_m,
-                                               lambda t: t.get("road_marking") == "stop_line")
+                                               is_stop_line)
                 if len(coords) >= 2]
     return _layer("stop_lines", center_wgs84, radius_m, build)
 

@@ -251,14 +251,13 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     import math
 
     from scripts.export_network import export_network
-    from scripts.render_slice import _center_ft, design_for, load_network, slice_around, slice_context
+    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
     from src.render.export import export_scenario
 
     export_network(AREA, tmp_path)
     around = slice_around(load_network(AREA, tmp_path),
                           _center_ft("-74.7619598,40.389179"), 320.0)
-    model, state, pavement = design_for(around)
-    context = slice_context(around)
+    model, state, pavement, context = design_for(around)
     out = tmp_path / "slice_3d.json"
     export_scenario(model, state, "test", out, pavement=pavement,
                     buildings=context["buildings"], crossings=context["crossings"],
@@ -269,6 +268,18 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     # interpreter and .importlinter forbids reaching into it from here.
     assert {"frame", "kerbs", "paved_surfaces", "surveyed_crossings"} <= set(doc)
     assert doc["pavement_near"], "a slice with no asphalt renders paint floating in space"
+    # THE LAYERS THAT WERE SILENTLY EMPTY. A slice of this junction exported 0 paved surfaces and
+    # 0 sidewalk pieces against the configured site's 33 and 25, because `area_context` carried
+    # three of the ten OSM layers the fetchers know about and nothing said so - the export
+    # succeeded, the invariants passed, and the render was simply missing the driveways, the
+    # parking and every street that is not one of the four named ones. A count, not a presence
+    # check: >= 1 would have passed on the day this drew one driveway and no roadway.
+    assert len(doc["paved_surfaces"]) >= 20, (
+        f"only {len(doc['paved_surfaces'])} paved surfaces - the document is not carrying OSM's "
+        f"driveways, parking and surrounding roads through to the scene")
+    assert doc["sidewalks_near"] or doc["sidewalks_far"], (
+        "no footway: a crop has no corner ring, so build_sidewalk_pieces must be given the "
+        "pavement to widen or the 3D scene has nothing to walk on")
     assert doc["bike_lane_surface_polygons"], "the facility should survive the translation"
     assert [p for p in doc["props"] if p["type"] == "bollard"], "so should its flex posts"
 

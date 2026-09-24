@@ -31,7 +31,7 @@ from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.network.slice_design import slice_design, slice_pavement
 from src.geometry.treatments import (existing_conditions, osm_derived_baseline,
                                      route_decision_for)
-from src.sources.osm_context import (height_from_tags, is_street_furniture,
+from src.sources.osm_context import (height_from_tags, is_kerb, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
 from src.render.frame import Frame
@@ -75,6 +75,23 @@ def _parts(geom):
     return [g for g in getattr(geom, "geoms", [geom]) if g is not None and not g.is_empty]
 
 
+#: {layer: (document kind, the geometry type it is carried as)} - every OSM layer a renderer can
+#: be handed, keyed by the name its FETCHER uses, because that is the name the consumer knows it
+#: by. The document writes `osm_<layer>` for everything added after the first three; see
+#: scripts/export_network.py:_context_rows.
+SLICE_LAYERS: dict[str, tuple[str, str]] = {
+    "buildings": ("building", "Polygon"),
+    "parking_lots": ("osm_parking_lots", "Polygon"),
+    "crossings": ("crossing_way", "LineString"),
+    "sidewalks": ("osm_sidewalks", "LineString"),
+    "kerb_ways": ("kerb_way", "LineString"),
+    "driveways": ("osm_driveways", "LineString"),
+    "parking_aisles": ("osm_parking_aisles", "LineString"),
+    "stop_lines": ("osm_stop_lines", "LineString"),
+    "roads": ("osm_roads", "LineString"),
+}
+
+
 def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
     """The document's own OSM context, in the shape the OSM fetchers return it.
 
@@ -86,6 +103,10 @@ def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
     The tags are OSM's own, carried verbatim through the document, so everything derived FROM
     them - a building's height, a crossing's markings - is derived here by the same functions a
     site uses rather than read from a column that could disagree.
+
+    EVERY layer, because the consumer decides what it needs and this cannot: `_paved_surfaces_ft`
+    reads four of them to build one list, and handing it three drew the driveways and lost the
+    streets around them. A layer the document holds and this does not pass on is invisible.
     """
     wgs84 = features.to_crs(WGS84_EPSG)
     # A dict OR a JSON string: GDAL tags the column as a JSON subtype on write and parses it
@@ -98,34 +119,36 @@ def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
 
     of_kind = lambda kind: wgs84[wgs84["kind"] == kind].itertuples()
 
-    def ways(kind: str, geom_type: str):
-        return [(row, tags_of(row), part)
+    def ids(row, field: str) -> list[int]:
+        return [int(i) for i in str(getattr(row, field, "")).split(",") if i.strip().isdigit()]
+
+    def layer(name: str) -> list[dict]:
+        kind, geom_type = SLICE_LAYERS[name]
+        return [{"coords_wgs84": list(part.exterior.coords if geom_type == "Polygon"
+                                      else part.coords),
+                 "tags": tags_of(row), "id": next(iter(ids(row, "way_ids")), None),
+                 "node_ids": ids(row, "node_ids")}
                 for row in of_kind(kind) for part in _parts(row.geometry)
                 if part.geom_type == geom_type]
 
-    def node_ids(row) -> list[int]:
-        return [int(i) for i in str(row.node_ids).split(",") if i.strip().isdigit()]
-
-    nodes = [(tags_of(row), part) for row in of_kind("osm_node")
+    nodes = [(tags_of(row), part, row) for row in of_kind("osm_node")
              for part in _parts(row.geometry) if part.geom_type == "Point"]
-    return {
-        # height_m None where nobody recorded one, which is what fetch_buildings means by it -
-        # "nobody said" is a different answer from the default, and export.py looks elsewhere.
-        "buildings": [{"coords_wgs84": list(part.exterior.coords), "tags": tags,
-                       "height_m": (found := height_from_tags(tags)) and found[0],
-                       "height_source": found[1] if found else None}
-                      for row, tags, part in ways("building", "Polygon")],
-        "crossings": [{"coords_wgs84": list(part.coords), "tags": tags,
-                       "node_ids": node_ids(row)}
-                      for row, tags, part in ways("crossing_way", "LineString")],
-        "kerb_ways": [{"coords_wgs84": list(part.coords), "tags": tags,
-                       "id": row.Index, "node_ids": node_ids(row)}
-                      for row, tags, part in ways("kerb_way", "LineString")],
-        "traffic_control": [{"lon": p.x, "lat": p.y, "tags": t}
-                            for t, p in nodes if is_traffic_control(t)],
-        "street_furniture": [{"lon": p.x, "lat": p.y, "tags": t}
-                             for t, p in nodes if is_street_furniture(t)],
-    }
+    context = {name: layer(name) for name in SLICE_LAYERS}
+    # height_m None where nobody recorded one, which is what fetch_buildings means by it -
+    # "nobody said" is a different answer from the default, and export.py looks elsewhere.
+    for item in context["buildings"]:
+        found = height_from_tags(item["tags"])
+        item["height_m"], item["height_source"] = found if found else (None, None)
+    # Kerb NODES, appended to the kerb ways exactly as `fetch_kerbs` returns them in one list:
+    # OSM tags a dropped kerb on the node where the footway crosses, and the two are one layer.
+    context["kerb_ways"] += [{"coords_wgs84": None, "lon": p.x, "lat": p.y, "tags": t,
+                              "id": next(iter(ids(row, "way_ids")), None)}
+                             for t, p, row in nodes if is_kerb(t)]
+    context["traffic_control"] = [{"lon": p.x, "lat": p.y, "tags": t}
+                                  for t, p, _row in nodes if is_traffic_control(t)]
+    context["street_furniture"] = [{"lon": p.x, "lat": p.y, "tags": t}
+                                   for t, p, _row in nodes if is_street_furniture(t)]
+    return context
 
 
 def window_frame(features: gpd.GeoDataFrame) -> Frame:
@@ -145,11 +168,16 @@ def window_frame(features: gpd.GeoDataFrame) -> Frame:
 def context_layers(context: dict[str, list[dict]]) -> dict[str, list[dict]]:
     """The layers BOTH views take, so neither can be handed a set the other was not.
 
-    `buildings` is not here only because the 2D sheet does not draw them; every other layer is
-    passed to both, which is what keeps a hydrant from existing in one view and not the other.
+    Two layers are deliberately not here, and neither is a view drawing something the other
+    cannot. `buildings` the 2D sheet does not draw. `sidewalks` is the surveyed OSM CENTRELINE,
+    which is a 2D annotation - the 3D footway is a BAND derived from the pavement both views
+    share (`build_sidewalk_pieces`), so the walkable surface is in both and only the blue
+    reference line is in one. Everything else goes to both, which is what keeps a hydrant from
+    existing in one view and not the other.
     """
     return {key: context[key]
-            for key in ("crossings", "traffic_control", "street_furniture", "kerb_ways")}
+            for key in ("crossings", "traffic_control", "street_furniture", "kerb_ways",
+                        "stop_lines")}
 
 
 def _route_decisions(state, model, features: gpd.GeoDataFrame):
@@ -183,23 +211,24 @@ SCENARIOS = {
 
 
 def design_for(features: gpd.GeoDataFrame, scenario: str = "two_way_bikeway"):
-    """(model, state, pavement) for a slice, drawn in one scenario.
+    """(model, state, pavement, context) for a slice, drawn in one scenario.
 
     The baseline is `existing_conditions`, the same state every site pipeline labels "Existing
     Conditions", so "existing" here means what it means everywhere else in this repo.
     """
-    model, _ = slice_design(features)
+    context = slice_context(features)
+    model, _ = slice_design(features, osm=context)
     state = SCENARIOS[scenario](existing_conditions(model), model, features)
-    return model, state, slice_pavement(features)
+    return model, state, slice_pavement(features), context
 
 
 def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
              scenario: str = "two_way_bikeway") -> Path:
-    model, state, pavement = design_for(features, scenario)
-    context = slice_context(features)
+    model, state, pavement, context = design_for(features, scenario)
     fig, ax = plt.subplots(figsize=(11, 11))
-    plot_design_state(ax, model, state, name, pavement=pavement, sidewalks=[],
-                      frame=window_frame(features), **context_layers(context))
+    plot_design_state(ax, model, state, name, pavement=pavement,
+                      frame=window_frame(features), sidewalks=context["sidewalks"],
+                      **context_layers(context))
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.png"
     fig.savefig(out, dpi=200, bbox_inches="tight", facecolor="white")
@@ -211,8 +240,7 @@ def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
              scenario: str = "two_way_bikeway") -> Path:
     from scripts.phase4_render_3d import find_blender, render_all
 
-    model, state, pavement = design_for(features, scenario)
-    context = slice_context(features)
+    model, state, pavement, context = design_for(features, scenario)
     out_dir.mkdir(parents=True, exist_ok=True)
     geometry, png = out_dir / f"{name}_3d.json", out_dir / f"{name}_3d.png"
     export_scenario(model, state, name, geometry, pavement=pavement,

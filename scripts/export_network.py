@@ -89,29 +89,38 @@ def _context_rows(area: str, pavement) -> list[dict]:
     at read time. One JSON column rather than a column per key, because the borough's tag
     vocabulary is hundreds of keys and a sparse table of them is mostly nulls.
 
-    ONLY WHAT CANNOT BE DERIVED. The crossing BARS are not stored: export_scenario paints them
-    from the way, against the surveyor's own crossing:markings. Sidewalks are not stored either -
-    build_sidewalk_pieces derives them from the design.
+    EVERY LAYER, not a chosen few: `area_context` sweeps whatever the fetchers in
+    src/sources/osm_context.py know how to ask for, and this writes all of it out under
+    `osm_<layer>`. Carrying three of the ten is what left a slice with no driveways, no parking
+    and no surveyed footway while the same junction drawn as a site had 33 paved surfaces.
+
+    ONLY WHAT CANNOT BE DERIVED is still left out: the crossing BARS are not stored, because
+    export_scenario paints them from the way against the surveyor's own crossing:markings.
     """
     context = area_context(area)
     # OSM footprints are coarser than the traced kerbs, so a few sit in the carriageway. Dropped
     # rather than drawn standing in the road - src/render/export.py does the same, against the
     # same geometry. Skipped where nothing is paved, which would drop every building.
-    rows = [_osm_row("building", item) for item in context["buildings"]
+    rows = [_osm_row("building", item) for item in context.pop("buildings")
             if pavement is None or not item["geometry"].intersects(pavement)]
-    rows += [_osm_row("crossing_way", item) for item in context["crossings"]]
-    rows += [_osm_row("kerb_way", item) for item in context["kerb_ways"]]
-    rows += [_osm_row("osm_node", item) for item in context["nodes"]]
+    rows += [_osm_row("osm_node", item) for item in context.pop("nodes")]
+    # `crossing_way` and `kerb_way` keep the names they were first written under, so a document
+    # read by an older checkout still finds them; every layer added since is `osm_<layer>`.
+    named = {"crossings": "crossing_way", "kerb_ways": "kerb_way"}
+    rows += [_osm_row(named.get(layer, f"osm_{layer}"), item)
+             for layer, items in context.items() for item in items]
     return rows
 
 
 def _osm_row(kind: str, item: dict) -> dict:
-    """One OSM element as one feature: its geometry, its tags, and its node ids if it has any.
+    """One OSM element as one feature: its geometry, its tags, its way id and its node ids.
 
     `node_ids` is carried because a tactile pad is placed at a node SHARED by a crossing way and
     a tactile_paving kerb way - the topology IS the observation, and no geometry expresses it.
+    The way `id` because a PavedSurface keeps one, and the kerb-opening rules match on it.
     """
     return {"kind": kind, "tags": json.dumps(item["tags"], sort_keys=True),
+            "way_ids": str(item["id"]) if item.get("id") is not None else "",
             "node_ids": ",".join(str(i) for i in item.get("node_ids") or ()),
             "geometry": item["geometry"]}
 
@@ -186,9 +195,9 @@ def _summarise(features: gpd.GeoDataFrame) -> str:
             f"{(features['kind'] == 'bikeway').sum()} bikeway run(s) totalling "
             f"{_bikeway_ft(features):,.0f} ft, {(features['kind'] == 'bollard').sum()} bollards, "
             f"{(features['kind'] == 'building').sum()} buildings, "
-            f"{(features['kind'] == 'crossing_way').sum()} crossing ways, "
-            f"{(features['kind'] == 'kerb_way').sum()} OSM kerb ways, "
-            f"{(features['kind'] == 'osm_node').sum()} control/furniture nodes")
+            + ", ".join(f"{n} {k}" for k, n in sorted(features[
+                features["kind"].str.startswith(("crossing_way", "kerb_way", "osm_"))
+            ]["kind"].value_counts().items())))
 
 
 def _bikeway_ft(features: gpd.GeoDataFrame) -> float:

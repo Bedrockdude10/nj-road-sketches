@@ -30,7 +30,8 @@ def to_state_plane(coords) -> list[tuple[float, float]]:
     return list(zip(xs, ys))
 
 
-def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude) -> tuple:
+def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude,
+                          osm: dict | None = None, reach=None) -> tuple:
     """The streets AROUND the junction, widened from the kerb that was actually traced.
 
     `exclude` is the modelled pavement (and the mapped lots): subtracted from every surface, so
@@ -50,10 +51,9 @@ def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude) -> tuple
     # corridor losing its edges partway along, which is exactly the mismatch that made the first
     # wide render show street to 938 ft and kerb to 379. A way clipped into two pieces is two
     # surfaces; each is measured on its own.
-    reach_ft = drawn_kerb_radius_ft()
-    in_range = center_ft.buffer(reach_ft)
+    in_range = reach if reach is not None else center_ft.buffer(drawn_kerb_radius_ft())
     ways = []
-    for way in fetch_roads(center_wgs84, radius_m=radius_m):
+    for way in _supplied(osm, "roads", lambda: fetch_roads(center_wgs84, radius_m=radius_m)):
         tags = way.get("tags", {})
         if not is_carriageway(tags) or len(way.get("coords_wgs84") or []) < 2:
             continue
@@ -64,7 +64,8 @@ def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude) -> tuple
     if not ways:
         return ()
     kerb_lines = [LineString(to_state_plane(k["coords_wgs84"]))
-                  for k in fetch_kerbs(center_wgs84, radius_m=radius_m)
+                  for k in _supplied(osm, "kerb_ways",
+                                     lambda: fetch_kerbs(center_wgs84, radius_m=radius_m))
                   if len(k.get("coords_wgs84") or []) >= 2]
 
     centerlines = [line for _tags, line in ways]
@@ -85,7 +86,20 @@ def _context_roadways_ft(center_wgs84: Point, radius_m: float, exclude) -> tuple
     return tuple(out)
 
 
-def _paved_surfaces_ft(center_wgs84: Point, corner_fillets: dict | None = None) -> tuple:
+def _supplied(osm: dict | None, layer: str, fetch):
+    """A layer the caller handed over, or the one a fetch at a radius returns.
+
+    THE SAME BARGAIN src/render/export.py:export_scenario already strikes, for the same reason:
+    a junction knows a centre and a radius so it fetches, and a crop of the borough document has
+    neither - the largest radius that fits the snapshot bbox is smaller than the borough. The
+    keys are the FETCHER's names (`roads`, `driveways`, `kerb_ways`), which is what
+    src/geometry/network/area.py:area_context writes and what a slice passes back.
+    """
+    return fetch() if osm is None or layer not in osm else osm[layer]
+
+
+def _paved_surfaces_ft(center_wgs84: Point, corner_fillets: dict | None = None,
+                        osm: dict | None = None, reach=None, pavement=None) -> tuple:
     """Every mapped driveway, parking aisle and parking lot near this junction, projected once.
 
     The lots are built first because they SUBTRACT from the aisles. An aisle inside a mapped lot
@@ -109,7 +123,8 @@ def _paved_surfaces_ft(center_wgs84: Point, corner_fillets: dict | None = None) 
 
     radius_m = context_radius_m(DRIVEWAY_CONTEXT_RADIUS_M)
     lots = []
-    for lot in fetch_parking_lots(center_wgs84, radius_m=radius_m):
+    for lot in _supplied(osm, "parking_lots",
+                         lambda: fetch_parking_lots(center_wgs84, radius_m=radius_m)):
         coords = lot.get("coords_wgs84") or []
         if len(coords) < 4:
             continue
@@ -120,9 +135,10 @@ def _paved_surfaces_ft(center_wgs84: Point, corner_fillets: dict | None = None) 
     paved_by_lots = unary_union([lot.surface for lot in lots]) if lots else None
 
     out = list(lots)
-    for kind, fetch in ((PavedKind.DRIVEWAY, fetch_driveways),
-                        (PavedKind.PARKING_AISLE, fetch_parking_aisles)):
-        for way in fetch(center_wgs84, radius_m=radius_m):
+    for kind, layer, fetch in ((PavedKind.DRIVEWAY, "driveways", fetch_driveways),
+                               (PavedKind.PARKING_AISLE, "parking_aisles", fetch_parking_aisles)):
+        for way in _supplied(osm, layer,
+                             lambda: fetch(center_wgs84, radius_m=radius_m)):  # noqa: B023
             coords = way.get("coords_wgs84") or []
             if len(coords) < 2:
                 continue
@@ -143,8 +159,14 @@ def _paved_surfaces_ft(center_wgs84: Point, corner_fillets: dict | None = None) 
 
     # The streets last, cut around everything already resolved: the junction's own measured
     # pavement first of all, and the mapped lots for the same reason the aisles are.
-    keep_clear = [build_pavement_polygon(corner_fillets)] if corner_fillets else []
+    # The measured roadway this project already draws, which every context surface is cut around
+    # so no two asphalt polygons end up coplanar. A junction derives it from its corner ring; a
+    # crop has no ring and hands over the pavement traced along its streets instead. Supplying
+    # neither left 51,905 sq ft - 87% of one window's roadway - drawn twice, which in Blender is
+    # not redundancy but z-fighting (see MARKING_CLEARANCE_M).
+    keep_clear = [pavement] if pavement is not None else (
+        [build_pavement_polygon(corner_fillets)] if corner_fillets else [])
     if paved_by_lots is not None:
         keep_clear.append(paved_by_lots)
     exclude = unary_union([g for g in keep_clear if g is not None and not g.is_empty]) or None
-    return tuple(out) + _context_roadways_ft(center_wgs84, radius_m, exclude)
+    return tuple(out) + _context_roadways_ft(center_wgs84, radius_m, exclude, osm, reach)

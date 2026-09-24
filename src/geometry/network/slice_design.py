@@ -17,10 +17,11 @@ from itertools import pairwise
 
 import geopandas as gpd
 from shapely import reverse
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, Point, box
 from shapely.ops import substring
 
 from src.geometry.intersection.junction import IntersectionModel
+from src.geometry.intersection.paved import _paved_surfaces_ft
 from src.geometry.model import Leg, NJ_STATE_PLANE_FT
 from src.geometry.treatments import DesignState
 
@@ -119,13 +120,20 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
     return legs
 
 
-def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignState]:
+def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
+                 ) -> tuple[IntersectionModel, DesignState]:
     """The (model, state) for one slice, ready for export_scenario or plot_design_state.
 
     `features` is a slice of the document in state-plane feet - what render_slice.slice_around
     returns. EVERY junction in the window is modelled, not the one it happens to be centred on -
     a window is a piece of the network, and a road or a node inside it that the model does not
     carry is simply missing from the drawing.
+
+    `osm` is the window's own context in the fetchers' shape (render_slice.slice_context), and
+    it is what fills `paved_surfaces` - the driveways, parking and surrounding streets BOTH
+    renderers read off the model. Without it a slice drew 0 of them where the same junction as a
+    configured site drew 33, which is the whole of "everything in 3D must be in 2D" failing at
+    the document rather than at the seam.
     """
     streets = features[features["kind"] == "street"].rename(columns={"name": "name_"})
     minx, miny, maxx, maxy = features.total_bounds
@@ -143,13 +151,14 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
     legs = _legs_of(streets, traced, junction_nodes(features))
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
+    center_wgs84 = gpd.GeoSeries([center_ft], crs=NJ_STATE_PLANE_FT).to_crs(4326).iloc[0]
     model = IntersectionModel(
         # `legs` is how legs_on_road tells which approaches are on a route, and therefore the
         # only reason a route decision reaches a crop at all. The street's own OSM name, so the
         # document and the decision are keyed on one string.
         config={"intersection": {},
                 "legs": {slug: {"street_name": leg.name} for slug, leg in legs.items()}},
-        center_wgs84=gpd.GeoSeries([center_ft], crs=NJ_STATE_PLANE_FT).to_crs(4326).iloc[0],
+        center_wgs84=center_wgs84,
         center_ft=center_ft,
         legs=legs,
         # No corner is modelled in a crop - there is no junction node to fillet around, and
@@ -157,5 +166,12 @@ def slice_design(features: gpd.GeoDataFrame) -> tuple[IntersectionModel, DesignS
         corner_fillets={},
         parcels=empty,
         corner_parcels=empty,
+        # The minor carriageways, cut to the WINDOW rather than to a radius about its centre:
+        # `reach` is the drawing's own extent, so asphalt reaches the corners of the sheet
+        # instead of stopping on the circle inscribed in it. No `corner_fillets` to cut around -
+        # a crop has none - so the traced pavement stands in as the measured geometry that wins.
+        paved_surfaces=_paved_surfaces_ft(center_wgs84, osm=osm, pavement=slice_pavement(features),
+                                          reach=box(minx, miny, maxx, maxy))
+        if osm is not None else (),
     )
     return model, DesignState(legs=legs, corner_fillets={})

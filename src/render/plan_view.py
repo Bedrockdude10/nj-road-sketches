@@ -513,7 +513,8 @@ def draw_change_panel(fig, before: SceneMetrics, after: SceneMetrics) -> Compari
 def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: str, dimension_labels: bool = True,
                        crossings: list[dict] | None = None, sidewalks: list[dict] | None = None,
                        traffic_control: list[dict] | None = None, street_furniture: list[dict] | None = None,
-                       pavement=None, kerb_ways: list[dict] | None = None, frame=None):
+                       pavement=None, kerb_ways: list[dict] | None = None, frame=None,
+                       stop_lines: list[dict] | None = None):
     """Every OSM layer may be SUPPLIED rather than fetched, exactly as export_scenario takes them,
     so the two views cannot be drawn from different data. See that function for why a crop has to
     supply them; `pavement` likewise overrides the ring built from corner fillets it has none of.
@@ -562,7 +563,8 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
             crossings = []
     # Once, for the whole figure: the pavement, every crossing and stop bar footprint, and the
     # offsets/skews everything else is measured from. See src/render/scene.py.
-    scene = SceneGeometry.resolve(model, state, crossings, pavement=pavement)
+    scene = SceneGeometry.resolve(model, state, crossings, stop_lines=stop_lines,
+                                   pavement=pavement)
     pavement = scene.pavement
     # Queued, not drawn: every label below is sized in points and has to be placed in feet, and
     # the conversion is a fact about axes limits this function sets last. See src/render/labels.py.
