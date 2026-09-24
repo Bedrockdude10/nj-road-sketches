@@ -532,8 +532,16 @@ def match_stop_lines_to_legs(legs: dict, stop_lines: list[dict]) -> dict:
 
 
 def resolve_stop_bar_offsets(state: DesignState, crosswalk_offsets: dict[str, tuple[float, str]],
-                              stop_lines: list[dict] | None = None) -> dict[str, float]:
-    """{leg_name: offset_ft} - where a signalized approach's stop bar sits.
+                              stop_lines: list[dict] | None = None,
+                              derive_unsurveyed: bool = True) -> dict[str, float]:
+    """{leg_name: offset_ft} - where an approach's stop bar sits.
+
+    A SURVEYED BAR DRAWS WHEREVER IT IS PAINTED. `derive_unsurveyed` governs only the fallback
+    below - hanging a bar off a crosswalk offset for an approach nobody traced - which is a
+    claim a junction has to earn by being signalized. The two were one gate, in the caller, and
+    it threw away real data: a crop of the network has no site config to declare signals, so
+    four traced `road_marking=stop_line` ways at Broad x Greenwood were handed to this function
+    and never asked for.
 
     Prefers the SURVEYED position: a road_marking=stop_line way is the painted bar itself, so
     its distance along the leg is the answer, not something to infer. Ten are mapped across
@@ -552,6 +560,8 @@ def resolve_stop_bar_offsets(state: DesignState, crosswalk_offsets: dict[str, tu
         min_offset_ft = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
         line = surveyed.get(leg_name)
         if line is None:
+            if not derive_unsurveyed:
+                continue   # nobody traced one here and nothing licenses inventing it
             # NOTHING STOPS ON A LEG TRAFFIC LEAVES BY. The derivation below hangs a bar off
             # every leg that has a crosswalk, which is right on a two-way street because every
             # leg there is an approach - and wrong on a ONE-WAY carriageway, where half the legs

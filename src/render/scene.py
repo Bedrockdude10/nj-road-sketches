@@ -108,12 +108,17 @@ class SceneGeometry:
         reaches = crosswalk_reaches_ft(state, offsets, skews, pavement, marked)
         bands = crosswalk_bands_ft(state, offsets, skews, CROSSWALK_DEPTH_FT, pavement, reaches)
 
-        if model.config.get("signals"):
-            if stop_lines is None:
-                stop_lines = fetch_stop_lines(model.center_wgs84, radius_m=STOP_LINE_RADIUS_M)
-            stop_bar_offsets = resolve_stop_bar_offsets(state, offsets, stop_lines)
-        else:
-            stop_bar_offsets = {}
+        # A TRACED STOP BAR IS A PAINTED STOP BAR, signalized or not. The `signals` block only
+        # licenses DERIVING one for an approach nobody traced, which is why it is now passed to
+        # the resolver rather than gating the whole call: as a gate it discarded the four
+        # surveyed bars at Broad x Greenwood whenever the drawing was a crop with no site config.
+        # Still only FETCHED at a signalized junction, so an unsignalized site adds no Overpass
+        # round trip it did not make before - a supplied layer is used whenever it is given.
+        signalized = bool(model.config.get("signals"))
+        if stop_lines is None and signalized:
+            stop_lines = fetch_stop_lines(model.center_wgs84, radius_m=STOP_LINE_RADIUS_M)
+        stop_bar_offsets = resolve_stop_bar_offsets(state, offsets, stop_lines,
+                                                     derive_unsurveyed=signalized)
         from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
         from src.geometry.surveyed import surveyed_crossings_in_frame
 
