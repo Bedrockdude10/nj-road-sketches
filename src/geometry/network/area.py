@@ -21,6 +21,7 @@ from src.geometry.model import station_offset_many
 from src.geometry.network.corridor import Corridor, _street_name
 from src.geometry.network.kerb import KerbRun, _traced_kerb_runs
 from src.render.coords import wgs84_to_state_plane
+from src.sources.observations import ELEMENT_FROM_OSM, apply_observations, load_observations
 from src.sources.osm_context import (SNAPSHOT_AREAS, fetch_borough_osm, is_building,
                                      is_crossing_way, is_driveway, is_kerb, is_parking_aisle,
                                      is_parking_lot, is_road, is_sidewalk, is_stop_line)
@@ -323,9 +324,15 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
     friends: those take a centre and a radius, and the largest radius that fits inside the
     declared bbox is smaller than the borough, so the corners would lose their context. An area
     has no centre to measure from, which is the same reason `_area_kerb_ways` exists.
+
+    THE ONE MERGE POINT for observations/<area>.yaml (src/sources/observations.py): every
+    field observation is additive OSM tags on an OSM element, applied to the snapshot here,
+    before anything below reads it - so a slice and a site built from the same area can never
+    see different tags, and no reader downstream needs to know observations exist at all.
     """
     bbox: Bbox = SNAPSHOT_AREAS[area]
     snapshot = snapshot if snapshot is not None else fetch_borough_osm(bbox=bbox)
+    snapshot = apply_observations(snapshot, load_observations(area))
     xy = _projected_nodes(snapshot["nodes"])
     found = municipal_boundary_ft(Point(*_snapshot_center(bbox)))
     if found is None:
@@ -356,13 +363,15 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
             # node SHARED by a crossing way and a tactile_paving kerb way, so the topology is the
             # observation and the geometry alone cannot express it.
             out[layer].append({"geometry": geometry, "tags": tags, "id": way.get("id"),
-                               "node_ids": tuple(way.get("nodes") or ())})
+                               "node_ids": tuple(way.get("nodes") or ()),
+                               "provenance": way.get("provenance", ELEMENT_FROM_OSM)})
     # EVERY tagged node, with no role written down beside it: which of the three a node plays is
     # a function of its tags (`is_traffic_control`, `is_street_furniture`, `is_kerb`), and a
     # column repeating that is the second copy this module exists to avoid - the reader derives
     # it, as render_slice.slice_context does. Its own row even where it is a member of a carried
     # way, because a bare id in that way's `node_ids` cannot carry the node's tags.
-    out["nodes"] = [{"geometry": point, "tags": tags, "id": node_id}
+    out["nodes"] = [{"geometry": point, "tags": tags, "id": node_id,
+                     "provenance": node.get("provenance", ELEMENT_FROM_OSM)}
                     for node_id, node in snapshot["nodes"].items()
                     if (tags := node.get("tags") or {})
                     and (point := Point(xy[node_id])).intersects(boundary)]

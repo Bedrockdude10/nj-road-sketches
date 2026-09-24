@@ -29,6 +29,7 @@ from src.geometry.corridor_paint import paint_facility
 from src.geometry.markings import (BIKE_BUFFER_FILL, BIKE_LANE_EDGE_LINE,
                                    BIKE_LANE_SURFACE)
 from src.geometry.network.area import area_context, area_corridors, corridor_pavement
+from src.sources.observations import ELEMENT_FROM_OSM
 from src.geometry.treatments import route_decision_for
 from src.geometry.treatments.corridor import CorridorFacility
 
@@ -122,10 +123,17 @@ def _osm_row(kind: str, item: dict) -> dict:
     `node_ids` is carried because a tactile pad is placed at a node SHARED by a crossing way and
     a tactile_paving kerb way - the topology IS the observation, and no geometry expresses it.
     The way `id` because a PavedSurface keeps one, and the kerb-opening rules match on it.
+
+    `provenance` because an element this project OBSERVED must be tellable from one a mapper
+    surveyed. Without it the carrier's whole bargain is unauditable: the document would assert a
+    signal mast in the same voice as a traced kerb, and nothing downstream could ask which is
+    which. Computed in area_context and dropped here is the same defect a `label` field had -
+    a fact derived and then thrown away at the boundary.
     """
     return {"kind": kind, "tags": json.dumps(item["tags"], sort_keys=True),
             "way_ids": str(item["id"]) if item.get("id") is not None else "",
             "node_ids": ",".join(str(i) for i in item.get("node_ids") or ()),
+            "provenance": item.get("provenance", ELEMENT_FROM_OSM),
             "geometry": item["geometry"]}
 
 

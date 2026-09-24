@@ -1,0 +1,3 @@
+# Field observations for Hopewell Borough - additive OSM tags, format and rules pinned in
+# src/sources/observations.py. Empty for now; the per-site config observations
+# (existing_marked_crosswalks etc.) are being migrated here separately.
