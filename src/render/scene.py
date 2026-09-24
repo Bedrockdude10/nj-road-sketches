@@ -68,7 +68,8 @@ class SceneGeometry:
 
     @classmethod
     def resolve(cls, model: "IntersectionModel", state: "DesignState", crossings: list[dict],
-                 stop_lines: list[dict] | None = None, pavement=None) -> "SceneGeometry":
+                 stop_lines: list[dict] | None = None, pavement=None,
+                 kerb_ways: list[dict] | None = None) -> "SceneGeometry":
         """Resolve one scenario's marking geometry. `crossings` is the fetched OSM layer.
 
         The order below is a real dependency chain, which is the other reason this belongs in
@@ -99,7 +100,8 @@ class SceneGeometry:
         from src.geometry.surveyed import surveyed_crossings_in_frame
 
         drawn_kerbs = tuple(line for line, _tags, _way_id in kerb_lines_with_tags_ft(
-            model.center_wgs84, model.center_ft, radius_ft=drawn_kerb_radius_ft()))
+            model.center_wgs84, model.center_ft, radius_ft=drawn_kerb_radius_ft(),
+            kerbs=kerb_ways))
         return cls(
             model=model, state=state, pavement=pavement, marked_crosswalks=marked,
             crosswalk_offsets=offsets, crosswalk_skews=skews, crosswalk_reaches=reaches,

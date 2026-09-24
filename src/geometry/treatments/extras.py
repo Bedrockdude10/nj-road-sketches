@@ -47,7 +47,7 @@ class ExtraProp(Treatment):
 
 
 def build_sidewalk_pieces(state: DesignState, sidewalk_width_ft: float = 6,
-                           pavement=None) -> list[Polygon]:
+                           pavement=None, edges: list | None = None) -> list[Polygon]:
     """A sidewalk band hugging the real kerb, all the way round the junction.
 
     Built by widening each piece of the ACTUAL pavement boundary - the same (trimmed_a, arc,
@@ -60,22 +60,23 @@ def build_sidewalk_pieces(state: DesignState, sidewalk_width_ft: float = 6,
     exterior only (scripts/blender/blender_scene.py:extrude_polygon), so a ring-with-a-hole would
     come out as a slab over the whole intersection.
 
-    A SUPPLIED `pavement` is walked at its own boundary, because the edges above are the corner
-    ring's and a crop of the network has no corner ring - so a window drew 0 sidewalk pieces
-    while the 2D sheet beside it drew the surveyed footway, which is the seam this project
-    refuses to leave open. Same construction either way: widen the roadway's real edge, cut the
-    roadway back out.
+    A crop of the network supplies both: `pavement` for the roadway to cut out, and `edges` for
+    the kerb to lay the band against - because it has no corner ring, and the pavement's own
+    BOUNDARY is not a kerb. Walking that boundary instead put a 6 ft ribbon right round the
+    roadway blob, 2 pieces and 19,102 sq ft with 7,437 of it more than 8 ft from any traced
+    kerb, including caps across the carriageway where the window cut each street. The traced
+    kerb ways are the kerb, so they are what a window hands over; where OSM traced none there
+    is no sidewalk, which is the same answer this project gives everywhere else about partial
+    data. Same construction in both cases: widen the real kerb, cut the roadway back out.
     """
     if pavement is None:
         try:
             pavement = build_pavement_polygon(state.corner_fillets)
         except ValueError:
             return []   # no closed roadway to lay a sidewalk against
+    if edges is None:
         edges = [parts[key] for parts in state.corner_fillets.values() if "error" not in parts
                  for key in ("trimmed_a", "arc", "trimmed_b") if parts.get(key) is not None]
-    else:
-        edges = [line for part in getattr(pavement, "geoms", [pavement])
-                 for line in [part.exterior, *part.interiors]]
 
     pieces = []
     for edge in edges:

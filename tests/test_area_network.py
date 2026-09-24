@@ -295,6 +295,65 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     assert max(math.hypot(*p["position_m"]) for p in doc["props"]) <= radius_m * 1.5
 
 
+def test_a_slice_reads_what_osm_says_about_each_leg() -> None:
+    """`overtaking=no` IS a double yellow, and a window must read it off its own road ways.
+
+    Not a layer but a STATEMENT, which is why it gets its own test: a missing layer leaves a
+    hole in the picture and this leaves a WRONG picture - the repo's dashed default says on the
+    sheet that passing is permitted. 5 of the 7 named ways through Broad & Greenwood are tagged
+    `overtaking=no` and every one of them drew dashed, because `slice_design` built a model with
+    no `leg_osm_tags` and DesignState.from_model reads exactly that field.
+    """
+    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
+
+    around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
+    _model, state, _pavement, context = design_for(around, "existing")
+
+    tagged = {t["tags"]["name"] for t in context["roads"]
+              if t["tags"].get("overtaking") == "no" and t["tags"].get("name")}
+    assert tagged, "the window should hold ways tagged overtaking=no - check the document"
+    double = {name for name, style in state.existing_centerline_styles.items()
+              if style == "double_yellow"}
+    assert len(double) >= 5, (
+        f"{len(tagged)} streets in this window are tagged overtaking=no but only {len(double)} "
+        f"legs drew a double yellow: {state.existing_centerline_styles}")
+
+
+def test_a_slice_lays_its_footway_against_the_traced_kerb() -> None:
+    """The band follows the KERB OSM traced, not the outline of the roadway.
+
+    A junction widens its corner ring, which is fitted to that kerb. A crop has no ring, and
+    walking the pavement's own boundary instead is not the same thing: it wrapped one 6 ft
+    ribbon round the whole roadway blob - 2 pieces, 19,102 sq ft, 7,437 of it more than 8 ft
+    from any traced kerb, with caps laid across the carriageway where the window cut each
+    street. Measured against the kerb rather than counted, because the count was not the defect.
+    """
+    from shapely.ops import unary_union
+
+    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
+    from src.geometry.intersection.paved import to_state_plane
+    from src.geometry.treatments import build_sidewalk_pieces
+    from src.render.scene import SceneGeometry
+
+    around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
+    model, state, pavement, context = design_for(around, "existing")
+    scene = SceneGeometry.resolve(model, state, context["crossings"], pavement=pavement,
+                                  kerb_ways=context["kerb_ways"])
+    assert len(scene.drawn_kerbs) == len([k for k in context["kerb_ways"]
+                                          if k.get("coords_wgs84")]), (
+        "the scene should draw the document's own kerb ways, not a second set fetched at a "
+        "radius around the window's centre")
+
+    band = unary_union(build_sidewalk_pieces(state, 6, pavement=pavement,
+                                             edges=list(scene.drawn_kerbs)))
+    kerbs = unary_union([LineString(to_state_plane(k["coords_wgs84"]))
+                         for k in context["kerb_ways"] if k.get("coords_wgs84")])
+    assert band.difference(kerbs.buffer(8.0)).area < 1.0, (
+        f"{band.difference(kerbs.buffer(8.0)).area:,.0f} sq ft of footway sits more than 8 ft "
+        f"from any traced kerb - it is following the roadway outline, not the kerb")
+    assert band.intersection(pavement).area < 1.0, "footway drawn over the carriageway"
+
+
 def test_a_slice_clips_rather_than_dropping_what_overhangs_it() -> None:
     """A 1,050 ft bikeway run whose centre is outside the window still crosses it. Filtering by
     centroid instead of clipping would draw a hole where the longest run should be."""

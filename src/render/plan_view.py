@@ -320,7 +320,7 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     # src/geometry/intersection/kerb_sources.py:kerb_lines_with_tags_ft on why the drawing test is not the
     # corner-fit's near set, and src/render/export.py for the matching call.
     kerb_lines = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                          radius_ft=drawn_kerb_radius_ft())
+                                          radius_ft=drawn_kerb_radius_ft(), kerbs=kerb_ways)
     props = build_props(model, state, crosswalk_offsets, model.center_ft, traffic_control,
                          street_furniture, crossings,
                          kerb_ways if kerb_ways is not None
@@ -564,7 +564,7 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     # Once, for the whole figure: the pavement, every crossing and stop bar footprint, and the
     # offsets/skews everything else is measured from. See src/render/scene.py.
     scene = SceneGeometry.resolve(model, state, crossings, stop_lines=stop_lines,
-                                   pavement=pavement)
+                                   pavement=pavement, kerb_ways=kerb_ways)
     pavement = scene.pavement
     # Queued, not drawn: every label below is sized in points and has to be placed in feet, and
     # the conversion is a fact about axes limits this function sets last. See src/render/labels.py.

@@ -252,7 +252,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # src/render/props.py's _traffic_signal_props/_no_turn_on_red_props use.
     supplied_pavement = pavement
     scene = SceneGeometry.resolve(model, state, crossings, stop_lines=stop_lines,
-                                   pavement=pavement)
+                                   pavement=pavement, kerb_ways=kerb_ways)
     pavement = scene.pavement
     if pavement is None:
         # export_scenario has always required a closed ring (build_pavement_polygon raised
@@ -265,11 +265,14 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     crosswalk_reaches = scene.crosswalk_reaches
     stop_bar_offsets = scene.stop_bar_offsets
     marked_crosswalks = scene.marked_crosswalks
-    # `pavement` only where the caller supplied the roadway: a junction's band is built off its
-    # corner ring, and passing the resolved pavement there would widen the WHOLE ring including
-    # the far end of every leg. A crop has no ring, so its own roadway is the only edge there is.
+    # Only where the caller supplied the roadway: a junction's band is built off its own corner
+    # ring, and the traced kerbs are a wider set than that ring - passing them there would lay
+    # footway along every leg to the fetch radius. A crop has no ring, so the kerb OSM traced is
+    # the kerb, and `scene.drawn_kerbs` is that set resolved once for the whole scene.
     sidewalk_pieces = build_sidewalk_pieces(state, sidewalk_width_ft=SIDEWALK_WIDTH_FT,
-                                             pavement=supplied_pavement)
+                                             pavement=supplied_pavement,
+                                             edges=list(scene.drawn_kerbs) if supplied_pavement
+                                             is not None else None)
 
     # OSM building footprints are independent of (and coarser than) our SLD/field-measured
     # curb geometry - a few end up drawn overlapping the actual pavement. Drop those rather
@@ -283,7 +286,8 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # surveyed-crossing trim against these kerbs lives in SceneGeometry.surveyed_crossing_markings,
     # beside where the crossing's STYLE is resolved, so the two cannot use different kerbs.
     drawn_kerbs_with_tags = list(kerb_lines_with_tags_ft(model.center_wgs84, center_ft,
-                                                         radius_ft=drawn_kerb_radius_ft()))
+                                                         radius_ft=drawn_kerb_radius_ft(),
+                                                         kerbs=kerb_ways))
 
     near_radius_ft = max((v[0] for v in crosswalk_offsets.values()), default=30) + NEAR_ZONE_BUFFER_FT
     pavement_near, pavement_far = _split_near_far([pavement], center_ft, near_radius_ft)

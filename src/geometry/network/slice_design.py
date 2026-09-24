@@ -21,6 +21,7 @@ from shapely.geometry import LineString, Point, box
 from shapely.ops import substring
 
 from src.geometry.intersection.junction import IntersectionModel
+from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
 from src.geometry.intersection.paved import _paved_surfaces_ft
 from src.geometry.model import Leg, NJ_STATE_PLANE_FT
 from src.geometry.treatments import DesignState
@@ -138,6 +139,7 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     streets = features[features["kind"] == "street"].rename(columns={"name": "name_"})
     minx, miny, maxx, maxy = features.total_bounds
     center_ft = Point((minx + maxx) / 2, (miny + maxy) / 2)
+    center_wgs84 = gpd.GeoSeries([center_ft], crs=NJ_STATE_PLANE_FT).to_crs(4326).iloc[0]
     # THE TRACED WIDTH, not OSM's `width` tag. Both are in the document and they disagree -
     # SKILLS.md section 2, the two datums - and here the choice is forced: the asphalt drawn under a slice
     # IS corridor_pavement's, which follows the traced kerb, so a prop placed off the nominal
@@ -151,7 +153,16 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     legs = _legs_of(streets, traced, junction_nodes(features))
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
-    center_wgs84 = gpd.GeoSeries([center_ft], crs=NJ_STATE_PLANE_FT).to_crs(4326).iloc[0]
+    # WHAT OSM SAYS ABOUT EACH LEG, matched off the window's own road ways. Not a layer but a
+    # STATEMENT, and the one call that carries it: `overtaking=no` is a double yellow
+    # (DesignState.from_model), and `parking:left`/`parking:right` are the kerbside restrictions
+    # (parking_restriction_spans). Without it every leg fell back to the repo's dashed default,
+    # which claims on the sheet that passing is permitted - on five of the seven named ways
+    # through Broad & Greenwood, where the survey says it is not.
+    spans = _match_legs_to_osm_roads(legs, center_wgs84, center_ft,
+                                     roads=(osm or {}).get("roads")) if osm is not None else {}
+    dominant = {name: max(rows, key=lambda span: span.length_ft) for name, rows in spans.items()}
+
     model = IntersectionModel(
         # `legs` is how legs_on_road tells which approaches are on a route, and therefore the
         # only reason a route decision reaches a crop at all. The street's own OSM name, so the
@@ -173,5 +184,8 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
         paved_surfaces=_paved_surfaces_ft(center_wgs84, osm=osm, pavement=slice_pavement(features),
                                           reach=box(minx, miny, maxx, maxy))
         if osm is not None else (),
+        leg_road_spans=spans,
+        leg_osm_tags={name: span.tags for name, span in dominant.items()},
+        leg_osm_aligned={name: span.aligned for name, span in dominant.items()},
     )
     return model, DesignState(legs=legs, corner_fillets={})

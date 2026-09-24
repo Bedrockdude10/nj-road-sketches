@@ -70,7 +70,8 @@ def drawn_kerb_radius_ft() -> float:
 
 
 def kerb_lines_with_tags_ft(center_wgs84: Point, center_ft: Point, legs: dict | None = None,
-                             radius_ft: float | None = None) -> list[tuple[LineString, dict, int | None]]:
+                             radius_ft: float | None = None, kerbs: list[dict] | None = None
+                             ) -> list[tuple[LineString, dict, int | None]]:
     """[(LineString, tags, way id)] for traced kerbs near the junction - geometry plus what OSM
     says about each (kerb=lowered, tactile_paving=yes, wheelchair=yes).
 
@@ -105,7 +106,7 @@ def kerb_lines_with_tags_ft(center_wgs84: Point, center_ft: Point, legs: dict | 
             return _runs_along_a_leg(line, legs)
         return line.distance(center_ft) <= KERB_NEAR_JUNCTION_FT
 
-    return [(line, tags, way_id) for line, tags, way_id in _projected_kerbs(center_wgs84)
+    return [(line, tags, way_id) for line, tags, way_id in _projected_kerbs(center_wgs84, kerbs)
             if relevant(line)]
 
 
@@ -118,13 +119,18 @@ def kerb_lines_with_tags_ft(center_wgs84: Point, center_ft: Point, legs: dict | 
 _PROJECTED_KERBS: dict[tuple, tuple] = {}
 
 
-def _projected_kerbs(center_wgs84: Point) -> list[tuple]:
+def _projected_kerbs(center_wgs84: Point, kerbs: list[dict] | None = None) -> list[tuple]:
     """[(LineString in feet, tags, way id)] for every traced kerb WAY near the junction.
 
     The id is carried because a marking this project BREAKS for a kerb has to be traceable to
     the kerb that broke it - see src/geometry/kerbs.py:KerbOpening.citation.
 
     Lone `barrier=kerb` NODES are dropped: they carry no arc to fit and no line to draw.
+
+    `kerbs` may be SUPPLIED in `fetch_kerbs`' own shape. A window onto the borough document
+    already holds its kerb ways and must not fetch a second set around its centre: the two
+    would be different sets of the same fact, and this is the set the drawing, the tactile pads
+    and the widths are all read off.
     """
     from src.render.frame import context_radius_m
 
@@ -132,7 +138,8 @@ def _projected_kerbs(center_wgs84: Point) -> list[tuple]:
     # cannot disturb the fits: both the near and the wide filter sit far inside the unscaled
     # 120 m, so extra ways are candidates every existing test rejects. Only the DRAWING wanted them.
     try:
-        kerbs = fetch_kerbs(center_wgs84, radius_m=context_radius_m(KERB_CONTEXT_RADIUS_M))
+        kerbs = (fetch_kerbs(center_wgs84, radius_m=context_radius_m(KERB_CONTEXT_RADIUS_M))
+                 if kerbs is None else kerbs)
     except RuntimeError as e:
         # An outage must not look like "nothing is mapped here": returning [] drops the widths,
         # the per-corner radii and every tactile pad, and the render looks finished. Overpass

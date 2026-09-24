@@ -131,7 +131,8 @@ ROAD_MATCH_HIGHWAY_CLASSES = frozenset({
 })
 
 
-def _match_legs_to_osm_roads(legs: dict, center_wgs84: Point, center_ft: Point) -> dict:
+def _match_legs_to_osm_roads(legs: dict, center_wgs84: Point, center_ft: Point,
+                              roads: list[dict] | None = None) -> dict:
     """{leg name: (tags, aligned)} for the OSM highway way each leg runs along.
 
     `aligned` is True when the way is drawn in the same direction the leg points outward.
@@ -140,13 +141,21 @@ def _match_legs_to_osm_roads(legs: dict, center_wgs84: Point, center_ft: Point) 
     Matched on geometry rather than on the street name in config.yaml: names disagree
     between sources ("W Broad St" vs "West Broad Street"), and a leg is a piece of a
     specific way, not of a name.
+
+    A caller may SUPPLY the ways, and a window onto the borough document must - this is the one
+    call that carries OSM's operational tags onto the legs, and skipping it is not a missing
+    layer but a missing STATEMENT: 5 of the 7 named ways through Broad & Greenwood are
+    `overtaking=no`, and without this every one of them drew a dashed single yellow, which says
+    on the sheet that passing is permitted where the survey says it is not. `parking:left` and
+    `parking:right` travel the same road (see IntersectionModel.parking_restriction_spans).
     """
-    try:
-        roads = fetch_roads(center_wgs84, radius_m=ROAD_CONTEXT_RADIUS_M)
-    except Exception as e:   # operational tags are an enhancement, not a dependency
-        print(f"  NOTE: couldn't read OSM road tags ({type(e).__name__}); centerline styles "
-              f"fall back to the site config.")
-        return {}
+    if roads is None:
+        try:
+            roads = fetch_roads(center_wgs84, radius_m=ROAD_CONTEXT_RADIUS_M)
+        except Exception as e:   # operational tags are an enhancement, not a dependency
+            print(f"  NOTE: couldn't read OSM road tags ({type(e).__name__}); centerline styles "
+                  f"fall back to the site config.")
+            return {}
 
     # Projected once, outside the leg loop. Each candidate way was re-transformed for every
     # leg, so a 4-leg junction did the same coordinate transform four times per way.
