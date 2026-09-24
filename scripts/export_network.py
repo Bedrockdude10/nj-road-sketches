@@ -93,6 +93,10 @@ def _context_rows(area: str, pavement) -> list[dict]:
     src/sources/osm_context.py know how to ask for, and this writes all of it out under
     `osm_<layer>`. Carrying three of the ten is what left a slice with no driveways, no parking
     and no surveyed footway while the same junction drawn as a site had 33 paved surfaces.
+    `other` and `relations` are the same fix one level further: a tagged way none of those ten
+    predicates claims, and a `type=multipolygon` relation whose tags live only on the relation
+    (a park or a soil-survey polygon whose member ways are themselves untagged), land here too
+    rather than being the one thing this document still can't answer for.
 
     ONLY WHAT CANNOT BE DERIVED is still left out: the crossing BARS are not stored, because
     export_scenario paints them from the way against the surveyor's own crossing:markings.
