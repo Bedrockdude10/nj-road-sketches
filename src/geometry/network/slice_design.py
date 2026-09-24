@@ -22,8 +22,10 @@ from shapely.ops import substring
 
 from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.junction import IntersectionModel
+from src.geometry.intersection.load import _build_corners
 from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
-from src.geometry.intersection.paved import _paved_surfaces_ft
+from src.geometry.intersection.paved import _paved_surfaces_ft, to_state_plane
+from src.geometry.model.traced_kerbs import corner_radii_from_kerbs
 from src.geometry.model import Leg, NJ_STATE_PLANE_FT
 from src.geometry.treatments import DesignState
 
@@ -122,6 +124,45 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float],
     return legs
 
 
+#: The placeholder every site config carries as `existing_corner_radius_ft`, for a corner whose
+#: kerb nobody traced. A crop has no config to read it from and the number is not per-site - all
+#: but one of them say 20 - so it lives here rather than being invented per window.
+FALLBACK_CORNER_RADIUS_FT: float = 20.0
+
+
+def _corners_of(legs: dict[str, Leg], nodes: list[Point], kerb_lines: list[LineString]) -> dict:
+    """The corner geometry for EVERY junction in the window, through the site path's own builder.
+
+    `build_corner_fillets` sorts the legs it is given by compass bearing and fillets between each
+    angularly-adjacent PAIR, wrapping around - which is right for a junction and wrong for a
+    window, because a window holds several. Handed all six legs of Broad x Greenwood and Broad x
+    Blackwell at once it would pair a Greenwood approach with a Blackwell one and round a corner
+    between two streets that never meet. So the legs are grouped by the node they radiate from
+    first, and `_build_corners` runs once per group exactly as it does for a site.
+
+    Grouped by the NEAREST junction node, not by the leg's own station 0 rounded off. Station 0
+    is where `_approaches` cut the street, and it cuts at `line.project(node)` - a point on THAT
+    street's centreline, which misses the node by however far the two centrelines pass. Measured:
+    Broad St's approach to Blackwell starts 1 ft from the Blackwell node, so rounding to the foot
+    filed it and Blackwell Ave under different keys and built no corner between two streets that
+    plainly meet. Snapping to the node instead asks the question that was meant.
+
+    A leg whose station 0 is a crop edge rather than a node matches no node and is left out, so
+    it forms no corner - which is also what `build_corner_fillets` returns for a group of one.
+    """
+    by_node: dict[int, dict[str, Leg]] = {}
+    for name, leg in legs.items():
+        start = Point(leg.centerline.coords[0])
+        near = min(range(len(nodes)), key=lambda i: nodes[i].distance(start), default=None)
+        if near is not None and nodes[near].distance(start) <= ON_STREET_FT:
+            by_node.setdefault(near, {})[name] = leg
+    corners: dict = {}
+    for group in by_node.values():
+        radii, _notes = corner_radii_from_kerbs(group, kerb_lines, FALLBACK_CORNER_RADIUS_FT)
+        corners.update(_build_corners(group, FALLBACK_CORNER_RADIUS_FT, radii, kerb_lines))
+    return corners
+
+
 def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
                  ) -> tuple[IntersectionModel, DesignState]:
     """The (model, state) for one slice, ready for export_scenario or plot_design_state.
@@ -151,7 +192,8 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     traced = {row.name_: row.geometry.area / length
               for row in paved.itertuples()
               if (length := streets[streets["name_"] == row.name_].geometry.length.sum()) > 0}
-    legs = _legs_of(streets, traced, junction_nodes(features))
+    nodes = junction_nodes(features)
+    legs = _legs_of(streets, traced, nodes)
     empty = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
     # WHAT OSM SAYS ABOUT EACH LEG, matched off the window's own road ways. Not a layer but a
@@ -170,6 +212,14 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     # of reading its own layers.
     cross_streets = (cross_streets_ft(center_wgs84, center_ft, legs, osm=osm)
                      if osm is not None else {})
+    # THE CORNERS, per junction, off the window's own traced kerbs. Without them a crop had
+    # `corner_fillets={}`, and that one empty dict is upstream of most of what a slice was
+    # missing: build_pavement_polygon has no ring, build_sidewalk_pieces has no edge to widen,
+    # the signal hardware has no corner to stand on, and every corner return and apron is absent.
+    kerb_lines = [LineString(to_state_plane(k["coords_wgs84"]))
+                  for k in ((osm or {}).get("kerb_ways") or [])
+                  if len(k.get("coords_wgs84") or []) >= 2]
+    corner_fillets = _corners_of(legs, nodes, kerb_lines) if osm is not None else {}
 
     model = IntersectionModel(
         # `legs` is how legs_on_road tells which approaches are on a route, and therefore the
@@ -182,7 +232,7 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
         legs=legs,
         # No corner is modelled in a crop - there is no junction node to fillet around, and
         # inventing one would put a kerb return where OSM traced none.
-        corner_fillets={},
+        corner_fillets=corner_fillets,
         parcels=empty,
         corner_parcels=empty,
         # The minor carriageways, cut to the WINDOW rather than to a radius about its centre:
@@ -197,4 +247,4 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
         leg_osm_aligned={name: span.aligned for name, span in dominant.items()},
         cross_streets=cross_streets,
     )
-    return model, DesignState(legs=legs, corner_fillets={})
+    return model, DesignState(legs=legs, corner_fillets=corner_fillets)

@@ -84,7 +84,22 @@ class SceneGeometry:
                 pavement = build_pavement_polygon(state.corner_fillets)
             except ValueError:
                 pavement = None     # an unclosable ring is reported by check_pavement_ring
-        marked = frozenset(model.config["intersection"].get("existing_marked_crosswalks", []))
+        # THE SURVEY AND THE FIELD OBSERVATION, reconciled rather than one chosen - which is what
+        # SurveyedCrossing.is_marked's docstring asks any renderer to do. A config list is an
+        # eyes-on observation and OSM's silence is a survey GAP, not a statement that a crossing
+        # is bare; equally, a crossing OSM records as painted is painted whether or not a config
+        # happens to name its leg. So: the union. `drawable_markings` is the one decision about
+        # whether a surveyed crossing has paint this project draws, so this cannot disagree with
+        # what coverage.py counts as covered.
+        #
+        # Without the OSM half a crop of the network painted NOTHING - it has no config at all -
+        # and drew every approach of Broad x Greenwood as an unmarked dotted outline while the
+        # same junction as a site drew four solid bands.
+        from src.geometry.surveyed import drawable_markings  # local: geometry<->render cycle
+
+        matched = _match_crossings_to_legs(state.legs, crossings)
+        marked = frozenset(model.config["intersection"].get("existing_marked_crosswalks", [])) | {
+            leg for leg, (_a, _st, _sk, _l, tags) in matched.items() if drawable_markings(tags)}
         offsets = resolve_crosswalk_offsets(state, crossings)
         skews = resolve_crosswalk_skews(state, crossings)
         # Two passes inside crosswalk_reaches_ft, so adjoining crossings at a shared corner
