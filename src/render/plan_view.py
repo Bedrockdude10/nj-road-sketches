@@ -93,12 +93,16 @@ def _at_real_width(kind, geometries: list, style: dict) -> tuple[list, dict]:
 
     Flat caps and mitred joins, matching checks.py - a striper's paint ends square.
 
-    A kind whose style carries a `linestyle` keeps its stroke: the dash there is COSMETIC, laid
-    over continuous geometry, and a body would silently assert a solid stripe. The dashed
-    centreline is cut into real segments upstream and does not go through here.
+    NO ESCAPE FOR A COSMETIC DASH, deliberately. This carried one at first, for a kind whose
+    `linestyle` broke a continuous line - and the only kind that had one, the contraflow
+    divider, does not have continuous geometry: place.py cuts it into real 3 ft dashes with 5 ft
+    gaps, so matplotlib was sub-dividing dashes that were already there AND the exemption was
+    costing it its width. Breaks belong in the geometry here (see BIKE_LANE_DOTTED_EXTENSION's
+    note), so a style that needs a dash pattern is a marking built wrong, and it should be
+    visibly solid rather than quietly let through.
     """
     width_ft = stroke_width_ft(kind)
-    if width_ft is None or kind.covers_area or "linestyle" in style:
+    if width_ft is None or kind.covers_area:
         return geometries, style
     return ([g.buffer(width_ft / 2, cap_style=2, join_style=2) for g in geometries],
             {key: value for key, value in style.items() if key != "linewidth"})
@@ -296,8 +300,10 @@ PAINT_STYLE = require_every_kind({
     # A two-way lane's centre stripe. Yellow and dashed, the same as the roadway's own
     # centreline and for the same reason - it divides opposing traffic. Drawn above the green
     # surface it sits on (zorder 4, over the surface's 2) or the fill hides it.
-    markings.BIKE_CONTRAFLOW_DIVIDER: dict(color="goldenrod", linewidth=1.3, linestyle="--",
-                                            zorder=4),
+    # NO `linestyle` HERE: place.py already cuts this into 3 ft dashes with 5 ft gaps, so a dash
+    # pattern on top sub-divided dashes that were there - and cost the stripe its real width,
+    # since _at_real_width cannot give a body to something matplotlib is going to break up.
+    markings.BIKE_CONTRAFLOW_DIVIDER: dict(color="goldenrod", linewidth=1.3, zorder=4),
     # The BIKE LANE symbol, white on the green like the real marking, and above the surface it
     # sits on for the same reason the contraflow stripe is.
     markings.BIKE_LANE_SYMBOL:    dict(color="white", alpha=0.95, zorder=4),

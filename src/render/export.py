@@ -360,7 +360,24 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         "crosswalk_depth_m": CROSSWALK_DEPTH_M,
         # Likewise shared, so the 2D stop bar and the rendered one are the same bar.
         "stop_bar_curb_clearance_m": STOP_BAR_CURB_CLEARANCE_M,
-        "existing_marked_crosswalks": model.config["intersection"].get("existing_marked_crosswalks", []),
+        # THE RESOLVED SET, not the raw config list. `scene.marked_crosswalks` is the config's
+        # eyes-on observation UNIONED with every leg OSM records as painted, and this line read
+        # only the first half of it - so the 3D gate discarded a surveyed crossing whenever no
+        # config named its leg. A CROP HAS NO CONFIG AT ALL (slice_design builds `config={
+        # "intersection": {}}`), so a window exported an empty list and Blender painted none of
+        # its six approaches while the plan view painted all six from the same scene. The
+        # identical defect was already found and fixed once for stop bars - see
+        # src/render/scene.py's note on the four surveyed bars at Broad x Greenwood.
+        #
+        # Two lines up, `marked_crosswalks` is bound to exactly this set and used for
+        # centerline_start_m. One file was reading the union for one marking and the config for
+        # another.
+        # The config's own order, then whatever OSM adds - rather than sorting the union, which
+        # rewrote this list at all nine configured sites to say exactly what it already said.
+        "existing_marked_crosswalks": (
+            list(model.config["intersection"].get("existing_marked_crosswalks", []))
+            + sorted(set(marked_crosswalks)
+                     - set(model.config["intersection"].get("existing_marked_crosswalks", [])))),
         # Where the camera points and how much it takes in, resolved by src/render/frame.py so
         # this render and the plan view frame the same ground. Blender must not compute an extent
         # of its own from the pavement below.
