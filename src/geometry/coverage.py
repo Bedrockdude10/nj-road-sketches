@@ -390,8 +390,13 @@ def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
               osm: dict | None = None) -> Uncovered | None:
     """Traced kerb ways in the frame that the render does not draw. THE CONTROL CASE.
 
-    Expected clean: both renderers take the same one number (drawn_kerb_radius_ft), so the
-    only question is whether the drawing radius covers the frame radius.
+    Expected clean, for two different reasons on the two paths. A junction FETCHES its kerbs, and
+    both renderers bound that fetch by the same one number (drawn_kerb_radius_ft), so the only
+    question is whether the drawing radius covers the frame radius. A window SUPPLIES them, and
+    kerb_lines_with_tags_ft does not re-bound a supplied layer, so both sides of this comparison
+    are the same list and the question cannot arise - which is the point. It did arise: the
+    circle cut 11 of a 1,000 ft window's 58 in-frame kerb ways out of the drawing and this
+    reported every one of them.
 
     Compared BY WAY ID rather than geometrically, because both sides of this comparison are the
     same fetch through the same projection - a geometric test would add a tolerance to a

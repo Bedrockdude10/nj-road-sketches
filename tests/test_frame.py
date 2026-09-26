@@ -218,3 +218,75 @@ def test_the_centerline_paint_follows_the_road_in_both_views(site, site_models, 
             f"gets {len(lines)}")
 
     assert painted_legs, f"{site} exported no centerline paint at all, so this proves nothing"
+
+
+def _legs_only_model(reach_ft: float):
+    """A model with legs and no pavement ring - enough for junction_frame, and nothing else.
+
+    The ring is what puts the frame's centre off the junction node, so leaving it out is not a
+    simplification: coincident centres are the WORST case for a radius that has to reach a
+    corner, and the one every four-legged junction here sits near (0.3-12.5 ft apart).
+    """
+    from types import SimpleNamespace
+
+    legs = {
+        name: SimpleNamespace(centerline=LineString([(0, 0), (dx * reach_ft, dy * reach_ft)]))
+        for name, (dx, dy) in {"north": (0, 1), "south": (0, -1),
+                               "east": (1, 0), "west": (-1, 0)}.items()
+    }
+    return SimpleNamespace(center_ft=Point(0, 0), legs=legs, corner_fillets={})
+
+
+def test_the_covering_radius_reaches_the_corners_of_its_own_square():
+    """A drawing covers its WINDOW, and the window is the square Frame.bounds_ft() describes.
+
+    The plan view sets its axes straight from those bounds, so the farthest ground on the sheet
+    is a CORNER, not a point on the inscribed circle. A radius measured to the edge leaves the
+    four corners - 11.13% of the sheet's area at coincident centres - fetched from nothing.
+    """
+    from src.render.frame import frame_covering_radius_m, junction_frame
+
+    model = _legs_only_model(500.0)
+    frame = junction_frame(model)
+    xmin, xmax, ymin, ymax = frame.bounds_ft()
+    corner_ft = max(model.center_ft.distance(Point(x, y))
+                    for x in (xmin, xmax) for y in (ymin, ymax))
+    # base_m=1 so the floor cannot stand in for the arithmetic under test.
+    supplied_ft = frame_covering_radius_m(model, 1.0) / FT_TO_M
+    assert supplied_ft + TOL_FT >= corner_ft, (
+        f"the fetch reaches {supplied_ft:.1f} ft and the sheet's far corner is at "
+        f"{corner_ft:.1f} ft - {corner_ft / supplied_ft - 1:.1%} of the way out again, so the "
+        f"corners of the picture are drawn from data nobody asked for")
+
+
+@needs_source_data
+@pytest.mark.parametrize("site", SITES)
+def test_the_covering_radius_reaches_the_corners_on_a_wide_sheet(site, wide_site_models):
+    """The same claim on the sheet a reader is actually looking at.
+
+    At 1x every site floors on the base radius, so the arithmetic is invisible there; the frame
+    scale is what carries the corner past it. NOTE the scale has to be set again here - the
+    fixture restores the environment when it returns, and the frame is read at DRAW time.
+    """
+    import os
+
+    from src.render.frame import FRAME_SCALE_ENV, frame_covering_radius_m, junction_frame
+    from tests.conftest import WIDE_FRAME_SCALE
+
+    model = wide_site_models[site]
+    previous = os.environ.get(FRAME_SCALE_ENV)
+    os.environ[FRAME_SCALE_ENV] = str(WIDE_FRAME_SCALE)
+    try:
+        frame = junction_frame(model)
+        xmin, xmax, ymin, ymax = frame.bounds_ft()
+        corner_ft = max(model.center_ft.distance(Point(x, y))
+                        for x in (xmin, xmax) for y in (ymin, ymax))
+        supplied_ft = frame_covering_radius_m(model, 1.0) / FT_TO_M
+    finally:
+        if previous is None:
+            os.environ.pop(FRAME_SCALE_ENV, None)
+        else:
+            os.environ[FRAME_SCALE_ENV] = previous
+    assert supplied_ft + TOL_FT >= corner_ft, (
+        f"{site} at {WIDE_FRAME_SCALE}x: the fetch reaches {supplied_ft:.1f} ft and the sheet's "
+        f"far corner is at {corner_ft:.1f} ft")

@@ -242,13 +242,20 @@ DRIVEWAY_REACH_FT = 5.0
 MAX_MOUTH_SNAP_FT = 20.0
 
 
-def kerb_openings_from_model(model: "IntersectionModel") -> dict:
+def kerb_openings_from_model(model: "IntersectionModel", kerbs: list[dict] | None = None) -> dict:
     """{(leg, side): [KerbOpening]} for every vehicle-crossable kerb along this junction's legs.
 
     Seeded onto the design by DesignState.from_model, exactly as parking_restrictions and
     existing_centerline_styles are, and for the same reason: this is an observed fact about the
     street that no treatment chose, so it belongs beside those two rather than being re-derived
     by each renderer or reached back for out of the model.
+
+    `kerbs` is THE SUPPLY DOOR src/render/export.py:export_scenario already opens for every other
+    OSM layer, and this was the last reader without one. Unsupplied it fetches, which is right
+    for a junction - a centre and a radius are what it has - and wrong for a crop of the borough
+    document, which holds the ways already and has no radius that fits the snapshot: the fetch
+    routes through `snapshot_for_site`, so a window near the edge of the downloaded area raised
+    SiteOutsideSnapshotError from a drawing that needed no network at all.
     """
     from src.geometry.intersection import kerb_lines_with_tags_ft
 
@@ -265,7 +272,8 @@ def kerb_openings_from_model(model: "IntersectionModel") -> dict:
     # _place_on_a_leg_side still assigns a leg afterwards, because a STATION needs one, but that is
     # stationing rather than eligibility: an opening it cannot place has no paint to break.
     for line, tags, way_id in kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                                       radius_ft=OPENING_COLLECTION_RADIUS_FT):
+                                                       radius_ft=OPENING_COLLECTION_RADIUS_FT,
+                                                       kerbs=kerbs):
         if not opens_the_kerb(tags):
             continue
         placed = _place_on_a_leg_side(line, model.legs)
@@ -295,7 +303,7 @@ def kerb_openings_from_model(model: "IntersectionModel") -> dict:
     from src.geometry.cross_streets import cross_streets_from_model
 
     # The model's own resolution, not a second derivation of it - see cross_streets_from_model.
-    traced = _kerb_coverage_outside_openings(model)
+    traced = _kerb_coverage_outside_openings(model, kerbs)
     for leg_name, crossings in cross_streets_from_model(model).items():
         for cross in crossings:
             for side in cross.sides:
@@ -400,7 +408,8 @@ _SERVICE_SOURCE_BY_KIND = {
 }
 
 
-def _kerb_coverage_outside_openings(model: "IntersectionModel") -> dict:
+def _kerb_coverage_outside_openings(model: "IntersectionModel",
+                                     kerbs: list[dict] | None = None) -> dict:
     """{(leg, side): [(start_ft, end_ft)]} for the stations a traced kerb covers, openings aside.
 
     Everything opens_the_kerb rejects counts as coverage, which is a wider set than "raised" and
@@ -414,7 +423,7 @@ def _kerb_coverage_outside_openings(model: "IntersectionModel") -> dict:
 
     covered: dict[tuple[str, str], list[tuple[float, float]]] = {}
     for line, tags, _way_id in kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                                        model.legs):
+                                                        model.legs, kerbs=kerbs):
         if opens_the_kerb(tags):
             continue
         placed = _place_on_a_leg_side(line, model.legs)

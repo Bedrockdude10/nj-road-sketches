@@ -228,9 +228,11 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     if theme is None:
         from src.render.theme import build_default_theme
         theme = build_default_theme()
-    # Scaled with the frame, like the kerbs, roads and cross streets: at 2.5x the frame reaches
-    # 431.2 ft = 131.4 m against a flat 130 m fetch, so the picture would be drawn wider than the
-    # data it is drawn from. At 1x this is the unscaled radius, so no existing render moves.
+    # Scaled with the frame, like the kerbs, roads and cross streets, and measured to the CORNER
+    # of the square sheet rather than to the edge - a building or a crossing fills the picture, so
+    # the ground it has to cover is the whole of Frame.bounds_ft(). At 3x the corners of Broad &
+    # Greenwood's sheet are 242.3 m out against the 188.9 m an edge measurement asked for. At 1x
+    # every site floors on BUILDING_CONTEXT_RADIUS_M, so no unscaled render moves.
     context_m = frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M)
     if buildings is None:
         buildings = fetch_buildings(model.center_wgs84, radius_m=context_m)

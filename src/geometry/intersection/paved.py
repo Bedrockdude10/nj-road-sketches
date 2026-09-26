@@ -121,7 +121,10 @@ def _paved_surfaces_ft(center_wgs84: Point, corner_fillets: dict | None = None,
     from src.sources.osm_context import (fetch_driveways, fetch_parking_aisles,
                                          fetch_parking_lots)
 
-    radius_m = context_radius_m(DRIVEWAY_CONTEXT_RADIUS_M)
+    # The centre goes in so a window that declared no drawn reach of its own cannot be served the
+    # last site's - src/render/frame.py:_reach_for. Unused where `osm` supplies every layer, and
+    # it is exactly then that inheriting one would be invisible.
+    radius_m = context_radius_m(DRIVEWAY_CONTEXT_RADIUS_M, center_wgs84)
     lots = []
     for lot in _supplied(osm, "parking_lots",
                          lambda: fetch_parking_lots(center_wgs84, radius_m=radius_m)):

@@ -31,6 +31,36 @@ VEHICLE_SIGNAL_LENS_COLORS = [
     (0.85, 0.65, 0.05),  # yellow (middle)
     (0.05, 0.55, 0.15),  # green (bottom)
 ]
+# ---- The sizes the PLAN VIEW draws these at too ------------------------------------------
+# Every figure in this block is mirrored in feet in src/render/props.py, which cannot import this
+# module (it runs in Blender's own interpreter - see .importlinter) and so keeps a copy.
+# tests/test_props.py:test_prop_dimensions_match_the_3d_builders reads these by AST and fails on a
+# change made to one side only: a prop built at one size here and drawn at another in plan is two
+# claims about one object with nothing to say which view is wrong, which is the same trap the
+# stripe widths are already pinned against.
+#
+# They were bare literals inside the builders, which is why the plan view drew all fourteen of
+# these as fixed-size dots for as long as it did - there was no figure to draw them at.
+SIGN_POST_RADIUS_M = 0.04
+SIGN_PLATE_THICKNESS_M = 0.03
+STOP_SIGN_PLATE_RADIUS_M = 0.3
+YIELD_SIGN_PLATE_RADIUS_M = 0.38
+BIKE_WARNING_PLATE_RADIUS_M = 0.38
+SCHOOL_ZONE_PLATE_RADIUS_M = 0.35
+# The rectangular white plates: NO TURN ON RED (R10-11) and the R9-23 turn-box sign, which is the
+# same builder. Thin along the facing axis, so the WIDTH is what a plan sees.
+RECTANGULAR_PLATE_THICKNESS_M = 0.02
+RECTANGULAR_PLATE_WIDTH_M = 0.3
+RECTANGULAR_PLATE_HEIGHT_M = 0.2
+PED_SIGNAL_HEAD_WIDTH_M = 0.28
+PED_SIGNAL_HEAD_HEIGHT_M = 0.32
+PED_SIGNAL_POST_RADIUS_M = 0.05
+TRAFFIC_SIGNAL_POLE_RADIUS_M = 0.1
+MAST_ARM_RADIUS_M = 0.05
+VEHICLE_SIGNAL_HEAD_WIDTH_M = 0.32
+VEHICLE_SIGNAL_HEAD_HEIGHT_M = 0.85
+HYDRANT_RADIUS_M = 0.09
+
 TRAFFIC_SIGNAL_POLE_HEIGHT_M = 5.5  # taller than the streetlight pole (4.5 m) - matches a real signal pole
 # Real arm length is a full-width mast arm (see sites/README.md / config.yaml signals.pole_type), computed
 # per-corner from real adjacent leg widths in src/render/props.py and passed in as each prop's arm_length_m. This
@@ -47,6 +77,9 @@ PED_SIGNAL_MOUNT_HEIGHT_M = 2.3  # typical pedestrian signal head mounting heigh
 RRFB_SIGN_YELLOW_GREEN = SCHOOL_ZONE_YELLOW_GREEN
 RRFB_BEACON_AMBER = (0.95, 0.55, 0.05)
 RRFB_MOUNT_HEIGHT_M = 2.3
+RRFB_POST_RADIUS_M = 0.05          # mirrored in plan - see the block above
+RRFB_PLATE_THICKNESS_M = 0.03
+RRFB_PLATE_WIDTH_M = 0.4
 
 # Plastic flex-post delineator/bollard: real MUTCD/channelizer safety orange, banded with
 # white retroreflective tape. No CC0 bollard model was found, so this is the same
@@ -133,12 +166,13 @@ def _add_post_sign(name: str, position: tuple, heading_deg: float, n_sides: int,
     red) and the school zone sign (n_sides=5, yellow-green) - real MUTCD shapes
     and colors, just not a downloaded model (no CC0 traffic-sign source found)."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=2.1, location=(x, y, 1.05))
+    bpy.ops.mesh.primitive_cylinder_add(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
     post = bpy.context.active_object
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
 
-    bpy.ops.mesh.primitive_cylinder_add(radius=plate_radius, depth=0.03, vertices=n_sides, location=(x, y, 2.15))
+    bpy.ops.mesh.primitive_cylinder_add(radius=plate_radius, depth=SIGN_PLATE_THICKNESS_M,
+                                         vertices=n_sides, location=(x, y, 2.15))
     plate = bpy.context.active_object
     plate.name = f"{name}_plate"
     plate.rotation_euler = (math.radians(90), 0, math.radians(heading_deg))
@@ -148,12 +182,14 @@ def _add_post_sign(name: str, position: tuple, heading_deg: float, n_sides: int,
 
 
 def add_stop_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    return _add_post_sign(name, position, heading_deg, n_sides=8, plate_radius=0.3,
+    return _add_post_sign(name, position, heading_deg, n_sides=8,
+                           plate_radius=STOP_SIGN_PLATE_RADIUS_M,
                            plate_color=STOP_SIGN_RED, post_mat=post_mat)
 
 
 def add_school_zone_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    return _add_post_sign(name, position, heading_deg, n_sides=5, plate_radius=0.35,
+    return _add_post_sign(name, position, heading_deg, n_sides=5,
+                           plate_radius=SCHOOL_ZONE_PLATE_RADIUS_M,
                            plate_color=SCHOOL_ZONE_YELLOW_GREEN, post_mat=post_mat)
 
 
@@ -164,7 +200,8 @@ def add_bike_warning_sign(name: str, position: tuple, heading_deg: float, post_m
     n_sides=4 on a cylinder puts vertices on the local axes, so once _add_post_sign stands the
     plate up one vertex is straight up: a diamond, not a square. Legend text is not modelled at
     this scale on any sign here - shape and colour are what the render can honestly carry."""
-    return _add_post_sign(name, position, heading_deg, n_sides=4, plate_radius=0.38,
+    return _add_post_sign(name, position, heading_deg, n_sides=4,
+                           plate_radius=BIKE_WARNING_PLATE_RADIUS_M,
                            plate_color=WARNING_SIGN_YELLOW, post_mat=post_mat)
 
 
@@ -175,7 +212,8 @@ def add_yield_sign(name: str, position: tuple, heading_deg: float, post_mat):
 
     n_sides=3 gives an UPWARD point, so the plate is rolled 180 degrees about its own facing
     axis - that roll is what makes it a yield sign rather than a nameless triangle."""
-    post = _add_post_sign(name, position, heading_deg, n_sides=3, plate_radius=0.38,
+    post = _add_post_sign(name, position, heading_deg, n_sides=3,
+                           plate_radius=YIELD_SIGN_PLATE_RADIUS_M,
                            plate_color=STOP_SIGN_RED, post_mat=post_mat)
     plate = bpy.data.objects[f"{name}_plate"]
     plate.rotation_euler = (math.radians(90), math.radians(180), math.radians(heading_deg))
@@ -194,7 +232,9 @@ def add_vehicle_signal_head(name: str, position: tuple, heading_deg: float, hous
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, z))
     housing = bpy.context.active_object
     housing.name = f"{name}_housing"
-    housing.scale = (0.32, 0.32, 0.85)  # square cross-section - housing orientation doesn't matter visually
+    # square cross-section - housing orientation doesn't matter visually
+    housing.scale = (VEHICLE_SIGNAL_HEAD_WIDTH_M, VEHICLE_SIGNAL_HEAD_WIDTH_M,
+                     VEHICLE_SIGNAL_HEAD_HEIGHT_M)
     housing.data.materials.append(housing_mat)
 
     for i, color in enumerate(VEHICLE_SIGNAL_LENS_COLORS):
@@ -225,7 +265,8 @@ def add_traffic_signal_pole(name: str, position: tuple, head_facing_deg: float, 
     this arm actually spans, not hardcoded."""
     x, y = position
     bpy.ops.mesh.primitive_cylinder_add(
-        radius=0.1, depth=TRAFFIC_SIGNAL_POLE_HEIGHT_M, location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
+        radius=TRAFFIC_SIGNAL_POLE_RADIUS_M, depth=TRAFFIC_SIGNAL_POLE_HEIGHT_M,
+        location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
     )
     pole = bpy.context.active_object
     pole.name = f"{name}_pole"
@@ -235,7 +276,8 @@ def add_traffic_signal_pole(name: str, position: tuple, head_facing_deg: float, 
     dx, dy = math.cos(arm_dir), math.sin(arm_dir)
     arm_z = TRAFFIC_SIGNAL_POLE_HEIGHT_M - 0.4
     arm_center = (x + dx * arm_length_m / 2, y + dy * arm_length_m / 2, arm_z)
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=arm_length_m, location=arm_center)
+    bpy.ops.mesh.primitive_cylinder_add(radius=MAST_ARM_RADIUS_M, depth=arm_length_m,
+                                         location=arm_center)
     arm = bpy.context.active_object
     arm.name = f"{name}_arm"
     arm.rotation_euler = (0, math.radians(90), arm_dir)  # lay the cylinder flat, then point it along arm_dir
@@ -256,7 +298,8 @@ def add_pedestrian_signal_head(name: str, position: tuple, heading_deg: float, o
     x, y = position
     if own_post:
         bpy.ops.mesh.primitive_cylinder_add(
-            radius=0.05, depth=PED_SIGNAL_MOUNT_HEIGHT_M, location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M / 2)
+            radius=PED_SIGNAL_POST_RADIUS_M, depth=PED_SIGNAL_MOUNT_HEIGHT_M,
+            location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M / 2)
         )
         post = bpy.context.active_object
         post.name = f"{name}_post"
@@ -265,7 +308,7 @@ def add_pedestrian_signal_head(name: str, position: tuple, heading_deg: float, o
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M))
     head = bpy.context.active_object
     head.name = f"{name}_head"
-    head.scale = (0.28, 0.28, 0.32)
+    head.scale = (PED_SIGNAL_HEAD_WIDTH_M, PED_SIGNAL_HEAD_WIDTH_M, PED_SIGNAL_HEAD_HEIGHT_M)
     head.rotation_euler = (0, 0, math.radians(heading_deg))
     head.data.materials.append(housing_mat)
     return head
@@ -278,7 +321,7 @@ def add_no_turn_on_red_sign(name: str, position: tuple, heading_deg: float, post
     instead of a regular polygon - stop/school-zone signs are octagon/pentagon,
     NTOR signs are rectangular."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=2.1, location=(x, y, 1.05))
+    bpy.ops.mesh.primitive_cylinder_add(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
     post = bpy.context.active_object
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
@@ -286,7 +329,9 @@ def add_no_turn_on_red_sign(name: str, position: tuple, heading_deg: float, post
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, 2.2))
     plate = bpy.context.active_object
     plate.name = f"{name}_plate"
-    plate.scale = (0.02, 0.3, 0.2)  # thin along local X (the facing/normal axis, before the Z rotation below)
+    # thin along local X (the facing/normal axis, before the Z rotation below)
+    plate.scale = (RECTANGULAR_PLATE_THICKNESS_M, RECTANGULAR_PLATE_WIDTH_M,
+                   RECTANGULAR_PLATE_HEIGHT_M)
     plate.rotation_euler = (0, 0, math.radians(heading_deg))
     plate_mat = make_material(f"{name}_plate_mat", NO_TURN_ON_RED_WHITE, roughness=0.35)
     plate.data.materials.append(plate_mat)
@@ -309,7 +354,8 @@ def add_rrfb(name: str, position: tuple, heading_deg: float, post_mat):
     opposite curb - only one assembly is modeled per exported prop entry (see
     src/geometry/treatments/extras.py:ExtraProp)."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=RRFB_MOUNT_HEIGHT_M, location=(x, y, RRFB_MOUNT_HEIGHT_M / 2))
+    bpy.ops.mesh.primitive_cylinder_add(radius=RRFB_POST_RADIUS_M, depth=RRFB_MOUNT_HEIGHT_M,
+                                         location=(x, y, RRFB_MOUNT_HEIGHT_M / 2))
     post = bpy.context.active_object
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
@@ -321,7 +367,7 @@ def add_rrfb(name: str, position: tuple, heading_deg: float, post_mat):
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, RRFB_MOUNT_HEIGHT_M + 0.15))
     sign = bpy.context.active_object
     sign.name = f"{name}_sign"
-    sign.scale = (0.03, 0.4, 0.4)
+    sign.scale = (RRFB_PLATE_THICKNESS_M, RRFB_PLATE_WIDTH_M, RRFB_PLATE_WIDTH_M)
     sign.rotation_euler = (math.radians(45), 0, math.radians(heading_deg))
     sign_mat = make_material(f"{name}_sign_mat", RRFB_SIGN_YELLOW_GREEN, roughness=0.35)
     sign.data.materials.append(sign_mat)
@@ -389,6 +435,10 @@ def add_bollard(name: str, position: tuple):
 
 PUSHBUTTON_POST_HEIGHT_M = 1.2      # APS pushbutton mounting height, ~42-48 in per MUTCD/PROWAG
 PUSHBUTTON_HOUSING_YELLOW = (0.85, 0.72, 0.08)
+PUSHBUTTON_POST_RADIUS_M = 0.04     # width/depth mirrored in plan - see the block at the top
+PUSHBUTTON_HOUSING_DEPTH_M = 0.06   # along the facing axis
+PUSHBUTTON_HOUSING_WIDTH_M = 0.13   # across it, which is what a plan sees
+PUSHBUTTON_HOUSING_HEIGHT_M = 0.2
 TACTILE_PAD_FALLBACK_M = (0.610, 0.914)  # 2 ft deep x 3 ft wide - fallback only; the real
                                           # dimensions arrive per-prop as pad_depth_m/pad_width_m
                                           # from src/render/props.py. Kept in step with those so a
@@ -417,7 +467,7 @@ def add_pedestrian_pushbutton(name: str, position: tuple, heading_deg: float, po
     crossings are actuated and where the poles stand is real; the housing's size and
     mounting height are generic."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.04, depth=PUSHBUTTON_POST_HEIGHT_M,
+    bpy.ops.mesh.primitive_cylinder_add(radius=PUSHBUTTON_POST_RADIUS_M, depth=PUSHBUTTON_POST_HEIGHT_M,
                                          location=(x, y, PUSHBUTTON_POST_HEIGHT_M / 2))
     post = bpy.context.active_object
     post.name = f"{name}_post"
@@ -429,7 +479,8 @@ def add_pedestrian_pushbutton(name: str, position: tuple, heading_deg: float, po
                                      location=(x + fx * 0.05, y + fy * 0.05, PUSHBUTTON_POST_HEIGHT_M - 0.1))
     housing = bpy.context.active_object
     housing.name = f"{name}_housing"
-    housing.scale = (0.06, 0.13, 0.2)
+    housing.scale = (PUSHBUTTON_HOUSING_DEPTH_M, PUSHBUTTON_HOUSING_WIDTH_M,
+                     PUSHBUTTON_HOUSING_HEIGHT_M)
     housing.rotation_euler = (0, 0, face)
     housing.data.materials.append(make_material(f"{name}_housing_mat", PUSHBUTTON_HOUSING_YELLOW, roughness=0.4))
     return post
@@ -466,7 +517,7 @@ def add_fire_hydrant(name: str, position: tuple):
     position. Background detail, but it is also one of the things that genuinely
     constrains where a curb extension or a parking stall can go."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.09, depth=HYDRANT_HEIGHT_M,
+    bpy.ops.mesh.primitive_cylinder_add(radius=HYDRANT_RADIUS_M, depth=HYDRANT_HEIGHT_M,
                                          location=(x, y, HYDRANT_HEIGHT_M / 2))
     barrel = bpy.context.active_object
     barrel.name = f"{name}_barrel"

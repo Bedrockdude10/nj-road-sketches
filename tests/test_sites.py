@@ -348,6 +348,123 @@ def test_speed_limit_is_none_where_neither_source_states_one():
     assert DesignState.from_model(FakeModel()).speed_limit_mph("untagged") is None
 
 
+def _a_one_way_fake_model(**per_leg):
+    """A model double carrying two opposed legs of one street and whatever OSM says about them.
+
+    Both legs point OUTWARD from the junction at the origin, which is the whole reason
+    `oneway` cannot be read without `leg_osm_aligned`: one leg runs north away from the
+    junction and the other runs south away from it, so a single carriageway direction is
+    `aligned` on one and not on the other.
+    """
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+
+    legs = {"gc_north": Leg(name="gc_north", centerline=LineString([(0, 0), (0, 190)]),
+                            curb_to_curb_ft=70.0),
+            "gc_south": Leg(name="gc_south", centerline=LineString([(0, 0), (0, -190)]),
+                            curb_to_curb_ft=70.0)}
+
+    class FakeModel:
+        config = {"legs": {name: dict(per_leg.get(name, {}).get("config", {}))
+                           for name in legs}}
+        corner_fillets = {}
+        leg_osm_tags = {name: dict(per_leg.get(name, {}).get("tags", {})) for name in legs}
+        leg_osm_aligned = {name: per_leg.get(name, {}).get("aligned", True) for name in legs}
+
+    FakeModel.legs = legs
+    return FakeModel()
+
+
+def test_a_one_way_carriageway_is_read_off_osm_where_config_is_silent():
+    """`oneway=yes` IS the statement `traffic_heads_toward` records, and a slice has no config.
+
+    The same precedence as the two above, with the tag's frame as the trap: OSM states `oneway`
+    about the WAY'S digitisation direction, so `leg_osm_aligned` is the other half of it. Both
+    legs here carry one northbound carriageway, so both must answer "north" - the north approach
+    because the way runs outward along it, the south approach because it runs inward.
+    """
+    model = _a_one_way_fake_model(
+        gc_north={"tags": {"oneway": "yes"}, "aligned": True},
+        gc_south={"tags": {"oneway": "yes"}, "aligned": False})
+
+    heads = DesignState.from_model(model).traffic_heads_toward
+    assert heads == {"gc_north": "north", "gc_south": "north"}, (
+        "one carriageway runs one way; a leg's own frame must not flip the compass")
+
+
+def test_oneway_minus_one_runs_against_the_way_it_is_tagged_on():
+    """`oneway=-1` is the same street drawn backwards, and the sign is silent when dropped.
+
+    No highway way in any of the four downloaded snapshot areas uses it (0 of 1,832), so nothing
+    in this project's own data would ever catch reading it as `yes` - a bay leaning the wrong
+    way and a yellow edge line down the wrong kerb, on a street nobody here draws yet.
+    """
+    model = _a_one_way_fake_model(
+        gc_north={"tags": {"oneway": "-1"}, "aligned": True},
+        gc_south={"tags": {"oneway": "-1"}, "aligned": False})
+
+    heads = DesignState.from_model(model).traffic_heads_toward
+    assert heads == {"gc_north": "south", "gc_south": "south"}, (
+        "-1 reverses the way, so the same tags as the test above must give the opposite street")
+
+
+def test_a_two_way_or_reversible_carriageway_states_no_direction():
+    """Absent, `no` and `reversible` are all "not a one-way carriageway", which is the ordinary
+    case and the one carriageway_is_one_way reads as two-way.
+
+    `reversible` is in here rather than treated as one-way because it has no single direction:
+    leaning a bay or painting a yellow left edge line for the way it runs half the day is a
+    drawing that is wrong half the day, where two-way is merely unremarkable.
+    """
+    model = _a_one_way_fake_model(gc_north={"tags": {"oneway": "no"}},
+                                  gc_south={"tags": {"oneway": "reversible"}})
+
+    assert DesignState.from_model(model).traffic_heads_toward == {"gc_north": None,
+                                                                  "gc_south": None}
+
+
+def test_a_configured_traffic_direction_outranks_the_osm_tag():
+    """Config is an observation someone made standing in the street; it wins, as it does for
+    centerline_style. What it may not be is the ONLY source, which is what a slice exposed."""
+    model = _a_one_way_fake_model(
+        gc_north={"tags": {"oneway": "yes"}, "aligned": True,
+                  "config": {"traffic_heads_toward": "south"}},
+        gc_south={"tags": {"oneway": "yes"}, "aligned": False})
+
+    heads = DesignState.from_model(model).traffic_heads_toward
+    assert heads == {"gc_north": "south", "gc_south": "north"}
+
+
+@needs_source_data
+def test_nj_35s_one_way_direction_is_recoverable_from_osm_alone(site_models):
+    """The real street behind the doubles above: `traffic_heads_toward: north` on both legs of
+    lavallette_reese, transcribed into config.yaml by hand, is what OSM already says.
+
+    NOT PARAMETRIZED OVER site_models for the reason
+    test_the_existing_bike_lane_lands_on_ONE_real_kerb_of_nj_35 gives - lavallette_reese is in
+    Ocean County and the roads fixture is clipped to Mercer.
+    """
+    import os
+
+    from src.geometry.intersection import load_intersection_model
+
+    if os.environ.get("ROAD_SKETCHES_DATA_DIR"):
+        pytest.skip("the roads fixture is clipped to Mercer County; NJ 35 is in Ocean")
+    with contextlib.redirect_stdout(io.StringIO()):
+        model = load_intersection_model(site="lavallette_reese")
+    for leg_cfg in model.config["legs"].values():
+        leg_cfg.pop("traffic_heads_toward", None)     # leave OSM as the only source
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        heads = DesignState.from_model(model).traffic_heads_toward
+    assert {name: heads[name] for name in ("grand_central_ave_north",
+                                           "grand_central_ave_south")} == {
+        "grand_central_ave_north": "north", "grand_central_ave_south": "north"}, (
+        "NJ 35 NB is tagged oneway=yes on both approaches; with config silent the tag has to "
+        f"carry the whole answer, and it gave {heads}")
+
+
 @needs_source_data
 @pytest.mark.parametrize("site", SITES)
 def test_stop_bars_use_the_surveyed_position(site, site_models):

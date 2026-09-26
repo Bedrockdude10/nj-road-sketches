@@ -77,18 +77,48 @@ def frame_scale() -> float:
 # Set by load_intersection_model before it fetches anything, for the same reason the frame scale
 # is an environment variable: it has to reach call sites several layers down that hold a centre
 # point and nothing else (drawn_kerb_radius_ft holds not even that, and MUST return the radius the
-# kerbs were really fetched at or the two renderers draw different sets). Set UNCONDITIONALLY on
-# every load, so a site with no override resets it instead of inheriting the last site's reach.
+# kerbs were really fetched at or the two renderers draw different sets).
+#
+# IT BELONGS TO THE LOAD THAT DECLARED IT, AND TO NOTHING ELSE. `load_intersection_model` is the
+# only caller of set_drawn_reach_ft, so a drawing that never loads a site - a slice of the borough
+# document - declares nothing and used to be served whatever the last site left behind. That is
+# not window dependence but HISTORY dependence: the same slice command drew a different set of
+# kerbs depending on what ran before it in the process, and after wbroad_lanning (2,307.5 ft) it
+# opened a 703 m fetch about the window's centre and died with SiteOutsideSnapshotError.
+#
+# So the declaration is claimed by the FIRST CENTRE that asks for it, which inside a load is that
+# load's own, and every other centre is told 0.0. The centre cannot come from set_drawn_reach_ft
+# itself: it is called before the model exists, with a leg length and nothing else.
 _drawn_reach_ft = 0.0
+_drawn_reach_center: tuple[float, float] | None = None
 
 
 def set_drawn_reach_ft(reach_ft: float) -> None:
     """Record the longest leg the model being built will draw. See `_drawn_reach_ft`."""
-    global _drawn_reach_ft
+    global _drawn_reach_ft, _drawn_reach_center
     _drawn_reach_ft = max(0.0, float(reach_ft))
+    _drawn_reach_center = None      # unclaimed: the next centre to ask is this load's own
 
 
-def context_radius_m(base_m: float) -> float:
+def _reach_for(center_wgs84: Point | None) -> float:
+    """The declared reach for `center_wgs84`, or 0.0 for a centre that declared nothing.
+
+    A caller with NO centre gets the declaration whatever it is, because the two that have none
+    are `drawn_kerb_radius_ft` and the boundary fetch, and both must answer with the radius the
+    load actually fetched at or the renderers draw different sets. That is safe only while such a
+    caller cannot govern a layer somebody else supplied - see kerb_lines_with_tags_ft, which no
+    longer re-bounds one.
+    """
+    global _drawn_reach_center
+    if center_wgs84 is None:
+        return _drawn_reach_ft
+    key = (round(center_wgs84.x, 7), round(center_wgs84.y, 7))
+    if _drawn_reach_center is None:
+        _drawn_reach_center = key
+    return _drawn_reach_ft if _drawn_reach_center == key else 0.0
+
+
+def context_radius_m(base_m: float, center_wgs84: Point | None = None) -> float:
     """How far out to pull CONTEXT - buildings, roads, parking - for the frame in force.
 
     The frame scale widens what the camera takes in; it must widen what there IS to take in by
@@ -104,8 +134,12 @@ def context_radius_m(base_m: float) -> float:
     binds only where a leg is longer than the base radius, which is no site whose legs are the
     130 ft default (39.6 m, well inside every base here) and is exactly the case the base radius
     cannot see. See `_drawn_reach_ft`.
+
+    `center_wgs84` is the point the caller is about to fetch around. PASS IT WHEREVER YOU HAVE
+    IT: it is what keeps a drawing that declared no reach of its own from inheriting the last
+    site's. See `_reach_for`.
     """
-    return max(base_m * frame_scale(), _drawn_reach_ft * FT_TO_M)
+    return max(base_m * frame_scale(), _reach_for(center_wgs84) * FT_TO_M)
 
 
 def frame_covering_radius_m(model: "IntersectionModel", base_m: float) -> float:
@@ -117,23 +151,41 @@ def frame_covering_radius_m(model: "IntersectionModel", base_m: float) -> float:
 
     Buildings and crossings instead fill the picture, and the picture is a circle of known radius,
     so what they need is the frame's own radius rather than base times zoom. The two diverge fast
-    - at Broad & Greenwood at 2.5x the frame reaches 131.4 m while context_radius_m(130) asks for
+    - at Broad & Greenwood at 2.5x this returns 194.2 m while context_radius_m(130) asks for
     325 m - and over-fetching is not free, because every building is meshed and decimated.
 
-    Floored at `base_m`, so at 1x no existing render moves. The 10% margin covers the difference
-    between a circular fetch and the square-ish ground the camera actually sees.
+    Floored at `base_m`, so at 1x no existing render moves.
 
-    AND MEASURED FROM THE JUNCTION NODE, WHICH IS NOT THE FRAME'S CENTRE. Every fetch is a circle
-    around `model.center_wgs84`; the frame is centred on the modelled pavement. Those coincide
-    only while the legs are about the same length - 0.3 to 3.8 m apart at the seven junctions
-    here - and not at all on a corridor: wbroad_lanning's frame centre sits 306 m down W Broad,
-    so a radius equal to the frame's own reached 444 m and left the far half of its own picture
-    with no buildings and no crossings in it. The radius a circle at the node needs to cover a
-    circle at the frame centre is the distance between them PLUS the frame's radius.
+    AND MEASURED FROM THE JUNCTION NODE, WHICH IS NOT THE FRAME'S CENTRE. Every fetch is bounded
+    about `model.center_wgs84`; the frame is centred on the modelled pavement. Those coincide
+    only while the legs are about the same length - 0.9 to 12.5 ft apart at the seven junctions
+    here - and not at all on a corridor: wbroad_lanning's frame centre sits 1,005 ft down W Broad.
+
+    AND TO THE CORNER OF THE SQUARE, NOT TO THE EDGE. `Frame.bounds_ft()` is a SQUARE of
+    half-width R and plan_view sets its axes straight from it, so the farthest ground on the
+    sheet is a corner - up to `d + R*sqrt(2)` from the node, not `d + R`. This used to return
+    `1.1 * (d + R)`, and a 10% margin does not cover a 41.42% diagonal: with coincident centres
+    it supplied 1.100 R where 1.41421 R is needed, leaving the four corners - 11.13% of the
+    sheet's area - outside the fetch, and it only came out ahead at `d >= 3.1421 R`, which no
+    site here reaches. Measured on the sheets output/ is drawn at, it was 18.7-28.3% short at
+    every site at 3x and 11.6% short on wbroad_lanning at 1x.
+
+    THE MARGIN IS GONE BECAUSE IT WAS THE GUESS THIS REPLACES. It was there to cover "the
+    difference between a circular fetch and the square-ish ground the camera actually sees", and
+    that difference is now computed off the frame's own bounds instead of estimated.
+
+    Plain EUCLIDEAN distance to the corner, which is more than a bbox needs. The layers this
+    bounds are cut by `osm_context._ways_near`, which turns the radius into a BBOX of that
+    half-side and so already contained the sheet - nothing was in fact missing from any site at
+    1x, 2.5x or 3x. Taking the smaller Chebyshev reach would bank on that: it would make this
+    function's correctness a property of how one fetcher happens to read its argument, and the
+    argument is called a radius.
     """
     frame = junction_frame(model)
-    reach_ft = frame.center_ft.distance(model.center_ft) + frame.radius_ft
-    return max(base_m, reach_ft * FT_TO_M * 1.1)
+    xmin, xmax, ymin, ymax = frame.bounds_ft()
+    reach_ft = max(model.center_ft.distance(Point(x, y))
+                   for x in (xmin, xmax) for y in (ymin, ymax))
+    return max(base_m, reach_ft * FT_TO_M)
 
 # How far past a leg's far end a pavement vertex may still count as part of this junction. The
 # corner fillets trim the curbs a little past the leg's own end, so a hard cut at the leg length

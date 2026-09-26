@@ -12,15 +12,61 @@ from dataclasses import dataclass, field
 from src.geometry.context_roads import osm_maxspeed_mph
 from src.geometry.cross_streets import cross_streets_from_model
 from src.geometry.kerbs import kerb_openings_from_model
+from src.geometry.model import leg_heads_toward
 from src.geometry.targets import LegTarget, Side
 from src.geometry.treatments.base import (DEFAULT_CENTERLINE_STYLE, Treatment,
                                           _parking_restrictions_from_model)
+# The vocabulary of traffic_heads_toward itself (site_schema.Leg types the key with it), and
+# already pinned equal to leg_frame._COMPASS_AXES by tests/test_site_schema.py - so this is the
+# one place the four words live that is public. The import runs the harmless way round the
+# config-path-stays-light contract: site_schema may not reach geometry, not the reverse.
+from src.site_schema import VALID_TRAFFIC_DIRECTIONS
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,
     # so importing them for real would close a cycle.
     from src.geometry.intersection.junction import IntersectionModel
 
+
+# What OSM's `oneway` says about the direction of travel, as a flag on the WAY'S OWN
+# digitisation direction: True where traffic runs along it, False where it runs against it.
+# A TABLE RATHER THAN `== "yes"` BECAUSE OF `-1`, which is a real OSM value meaning the way is
+# drawn backwards - and which appears on none of the 1,832 highway ways in the four downloaded
+# snapshot areas, so nothing in this project's own data would ever catch it being read as `yes`.
+# Everything absent here - `no`, unset, `reversible`, `alternating` - is NOT a one-way
+# carriageway: a reversible one has no single direction, and leaning a parking bay or painting a
+# yellow left edge line for the way it runs half the day is worse than drawing it as two-way.
+_ONEWAY_ALONG_THE_WAY = {"yes": True, "true": True, "1": True, "-1": False}
+
+
+def _osm_traffic_heads_toward(leg, tags: dict, aligned: bool) -> str | None:
+    """The compass direction ALL traffic on `leg` runs, read off OSM, or None where the
+    carriageway is not one-way.
+
+    TWO FRAMES, AND THE TAG IS IN NEITHER OF THE ONES WANTED HERE. `oneway` is stated about the
+    way's DIGITISATION direction; `aligned` is whether that direction is the leg's own outward
+    one; the field wants a COMPASS. So `oneway=-1` on a way drawn backwards along its leg is
+    traffic running outward, exactly as `oneway=yes` on a way drawn forwards - both flips, or
+    neither.
+
+    THE WORD IS CHOSEN BY ASKING THE FUNCTION THAT READS IT BACK. traffic_runs_outward answers
+    `leg_heads_toward(leg, word)`, so picking the word that already gives the right answer there
+    makes the seed and its consumer one derivation rather than two that agree until a leg bends.
+    A leg is BLIND on the axis it runs perpendicular to - leg_heads_toward raises rather than
+    answering from survey noise - so the words are tried until one of them can answer, and a leg
+    running NNE is described on the axis it actually has a heading on.
+    """
+    along_the_way = _ONEWAY_ALONG_THE_WAY.get(tags.get("oneway"))
+    if leg is None or along_the_way is None:
+        return None
+    runs_outward = along_the_way is bool(aligned)
+    for compass in VALID_TRAFFIC_DIRECTIONS:
+        try:
+            if leg_heads_toward(leg, compass) is runs_outward:
+                return compass
+        except ValueError:
+            continue        # blind on that axis; the other one answers
+    return None
 
 
 @dataclass(frozen=True)
@@ -61,9 +107,10 @@ class DesignState:
     existing_centerline_styles: dict = field(default_factory=dict)
     # leg name -> the compass direction ALL traffic on that leg runs, where the carriageway is
     # one-way; absent/None means two-way, which is the ordinary case. The same standing as the
-    # styles above: an OBSERVED FACT seeded in from_model from config.yaml, not a treatment's
-    # parameter, so every scenario of a junction gets the same answer - including the one the
-    # pipeline labels "Existing Conditions" and builds without asking a site anything.
+    # styles above: an OBSERVED FACT seeded in from_model from OSM's `oneway`, or from
+    # config.yaml where a site states one - not a treatment's parameter, so every scenario of a
+    # junction gets the same answer, including the one the pipeline labels "Existing Conditions"
+    # and builds without asking a site anything.
     #
     # HERE AND NOT ON Leg, though it is just as much a fact about the street, because a Leg is
     # REBUILT five times during load (fitting.py re-centres it on the traced kerbs, and each
@@ -190,11 +237,34 @@ class DesignState:
                           f"override if {corridor_speed} is the one that should govern here.")
             else:
                 speed_limits_mph[name] = corridor_speed
+        # THE THIRD FACT ON THE SAME PRECEDENCE, and the only one whose tag is not already in the
+        # frame it is wanted in - see _osm_traffic_heads_toward for the two flips. `oneway=yes`
+        # is a direct statement that the carriageway carries one direction, which is the whole of
+        # what this field records, so reading it beats treating every unconfigured leg as
+        # two-way: a SLICE has no config at all (src/geometry/network/slice_design.py builds
+        # `{"legs": {slug: {"street_name": ...}}}`), so config as the sole source left
+        # carriageway_is_one_way permanently false in every window.
+        #
+        # Config still wins where a site states one, as an observed centerline_style does: a
+        # compass someone wrote down after looking at the street outranks a tag, and there is no
+        # repo-default placeholder to discount here. Where the two disagree, say so - they cannot
+        # both be right about which way a street runs.
+        osm_aligned = getattr(model, "leg_osm_aligned", {})
+        traffic_heads_toward = {}
+        for name, leg_cfg in model.config["legs"].items():
+            configured = leg_cfg.get("traffic_heads_toward")
+            observed = _osm_traffic_heads_toward(model.legs.get(name), osm_tags.get(name, {}),
+                                                 osm_aligned.get(name, True))
+            traffic_heads_toward[name] = configured if configured is not None else observed
+            if configured is not None and observed is not None and configured != observed:
+                print(f"  NOTE: {name} is tagged oneway={osm_tags[name]['oneway']!r} in OSM, "
+                      f"which runs its traffic {observed} along this leg - config.yaml says "
+                      f"{configured} and wins. One of the two has the direction of a one-way "
+                      f"street wrong; check the tag against the street.")
         return cls(legs=deepcopy(model.legs), corner_fillets=deepcopy(model.corner_fillets),
                    existing_centerline_styles=centerline_styles,
                    speed_limits_mph=speed_limits_mph,
-                   traffic_heads_toward={name: leg_cfg.get("traffic_heads_toward")
-                                          for name, leg_cfg in model.config["legs"].items()},
+                   traffic_heads_toward=traffic_heads_toward,
                    kerb_openings=kerb_openings_from_model(model),
                    parking_restrictions=_parking_restrictions_from_model(model),
                    cross_streets=cross_streets_from_model(model),

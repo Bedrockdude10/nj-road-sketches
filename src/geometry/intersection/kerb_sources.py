@@ -53,7 +53,7 @@ def _runs_along_a_leg(line: LineString, legs: dict) -> bool:
 
 
 def drawn_kerb_radius_ft() -> float:
-    """How far out a kerb still counts as part of the PICTURE, in feet.
+    """How far out a FETCHED kerb still counts as part of the PICTURE, in feet.
 
     Every kerb that was fetched: the fetch radius already scales with the frame, so this is not
     a second independent idea of how much is relevant.
@@ -63,6 +63,10 @@ def drawn_kerb_radius_ft() -> float:
     src/render/frame.py describes that asymmetry. Sharing the subject is not the same as
     agreeing on the outline of the visible region, and neither may be left to disagree about
     which kerbs exist.
+
+    IT SAYS NOTHING ABOUT A SUPPLIED LAYER, and must not: a window onto the borough document
+    hands over the kerbs it already clipped to its own square, and this is a circle about a
+    point. See kerb_lines_with_tags_ft, which no longer applies it to one.
     """
     from src.render.frame import context_radius_m
 
@@ -80,7 +84,7 @@ def kerb_lines_with_tags_ft(center_wgs84: Point, center_ft: Point, legs: dict | 
 
       * `radius_ft` - everything within that distance of the centre. The DRAWING test, and the
         only one of the three that is about the picture rather than about the junction. Use it
-        for anything being rendered.
+        for anything being rendered. IT IS NOT APPLIED TO A SUPPLIED `kerbs` - see below.
       * `legs` - _runs_along_a_leg: kerb anywhere along a leg, however far out, which is what a
         curb LINE wants. Traced ways well out along a leg fail the near test.
       * neither - the NEAR set, within KERB_NEAR_JUNCTION_FT of the junction CENTRE. The right
@@ -98,10 +102,19 @@ def kerb_lines_with_tags_ft(center_wgs84: Point, center_ft: Point, legs: dict | 
     _extend_curbs_with_far_tracing rebuilds the curb lines from the wide set afterwards, once
     the widths are settled and extra ways can only lengthen a curb, never redefine one.
     See tests/test_leg_frame.py.
+
+    A SUPPLIED `kerbs` IS ALREADY THE ANSWER TO THE DRAWING TEST, so `radius_ft` is not applied
+    to one. A junction knows a centre and a radius, so it fetches a circle and re-clipping it to
+    that same circle is free; a window onto the borough document hands over the ways it clipped
+    to its own SQUARE, and a circle about the centre then deletes the corners of the very sheet
+    being drawn - 20 of a 1,000 ft window's 67 kerb ways, one of them 72 ft long and 521 ft out,
+    on a picture that reaches 707 ft to its corner. The `legs` and NEAR tests still apply to a
+    supplied layer: those ask whether a kerb is THIS JUNCTION's, which is a different question
+    from whether it is in the picture, and the window cannot have answered it.
     """
     def relevant(line: LineString):
         if radius_ft is not None:
-            return line.distance(center_ft) <= radius_ft
+            return kerbs is not None or line.distance(center_ft) <= radius_ft
         if legs:
             return _runs_along_a_leg(line, legs)
         return line.distance(center_ft) <= KERB_NEAR_JUNCTION_FT
@@ -137,8 +150,12 @@ def _projected_kerbs(center_wgs84: Point, kerbs: list[dict] | None = None) -> li
     # Scaled with the frame (see _paved_surfaces_ft for why the import is lazy). Widening this
     # cannot disturb the fits: both the near and the wide filter sit far inside the unscaled
     # 120 m, so extra ways are candidates every existing test rejects. Only the DRAWING wanted them.
+    # The centre goes in because the drawn reach belongs to the load that declared it: without it
+    # a window inherited wbroad_lanning's 2,307.5 ft and opened a 703 m fetch about its own
+    # centre, which SiteOutsideSnapshotError refuses. See src/render/frame.py:_reach_for.
     try:
-        kerbs = (fetch_kerbs(center_wgs84, radius_m=context_radius_m(KERB_CONTEXT_RADIUS_M))
+        kerbs = (fetch_kerbs(center_wgs84,
+                             radius_m=context_radius_m(KERB_CONTEXT_RADIUS_M, center_wgs84))
                  if kerbs is None else kerbs)
     except RuntimeError as e:
         # An outage must not look like "nothing is mapped here": returning [] drops the widths,

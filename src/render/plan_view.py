@@ -3,13 +3,14 @@ from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
+from matplotlib.collections import EllipseCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from shapely.geometry import LineString, Point
-from shapely.ops import unary_union
+from shapely.ops import substring, unary_union
 
 from src.metrics import Comparison, SceneMetrics, marked_stall_runs
-from src.geometry.model import inset_point_at_station, trimmed_curb_lines
+from src.geometry.model import hatch_lines_ft, inset_point_at_station, trimmed_curb_lines
 from src.geometry.intersection import (IntersectionModel, drawn_kerb_radius_ft,
                                        kerb_lines_with_tags_ft)
 from src.geometry.kerbs import KerbType
@@ -17,11 +18,26 @@ from src.geometry.treatments import (CENTERLINE_IS_WHITE, DesignState, RaiseCros
                                      RefugeIsland)
 from src.provenance import PLOT_STYLE, built_width_provenance
 from src.geometry import markings
-from src.geometry.paint import stroke_width_ft
+from src.geometry.paint import RimCause, stroke_width_ft
 from src.geometry.markings import require_every_kind
-from src.render.props import (DRAWN_BY_PAINT, TACTILE_PAD_DEPTH_FT, TACTILE_PAD_WIDTH_FT,
-                               build_props, pad_polygon, signalization_conflicts)
-from src.render.coords import wgs84_to_state_plane
+# The 3D render's own figures, read rather than re-stated: how wide it builds a footway, and the
+# spacing, angle and phase its hatch strokes are laid on. src/render/export.py is where a 2D/3D
+# disagreement about any of them would otherwise start.
+from src.render.export import (HATCH_ANGLE_DEG, PAINT_HATCH_SPACING_FT, SIDEWALK_WIDTH_FT,
+                               _leg_heading_deg)
+from src.render.props import (BIKE_WARNING_PLATE_RADIUS_FT, BOLLARD_RADIUS_FT, DRAWN_BY_PAINT,
+                               HYDRANT_RADIUS_FT, MAST_ARM_RADIUS_FT, PED_SIGNAL_HEAD_WIDTH_FT,
+                               PUSHBUTTON_HOUSING_DEPTH_FT, PUSHBUTTON_HOUSING_WIDTH_FT,
+                               PUSHBUTTON_POST_RADIUS_FT, RECTANGULAR_PLATE_THICKNESS_FT,
+                               RECTANGULAR_PLATE_WIDTH_FT, RRFB_PLATE_THICKNESS_FT,
+                               RRFB_PLATE_WIDTH_FT, RRFB_POST_RADIUS_FT,
+                               SCHOOL_ZONE_PLATE_RADIUS_FT, SIGN_PLATE_THICKNESS_FT,
+                               SIGN_POST_RADIUS_FT, STOP_SIGN_PLATE_RADIUS_FT,
+                               TACTILE_PAD_DEPTH_FT, TACTILE_PAD_WIDTH_FT,
+                               TRAFFIC_SIGNAL_POLE_RADIUS_FT, VEHICLE_SIGNAL_HEAD_WIDTH_FT,
+                               YIELD_SIGN_PLATE_RADIUS_FT, build_props, pad_polygon,
+                               signalization_conflicts)
+from src.render.coords import FT_TO_M, wgs84_to_state_plane
 from src.render.crosswalks import (CENTERLINE_STRIPE_WIDTH_FT,
                                    TRANSVERSE_LINE_WIDTH_FT, centerline_paint_ft,
                                    centerline_start_ft)
@@ -31,8 +47,12 @@ from src.render.scene import SceneGeometry
 from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_sidewalks,
                                      fetch_street_furniture, fetch_traffic_control)
 
-# Matches TACTILE_PAD_RED in scripts/blender/blender_props.py - the plan view and the 3D
-# render must not disagree about what a detectable warning surface looks like.
+# DOES NOT MATCH THE 3D, and the comment here claimed it did: it named a TACTILE_PAD_RED that
+# blender_props.py has not had since the pads went yellow (TACTILE_PAD_YELLOW, because at this
+# camera height a brick-red pad disappeared into the sidewalk). So one detectable warning surface
+# is drawn in two colours, and the sheet and the render disagree about what it is. Left red here
+# rather than changed in passing - it moves every plan view and is a decision, not a typo - but
+# recorded as the disagreement it is rather than as the agreement it was written up as.
 TACTILE_PAD_COLOR = "#8c1f14"
 
 TRAFFIC_CONTROL_RADIUS_M = 60  # matches src/render/export.py
@@ -108,6 +128,50 @@ def _at_real_width(kind, geometries: list, style: dict) -> tuple[list, dict]:
             {key: value for key, value in style.items() if key != "linewidth"})
 
 
+def _hatch_keep_off(paint) -> dict:
+    """Where hatching must not run, per leg-side: half a spacing off every OPENING rim.
+
+    The second half of _hatch_strokes_ft - see the trap there.
+    """
+    rims: dict = {}
+    for piece in paint:
+        if piece.rim is RimCause.OPENING:
+            rims.setdefault((piece.leg, piece.side), []).append(piece.geometry)
+    return {key: unary_union(geometries).buffer(PAINT_HATCH_SPACING_FT / 2)
+            for key, geometries in rims.items()}
+
+
+def _hatch_strokes_ft(pieces, state, center_ft, keep_off: dict) -> list:
+    """The strokes a hatched zone is actually painted with, as bodies at their real width.
+
+    A `hatch="//"` IS A PATTERN ON THE SHEET. Its spacing and its stroke weight are points, so one
+    buffer read as five hairlines on a corridor sheet and as solid paint on a junction one, and
+    neither was the 8 ft cadence the render lays - the reader could not count the strokes, measure
+    the gap, or see that a zone too narrow to hatch got hatched anyway. These are the strokes:
+    hatch_lines_ft, the function src/render/export.py:paint_channels_local_m serializes for
+    Blender, at the same spacing, the same angle rule and the same phase origin.
+
+    THE ANGLE RULE, THE PHASE AND THE KEEP-OFF ARE A SECOND COPY of that function's `_hatch`,
+    which is a closure inside it and cannot be imported. Three rules that have to agree or the
+    sheet shows strokes the street will not have; they are written here in its order and named
+    against it. One home for them is the fix and it needs src/render/export.py.
+    """
+    strokes = []
+    for piece in pieces:
+        angle_deg = (_leg_heading_deg(state.legs[piece.leg]) + 45
+                     if piece.leg in state.legs else HATCH_ANGLE_DEG)
+        lines = hatch_lines_ft(piece.geometry, spacing_ft=PAINT_HATCH_SPACING_FT,
+                               angle_deg=angle_deg, phase_origin=(center_ft.x, center_ft.y))
+        rims = keep_off.get((piece.leg, piece.side))
+        if rims is not None:
+            # WHOLE STROKES ONLY, as in the export: a stroke that clears the rim is painted and
+            # one that does not is absent, never truncated into a stray mark at the kerb.
+            lines = [line for line in lines if not line.intersects(rims)]
+        strokes += lines
+    width_ft = stroke_width_ft(pieces[0].kind)
+    return [line.buffer(width_ft / 2, cap_style=2, join_style=2) for line in strokes]
+
+
 def _draw(ax, geometries, boundary=None, **style) -> None:
     """Draw a group of same-styled geometries as ONE matplotlib collection.
 
@@ -128,7 +192,13 @@ def _draw(ax, geometries, boundary=None, **style) -> None:
 
 
 def _scatter_groups(ax, points_by_style: dict) -> None:
-    """One ax.scatter per marker style rather than one per prop, for the same reason."""
+    """One ax.scatter per marker style rather than one per prop, for the same reason.
+
+    ONLY FOR A PROP WHOSE SIZE NOBODY HAS STATED - a streetlight, or a type a site config named
+    that this repo has never heard of. `s` is an area in POINTS squared, so anything drawn this
+    way is a symbol on the sheet rather than an object on the ground, and it changes size with
+    the window. Everything with a dimension goes through _draw_discs or a footprint polygon.
+    """
     for style, points in points_by_style.items():
         if not points:
             continue
@@ -136,68 +206,177 @@ def _scatter_groups(ax, points_by_style: dict) -> None:
         ax.scatter(xs, ys, **dict(style))
 
 
+def _draw_discs(ax, discs: list, **style) -> None:
+    """Round props - a signal pole, a sign post, a flex post - as circles of their REAL diameter.
+
+    `discs` is [(point, diameter_ft)], one collection for the lot. An EllipseCollection in
+    units="xy" is matplotlib's only circle sized in DATA rather than in points, which is the whole
+    reason it is used here: a 0.66 ft pole is 0.66 ft of ground at any --frame-scale, any DPI. It
+    also keeps one offset per prop, so what was drawn can still be counted, and it is one artist
+    for every post on the sheet rather than N buffered polygons.
+    """
+    discs = [(point, size) for point, size in discs if size > 0]
+    if not discs:
+        return
+    sizes = [size for _point, size in discs]
+    ax.add_collection(EllipseCollection(
+        widths=sizes, heights=sizes, angles=0, units="xy",
+        offsets=[point for point, _size in discs], offset_transform=ax.transData,
+        facecolors=style.get("color", "none"), edgecolors=style.get("edgecolor", "none"),
+        linewidths=style.get("linewidth", 0), alpha=style.get("alpha"),
+        zorder=style.get("zorder", 7)))
+
+
 # One colour for a flex-post wherever it is drawn from - the treatment layer's own bollard
 # pieces, the daylight-zone props, and legend_handles(). Named so a test can count markers of
 # this colour rather than trusting that the dispatch has a branch for them at all.
 BOLLARD_PLAN_COLOR = "darkorange"
 
-# How each prop type is marked in plan. Data rather than an if/elif chain, so every prop of a
-# type scatters in one call and a new type is a row here rather than a branch that can be
-# forgotten and fall through to the generic marker.
+@dataclass(frozen=True)
+class PropFootprint:
+    """What one piece of a prop covers on the ground, in feet.
+
+    `across_ft` runs perpendicular to the prop's heading and `along_ft` parallel to it - the way
+    the 3D builders scale a plate, which is thin along the axis it faces and wide across it, so a
+    sign's long axis on the sheet is the direction it faces. A DISC sets the two equal and says
+    so: a pole has no facing, and drawing one as a square would invent an orientation.
+    """
+    across_ft: float
+    along_ft: float
+    disc: bool = False
+
+
+def _disc(diameter_ft: float) -> PropFootprint:
+    return PropFootprint(diameter_ft, diameter_ft, disc=True)
+
+
+# A sign post, in the grey the 3D paints it (blender_props.SIGN_POST_GRAY). One style for every
+# post on the sheet, so they are one collection however many sign types stand on it.
+POST_STYLE = dict(color="#59595e", zorder=7)
+SIGN_POST = (_disc(2 * SIGN_POST_RADIUS_FT), POST_STYLE)
+
+# How each prop type is drawn in plan: its real footprint on the ground, and the colours that
+# tell it from the next one. Data rather than an if/elif chain, so every prop of a type draws in
+# one call and a new type is a row here rather than a branch that can be forgotten.
+#
+# AT THE SIZE THE 3D RENDER BUILDS IT - the dimensions block in src/render/props.py, mirrored
+# from the bpy calls that build these - and never at a fixed marker size. matplotlib's `s` is an
+# area in POINTS squared, so `s=44` drew a stop sign 6.6 pt wide whatever the sheet showed: about
+# 2 ft of ground on a junction plan and 8 ft on a corridor one. At that size the drawing cannot
+# answer the question a plan view exists for - does this pole stand in the bike lane - and the
+# tactile pad, drawn true-size all along, is why that question IS answerable for pads.
+#
+# What a plan sees of a SIGN is its PLATE: the post is 0.26 ft across and the plate up to 2.5 ft,
+# so the plate is the object on the sheet. The post is drawn too, and is the smaller of the two.
 PROP_MARKERS = {
-    "traffic_signal_pole":    (dict(color="black", marker="o", s=46, zorder=7),
-                               dict(color="limegreen", marker="o", s=16, zorder=7)),
-    "pedestrian_signal_head": (dict(color="limegreen", marker="s", s=22, edgecolors="black",
-                                    linewidths=0.6, zorder=7),),
-    "stop_sign":              (dict(color="red", marker="H", s=44, edgecolors="white",
-                                    linewidths=0.6, zorder=7),),
-    "pedestrian_pushbutton":  (dict(color="gold", marker="P", s=30, edgecolors="black",
-                                    linewidths=0.5, zorder=8),),
-    "rrfb":                   (dict(color="gold", marker="D", s=30, edgecolors="black",
-                                    linewidths=0.6, zorder=8),),
-    "fire_hydrant":           (dict(color="firebrick", marker="P", s=34, zorder=7),),
-    "yield_sign":             (dict(color="white", marker="v", s=40, edgecolors="red",
-                                    linewidths=1.2, zorder=7),),
-    "no_turn_on_red_sign":    (dict(color="white", marker="s", s=26, edgecolors="red",
-                                    linewidths=1.2, zorder=7),),
+    "traffic_signal_pole":    ((_disc(2 * TRAFFIC_SIGNAL_POLE_RADIUS_FT),
+                                dict(color="limegreen", edgecolor="black", linewidth=0.6,
+                                     zorder=7)),),
+    "pedestrian_signal_head": ((PropFootprint(PED_SIGNAL_HEAD_WIDTH_FT, PED_SIGNAL_HEAD_WIDTH_FT),
+                                dict(color="limegreen", edgecolor="black", linewidth=0.6,
+                                     zorder=7)),),
+    "stop_sign":              (SIGN_POST,
+                               (PropFootprint(2 * STOP_SIGN_PLATE_RADIUS_FT,
+                                              SIGN_PLATE_THICKNESS_FT),
+                                dict(color="red", edgecolor="white", linewidth=0.6, zorder=7))),
+    "pedestrian_pushbutton":  ((_disc(2 * PUSHBUTTON_POST_RADIUS_FT), POST_STYLE),
+                               (PropFootprint(PUSHBUTTON_HOUSING_WIDTH_FT,
+                                              PUSHBUTTON_HOUSING_DEPTH_FT),
+                                dict(color="gold", edgecolor="black", linewidth=0.5, zorder=8))),
+    "rrfb":                   ((_disc(2 * RRFB_POST_RADIUS_FT), POST_STYLE),
+                               (PropFootprint(RRFB_PLATE_WIDTH_FT, RRFB_PLATE_THICKNESS_FT),
+                                dict(color="gold", edgecolor="black", linewidth=0.6, zorder=8))),
+    "fire_hydrant":           ((_disc(2 * HYDRANT_RADIUS_FT),
+                                dict(color="firebrick", zorder=7)),),
+    "yield_sign":             (SIGN_POST,
+                               (PropFootprint(2 * YIELD_SIGN_PLATE_RADIUS_FT,
+                                              SIGN_PLATE_THICKNESS_FT),
+                                dict(color="white", edgecolor="red", linewidth=1.2, zorder=7))),
+    "no_turn_on_red_sign":    (SIGN_POST,
+                               (PropFootprint(RECTANGULAR_PLATE_WIDTH_FT,
+                                              RECTANGULAR_PLATE_THICKNESS_FT),
+                                dict(color="white", edgecolor="red", linewidth=1.2, zorder=7))),
     # MUTCD W-series warning plates at a bikeway terminus: W9-5 BIKE LANE ENDS, and the
-    # W16-21P TWO-WAY BICYCLE CROSS TRAFFIC plaque under a crossroad's STOP. A yellow diamond,
-    # which is the plate's real shape - and distinct from the yield triangle and the school
-    # zone pentagon so the three sign families read apart at a glance.
-    # A THIN diamond, and a big one. The OSM RRFB beacon is already a small gold "D", and two
-    # prop types drawn identically are two things the reader cannot tell apart on the sheet -
-    # tests/test_props.py:test_every_prop_type_is_drawn_distinguishably is what holds that down.
-    "bike_warning_sign":      (dict(color="gold", marker="d", s=64, edgecolors="black",
-                                    linewidths=1.2, zorder=7),),
+    # W16-21P TWO-WAY BICYCLE CROSS TRAFFIC plaque under a crossroad's STOP. The plate is the
+    # widest of the sign family, which is what the reader has to tell it by now that the shapes
+    # are footprints rather than glyphs - two prop types drawn identically are two things the
+    # reader cannot tell apart, and
+    # tests/test_props.py:test_every_prop_type_is_drawn_distinguishably holds that down.
+    "bike_warning_sign":      (SIGN_POST,
+                               (PropFootprint(2 * BIKE_WARNING_PLATE_RADIUS_FT,
+                                              SIGN_PLATE_THICKNESS_FT),
+                                dict(color="gold", edgecolor="black", linewidth=1.2, zorder=7))),
     # The R9-23 series regulatory plate at the two-stage turn box (MUTCD 9B.18). White plate,
-    # black edge - the NTOR sign is the other white rectangle and is edged RED, so the two do
-    # not read as the same sign.
-    "bike_regulatory_sign":   (dict(color="white", marker="s", s=26, edgecolors="black",
-                                    linewidths=1.2, zorder=7),),
+    # black edge - the NTOR sign is the other white rectangle and is edged RED. They are the SAME
+    # PLATE in 3D (add_bike_regulatory_sign is add_no_turn_on_red_sign), so colour is the only
+    # honest way a true-size plan tells them apart.
+    "bike_regulatory_sign":   (SIGN_POST,
+                               (PropFootprint(RECTANGULAR_PLATE_WIDTH_FT,
+                                              RECTANGULAR_PLATE_THICKNESS_FT),
+                                dict(color="white", edgecolor="black", linewidth=1.2, zorder=7))),
     # Drawn in 3D since the school-zone builder was added and never here, so a relocated
-    # school zone sign was invisible in plan. Pentagon-ish (matplotlib's "p"), fluorescent
-    # yellow-green, as built.
-    "school_zone_sign":       (dict(color="greenyellow", marker="p", s=44, edgecolors="black",
-                                    linewidths=0.6, zorder=7),),
-    "streetlight":            (dict(color="dimgrey", marker="*", s=34, zorder=6),),
-    "bollard":                (dict(color=BOLLARD_PLAN_COLOR, marker="o", s=14,
-                                    edgecolors="black", linewidths=0.4, zorder=7),),
+    # school zone sign was invisible in plan. Fluorescent yellow-green, as built.
+    "school_zone_sign":       (SIGN_POST,
+                               (PropFootprint(2 * SCHOOL_ZONE_PLATE_RADIUS_FT,
+                                              SIGN_PLATE_THICKNESS_FT),
+                                dict(color="greenyellow", edgecolor="black", linewidth=0.6,
+                                     zorder=7))),
+    # THE ONE PROP WITH NO SIZE ANYWHERE. add_streetlight imports an external Poly Haven glTF and
+    # the procedural fallback beside it says in its own docstring that it is not what ships, so
+    # there is no figure to draw a lamp at - see src/render/props.py. A fixed-size marker, and
+    # the only symbol left on this sheet that changes with the window.
+    "streetlight":            ((None, dict(color="dimgrey", marker="*", s=34, zorder=6)),),
+    "bollard":                ((_disc(2 * BOLLARD_RADIUS_FT),
+                                dict(color=BOLLARD_PLAN_COLOR, edgecolor="black", linewidth=0.4,
+                                     zorder=7)),),
 }
-# How each kind of traced kerb is drawn. Raised is the solid black line this view has always
-# drawn; a LOWERED kerb is where a vehicle crosses - a driveway or a yard entrance - and the
-# whole point of distinguishing them is that the kerbside markings break over one and not the
-# other, so the drawing has to show which is which or the gap in the paint looks like a mistake.
-# Every one of the 95 kerbs mapped here is tagged, so UNKNOWN is drawn only if that stops being
-# true - and drawn distinctly rather than as raised, because "nobody said" is not "raised".
-# THE TRAP: named linestyles, not dash tuples. These go through GeoSeries.plot to a
-# LineCollection, where a (offset, (on, off)) tuple is read as per-element data - numpy raises
-# "inhomogeneous shape" rather than drawing a dashed line.
+# EVERY KERB IS THE SAME WIDTH, because every kerb is built at KERB_WIDTH_M in
+# scripts/blender/blender_scene.py - raised, lowered and flush alike. What tells them apart in 3D
+# is HEIGHT (src/render/export.py:KERB_HEIGHT_M: 0.20 / 0.07 / 0.055 m), and a plan cannot draw a
+# height. So the width here is the real one and the DASH PATTERN is this view's way of saying the
+# thing a plan cannot show - which is worth saying, because a LOWERED kerb is where a vehicle
+# crosses and the kerbside markings break over one and not the other, so a reader looking at a
+# gap in a bike lane needs to see the driveway that caused it. UNKNOWN is drawn distinctly rather
+# than as raised, because "nobody said" is not "raised"; all 95 kerbs mapped here are tagged.
+KERB_WIDTH_FT = 0.15 / FT_TO_M
+# (on, off, on, off, ...) in FEET, repeated along the kerb, or None for a kerb drawn whole.
+# In feet rather than as a matplotlib linestyle for the same reason the width is: a pattern in
+# points is a statement about the sheet, and at --frame-scale 2.5 the old "--" said something
+# different about the same kerb. A cadence is a drawing convention, not a measurement - the
+# width above is the measurement - but a convention still has to hold still.
+KERB_DASHES_FT = {
+    KerbType.RAISED:  None,
+    KerbType.LOWERED: (4.0, 2.5),
+    KerbType.FLUSH:   (1.0, 2.0),
+    KerbType.UNKNOWN: (4.0, 2.0, 1.0, 2.0),
+}
 KERB_STYLE = {
-    KerbType.RAISED:  dict(color="black", linewidth=2.2, zorder=6),
-    KerbType.LOWERED: dict(color="black", linewidth=1.1, linestyle="--", zorder=6),
-    KerbType.FLUSH:   dict(color="black", linewidth=1.1, linestyle=":", zorder=6),
-    KerbType.UNKNOWN: dict(color="dimgrey", linewidth=1.6, linestyle="-.", zorder=6),
+    KerbType.RAISED:  dict(color="black", zorder=6),
+    KerbType.LOWERED: dict(color="black", zorder=6),
+    KerbType.FLUSH:   dict(color="black", zorder=6),
+    KerbType.UNKNOWN: dict(color="dimgrey", zorder=6),
 }
+
+
+def _cadence_pieces(line: LineString, cadence: tuple | None) -> list[LineString]:
+    """`line` cut into an (on, off, ...) cadence in feet, or whole if there is none.
+
+    CUT, not styled. A kerb drawn at its real width is a POLYGON, and a polygon has no linestyle -
+    matplotlib would run the dashes round its rim instead of along it. Same answer the contraflow
+    divider already gets: a break the drawing means belongs in the geometry.
+    """
+    if not cadence:
+        return [line]
+    pieces, at, step = [], 0.0, 0
+    while at < line.length:
+        run = cadence[step % len(cadence)]
+        if step % 2 == 0:
+            piece = substring(line, at, min(at + run, line.length))
+            if piece.geom_type == "LineString" and piece.length > 0:
+                pieces.append(piece)
+        at += run
+        step += 1
+    return pieces
 
 
 # A driveway is PAVING, so it is drawn as paving: a filled strip under everything else, in a
@@ -236,17 +415,22 @@ def _draw_kerbs(ax, kerb_lines) -> None:
     for line, tags, _way_id in kerb_lines:
         by_type.setdefault(KerbType.from_tags(tags), []).append(line)
     for kerb, lines in sorted(by_type.items(), key=lambda kv: str(kv[0])):
-        _draw(ax, lines, **KERB_STYLE[kerb])
+        _draw(ax, [piece.buffer(KERB_WIDTH_FT / 2, cap_style=2, join_style=2)
+                   for line in lines
+                   for piece in _cadence_pieces(line, KERB_DASHES_FT[kerb])],
+              **KERB_STYLE[kerb])
 
 
 # Site- or scenario-specific extras (school zone signs, RRFB relocations, ...) have no
 # dedicated marker: they are whatever a config or a proposal named.
 EXTRA_PROP_MARKER = dict(color="darkgoldenrod", marker="^", s=30, zorder=7)
 
-# The radius of a prop marker, in POINTS - matplotlib's `s` is an area in pt^2, and sqrt(30/pi)
-# is 3.1. In points because that is the unit the marker is drawn in; converted to feet only when
-# a label is placed (src/render/labels.py:ft_per_point), so the ground a signal pole is allowed
-# to keep to itself is the size of the dot the reader sees, at any --frame-scale.
+# How much ground a label has to leave clear around a prop, in POINTS, converted to feet once the
+# limits are set (src/render/labels.py:ft_per_point). DELIBERATELY A SHEET QUANTITY, and the only
+# one left here: the props themselves are now drawn at their real size, and their real size is
+# 0.3-2.5 ft - smaller than the letters of the label that would sit on them. Keeping a label off
+# 0.33 ft of flex post is keeping it off nothing, so what is reserved is the reader's-eye space
+# around the prop rather than the prop.
 PROP_MARKER_RADIUS_PT = 3.2
 
 # How each marking is drawn in plan. Styling is a real per-marking choice - what colour says
@@ -254,16 +438,30 @@ PROP_MARKER_RADIUS_PT = 3.2
 # derivable - so this table is written by hand. require_every_kind is what makes forgetting an
 # entry impossible: a marking declared in src/geometry/markings.py with no style here raises on
 # import, rather than being silently absent from the plan view while the 3D render draws it. An
-# OBJECT is exempt - a flex post is drawn as a marker, not as paint (see BOLLARD_PLAN_COLOR).
+# OBJECT is exempt - a flex post is drawn as a post, not as paint (see BOLLARD_PLAN_COLOR).
+#
+# NO `hatch` ON A FILL ANY MORE. A hatched zone's strokes are real paint, so they are drawn as
+# real paint by _hatch_strokes_ft, in the colour PAINT_FILL_EDGE gives the wash. The translucent
+# WASH stays and is a convention: no colour is applied to a street, and it is what lets the
+# reader (and the legend) tell a daylight zone from a parking buffer at a glance.
+#
+# EVERY `linewidth` BELOW IS DEAD. _at_real_width buffers a stroked marking to the body it really
+# has and drops the key before drawing - and it drops it for all eleven: measured, every LINE
+# kind here has a stroke width (0.492 or 0.820 ft) and none of them covers_area, which are the
+# two conditions. They are still written down only because
+# tests/test_paint.py:test_every_fill_colour_has_an_outline_colour tells a fill from a line by
+# whether the style HAS a linewidth key, so deleting them turns eleven lines into eleven fills
+# with no outline colour and reds a test. Delete them in the commit that teaches that test to
+# ask the marking (`kind.covers_area`) instead, which is what this file already does.
 PAINT_STYLE = require_every_kind({
-    markings.LANE_NARROWING_FILL: dict(color="gold", alpha=0.5, hatch="//", zorder=3),
-    markings.TAPER_FILL:          dict(color="gold", alpha=0.5, hatch="//", zorder=3),
-    markings.BUFFER_FILL:         dict(color="gold", alpha=0.5, hatch="//", zorder=3),
+    markings.LANE_NARROWING_FILL: dict(color="gold", alpha=0.5, zorder=3),
+    markings.TAPER_FILL:          dict(color="gold", alpha=0.5, zorder=3),
+    markings.BUFFER_FILL:         dict(color="gold", alpha=0.5, zorder=3),
     # The statutory no-parking zone at the corner (R.S. 39:4-138). Drawn in a distinct
     # colour from the ordinary buffer hatch because it is a different claim: not "this
     # asphalt is spare", but "parking here is illegal and this proposal marks it".
-    markings.DAYLIGHT_FILL:       dict(color="orangered", alpha=0.40, hatch="xx", zorder=3),
-    markings.CORNER_HATCH_FILL:   dict(color="gold", alpha=0.5, hatch="//", zorder=3),
+    markings.DAYLIGHT_FILL:       dict(color="orangered", alpha=0.40, zorder=3),
+    markings.CORNER_HATCH_FILL:   dict(color="gold", alpha=0.5, zorder=3),
     markings.APRON:               dict(color="peru", alpha=0.6, zorder=3),
     # A green bike lane's asphalt. Under the stripes' zorder so the white edge lines read on
     # top of it, exactly as they do on the street and in the render.
@@ -296,7 +494,7 @@ PAINT_STYLE = require_every_kind({
     # stripes - the same row the render extrudes. Styling it differently would say the paint is a
     # different colour across a driveway, which it is not.
     markings.BIKE_LANE_DOTTED_EXTENSION: dict(color="seagreen", linewidth=1.6, zorder=3),
-    markings.BIKE_BUFFER_FILL:    dict(color="mediumseagreen", alpha=0.35, hatch="\\\\", zorder=3),
+    markings.BIKE_BUFFER_FILL:    dict(color="mediumseagreen", alpha=0.35, zorder=3),
     # A two-way lane's centre stripe. Yellow and dashed, the same as the roadway's own
     # centreline and for the same reason - it divides opposing traffic. Drawn above the green
     # surface it sits on (zorder 4, over the surface's 2) or the fill hides it.
@@ -349,6 +547,11 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     visible error rather than a surprise three phases later. Three of these four junctions are
     signalized and one is not.
 
+    And at the size Blender will place it at: every prop here is its real footprint on the ground
+    (PROP_MARKERS), so the question this drawing is read to answer - does this pole stand in the
+    bike lane, does that pad reach the roadway - is answered by the drawing rather than by the
+    size of the dot somebody chose.
+
     Bollards tagged DRAWN_BY_PAINT are skipped because the treatment layer already drew them
     (LaneNarrowingBollards, ParkingBufferBollards emit their own paint pieces). Bollards WITHOUT
     that tag - ProtectDaylightZone's posts - exist only as props, so skipping every bollard shows
@@ -367,20 +570,22 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     _draw_paved_surfaces(ax, model.paved_surfaces)
     _draw_kerbs(ax, kerb_lines)
 
-    # Grouped, then drawn once per group. See _draw / _scatter_groups.
+    # Grouped by style, then drawn once per group. See _draw / _draw_discs / _scatter_groups.
+    discs_by_style: dict[tuple, list] = {}
+    footprints_by_style: dict[tuple, list] = {}
     marker_points: dict[tuple, list] = {}
-    pads, arms = [], []
+    pads, arms, heads = [], [], []
     signal_count = 0
     for prop in props:
         kind = prop["type"]
         if kind == "bollard" and prop.get(DRAWN_BY_PAINT):
             continue
         x, y = prop["position_ft"]
+        heading = prop["heading_deg"]
         if kind == "tactile_paving_pad":
-            # Drawn at its true size and orientation, not as a marker: whether the pad
-            # sits wholly on the footway or spills into the roadway is exactly the kind
-            # of thing the plan view exists to make checkable.
-            pads.append(pad_polygon(x, y, prop["heading_deg"],
+            # Its size arrives WITH the prop, because the step-back that keeps it off the roadway
+            # is half its depth - see src/render/props.py:pad_polygon.
+            pads.append(pad_polygon(x, y, heading,
                                       depth_ft=prop.get("pad_depth_ft", TACTILE_PAD_DEPTH_FT),
                                       width_ft=prop.get("pad_width_ft", TACTILE_PAD_WIDTH_FT)))
             continue
@@ -388,18 +593,40 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
             signal_count += 1
             # The mast arm is the part that reaches out over the roadway, and its length
             # is derived from a real leg width - worth seeing in plan, since it's the
-            # most visually dominant thing in the 3D render.
+            # most visually dominant thing in the 3D render. AT ITS REAL THICKNESS too: the
+            # arm is 0.33 ft of steel and a 1.6 pt stroke drew it four times that on a site
+            # sheet, so the one prop already drawn to a real LENGTH was not drawn to scale.
             arm_deg, arm_ft = prop.get("arm_heading_deg"), prop.get("arm_length_ft")
             if arm_deg is not None and arm_ft:
-                arms.append(LineString([(x, y),
-                                        (x + np.cos(np.radians(arm_deg)) * arm_ft,
-                                         y + np.sin(np.radians(arm_deg)) * arm_ft)]))
-        for style in PROP_MARKERS.get(kind, (EXTRA_PROP_MARKER,)):
-            marker_points.setdefault(tuple(sorted(style.items())), []).append((x, y))
+                end = (x + np.cos(np.radians(arm_deg)) * arm_ft,
+                       y + np.sin(np.radians(arm_deg)) * arm_ft)
+                arms.append(LineString([(x, y), end]).buffer(MAST_ARM_RADIUS_FT, cap_style=2,
+                                                              join_style=2))
+                # The vehicle head hangs off the far end of that arm in 3D
+                # (add_traffic_signal_pole -> add_vehicle_signal_head) and had nothing in plan,
+                # so the sheet showed a bare stick where the render shows the signal itself.
+                heads.append(pad_polygon(end[0], end[1], heading,
+                                          depth_ft=VEHICLE_SIGNAL_HEAD_WIDTH_FT,
+                                          width_ft=VEHICLE_SIGNAL_HEAD_WIDTH_FT))
+        for footprint, style in PROP_MARKERS.get(kind, ((None, EXTRA_PROP_MARKER),)):
+            key = tuple(sorted(style.items()))
+            if footprint is None:
+                marker_points.setdefault(key, []).append((x, y))
+            elif footprint.disc:
+                discs_by_style.setdefault(key, []).append(((x, y), footprint.across_ft))
+            else:
+                footprints_by_style.setdefault(key, []).append(
+                    pad_polygon(x, y, heading, depth_ft=footprint.along_ft,
+                                width_ft=footprint.across_ft))
 
-    _draw(ax, arms, color="black", linewidth=1.6, capstyle="round", zorder=7)
+    _draw(ax, arms, color="black", zorder=7)
+    _draw(ax, heads, color="#151515", zorder=7)
     _draw(ax, pads, color=TACTILE_PAD_COLOR, alpha=0.85, zorder=8,
           boundary=dict(color="black", linewidth=0.5, zorder=8))
+    for style, footprints in footprints_by_style.items():
+        _draw(ax, footprints, **dict(style))
+    for style, discs in discs_by_style.items():
+        _draw_discs(ax, discs, **dict(style))
     _scatter_groups(ax, marker_points)
 
     if dimension_labels:
@@ -622,12 +849,25 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
 
     _draw(ax, [pavement], color="#d9d9d9", zorder=2)
 
-    # Real OSM sidewalk centerlines, drawn behind everything else. These are what the
-    # crossing ways actually connect to, and they bound where the curb can possibly be
+    # Real OSM sidewalk footways, drawn behind everything else. These are what the crossing ways
+    # actually connect to, and they bound where the curb can possibly be
     # (src/geometry/model/context.py:sidewalk_span_ft) - so having them on the plot is what makes
     # an over-wide leg visible instead of merely arguable.
-    _draw(ax, sidewalk_lines_ft(sidewalks), color="steelblue", linewidth=1.0,
-          linestyle=(0, (4, 2)), alpha=0.65, zorder=2)
+    #
+    # AS A BAND, SIDEWALK_WIDTH_FT wide, because a footway is a strip of ground and a 1.0 pt line
+    # was a strip whose width was the window's. TWO CAVEATS, both live:
+    #   * OSM maps a footway as a CENTRELINE and almost never tags a width, so the 6 ft is
+    #     assumed. Hence the dashed edge - the same thing this sheet already says about a
+    #     driveway widened from a centreline (PAVED_EDGE_ASSUMED).
+    #   * It is NOT the band the 3D render builds. That one is build_sidewalk_pieces, widened
+    #     from the traced KERB rather than from the footway layer, so where OSM's footway does not
+    #     run parallel to the kerb the two are in different places. Both are real; neither is a
+    #     copy of the other, and conflating them would draw one and label it the other.
+    _draw(ax, [line.buffer(SIDEWALK_WIDTH_FT / 2, cap_style=2, join_style=2)
+               for line in sidewalk_lines_ft(sidewalks)],
+          color="steelblue", alpha=0.16, zorder=2,
+          boundary=dict(color="steelblue", linewidth=0.8, linestyle=(0, (4, 2)), alpha=0.65,
+                        zorder=2))
 
     # Curb lines as the corners trim them. The raw lines overshoot into the junction on
     # purpose (fillet material), so drawing them raw would draw curb across the middle of
@@ -644,6 +884,12 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
             labels.dimension(f"{leg.curb_to_curb_ft:.1f} ft", (mid.x, mid.y), fontsize=7,
                              toward=_leg_heading(leg, along_ft), color=PLOT_STYLE[tier]["color"],
                              bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.75))
+    # STILL A LINE ON THE SHEET, deliberately, where the TRACED kerb beside it is now a 0.49 ft
+    # body. This is not a kerb: it is the config's claim about where one is, half a nominal width
+    # off the alignment, and PLOT_STYLE draws it in three weights and dashes to say which tier of
+    # evidence that claim rests on. Given a real body all three would read alike and the claim
+    # would be gone - the same reason the crossing reference line and the centreline datum keep
+    # theirs. Where this and the traced kerb disagree is the finding.
     for tier, curbs in curbs_by_tier.items():
         _draw(ax, curbs, linewidth=2, zorder=3, **PLOT_STYLE[tier])
 
@@ -662,7 +908,12 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
                              toward=(mid.x - model.center_ft.x, mid.y - model.center_ft.y),
                              color="darkorange", fontweight="bold",
                              bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85))
-    _draw(ax, arcs, color="darkorange", linewidth=2.5, zorder=4)
+    # AT THE KERB WIDTH, because a corner fillet IS a kerb: src/render/export.py writes each arc
+    # into the kerb list as RAISED, and blender_scene.py builds it at KERB_WIDTH_M like any other.
+    # Kept darkorange rather than black, which is what says this one is solved geometry and not a
+    # traced way - the radius label beside it is the other half of that.
+    _draw(ax, [arc.buffer(KERB_WIDTH_FT / 2, cap_style=2, join_style=2) for arc in arcs],
+          color="darkorange", zorder=4)
 
     # Asked of the treatments, which build their polygon against this design - see
     # src/render/export.py's note on why these two are not materialised onto the state.
@@ -677,6 +928,10 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
                              color="darkgreen", fontweight="bold")
 
     raised_bands = [t.polygon(state) for t in state.treatments_of(RaiseCrossing)]
+    # THE ONE HATCH LEFT, and it is not paint. A raised crossing is BUILT GROUND - the band is
+    # already drawn at its real extent, and what the hatch says is that the ground is higher,
+    # which is the same thing KERB_DASHES_FT says about a kerb and the same thing a plan cannot
+    # draw. There are no strokes on it to lay at a real width; inventing some would paint a ramp.
     _draw(ax, raised_bands, color="slateblue", alpha=0.35, hatch="//", zorder=2,
           boundary=dict(color="slateblue", linewidth=1, zorder=2))
     if dimension_labels:
@@ -709,24 +964,34 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     by_kind: dict[markings.PaintKind, list] = {}
     bollards = []
     for piece in paint:
-        # A flex post is an object, not paint, and is drawn as a marker below. Asked of the
+        # A flex post is an object, not paint, and is drawn as a post below. Asked of the
         # marking rather than matched against its name - see markings.Role.
         if piece.kind.is_object:
             bollards.append(piece.geometry.centroid)
         else:
-            by_kind.setdefault(piece.kind, []).append(piece.geometry)
-    for kind, geometries in by_kind.items():
+            by_kind.setdefault(piece.kind, []).append(piece)
+    keep_off_rims = _hatch_keep_off(paint)
+    for kind, pieces in by_kind.items():
         style = PAINT_STYLE[kind]
         # A zone that covers ground gets its outline drawn too; a line has no boundary. Asked
         # of the marking, not of the geometry: a bollard is stored as a degenerate polygon, so
         # the geometry test answered "fill" for something that is neither.
         edge = (dict(color=PAINT_FILL_EDGE[style["color"]], linewidth=1, zorder=3)
                 if kind.covers_area else None)
-        geometries, style = _at_real_width(kind, geometries, style)
-        _draw(ax, geometries, boundary=edge, **style)
+        geometries, body_style = _at_real_width(kind, [piece.geometry for piece in pieces], style)
+        _draw(ax, geometries, boundary=edge, **body_style)
+        if kind.is_fill:
+            # The paint inside the wash, at the spacing and width the render lays it - see
+            # _hatch_strokes_ft. In the zone's own rim colour, because on the ground the rim and
+            # the strokes are one striper's pass.
+            _draw(ax, _hatch_strokes_ft(pieces, state, model.center_ft, keep_off_rims),
+                  color=PAINT_FILL_EDGE[style["color"]], zorder=3)
     if bollards:
-        ax.scatter([p.x for p in bollards], [p.y for p in bollards],
-                   color=BOLLARD_PLAN_COLOR, marker="o", s=10, zorder=6)
+        # The same flex post the props list stands in a daylight zone, at the same real diameter.
+        # These come from the treatment layer's own paint (see _draw_props); drawing the two at
+        # different sizes would say they are different objects.
+        _draw_discs(ax, [((point.x, point.y), 2 * BOLLARD_RADIUS_FT) for point in bollards],
+                    color=BOLLARD_PLAN_COLOR, zorder=6)
 
     if dimension_labels:
         _label_paint(labels, state, paint, scene.kerb_openings)
@@ -1001,14 +1266,18 @@ def legend_handles():
         Line2D([0], [0], color="black", lw=2, label="Curb line - FIELD-MEASURED width"),
         Line2D([0], [0], color="darkviolet", lw=2, ls="-.", label="Curb line - OSM-derived width"),
         Line2D([0], [0], color="crimson", lw=2, ls="--", label="Curb line - estimated width"),
-        Line2D([0], [0], color="black", lw=2.2, label="Traced kerb - RAISED (OSM kerb=raised)"),
-        Line2D([0], [0], color="black", lw=1.1, ls="--",
-               label="Traced kerb - LOWERED: a vehicle crosses, so the paint opens"),
+        # ONE WEIGHT FOR BOTH, because both kerbs are one width on the ground (KERB_WIDTH_FT).
+        # What the dashes say is a HEIGHT, which is what a plan cannot draw - see KERB_DASHES_FT.
+        Line2D([0], [0], color="black", lw=1.8, label="Traced kerb - RAISED (OSM kerb=raised)"),
+        Line2D([0], [0], color="black", lw=1.8, ls="--",
+               label="Traced kerb - LOWERED (same width, dropped): a vehicle crosses, so the "
+                     "paint opens"),
         Patch(facecolor="#8a7a68", alpha=0.55, edgecolor="#5d5044",
                label="Parking lot / street traced BOTH sides - outline as surveyed"),
         Patch(facecolor="#8a7a68", alpha=0.55, edgecolor="#5d5044", linestyle="--",
                label="Driveway, aisle, street part-traced - width DRAWN is assumed"),
-        Line2D([0], [0], color="steelblue", lw=1, ls=(0,(4,2)), label="OSM sidewalk centerline"),
+        Patch(facecolor="steelblue", alpha=0.16, edgecolor="steelblue", linestyle="--",
+               label="OSM sidewalk - mapped as a centreline, drawn 6 ft wide (ASSUMED)"),
         Line2D([0], [0], color="#3b6ea5", lw=0.9, ls=(0,(7,3,1,3)), label="Leg centerline (widths measured from this)"),
         Line2D([0], [0], color="gold", lw=1.2, label="Centerline paint (double yellow / dashed)"),
         Line2D([0], [0], color="white", lw=1.6,
@@ -1028,9 +1297,10 @@ def legend_handles():
                 label="Corner fillet / curb extension face (radius labeled)"),
         Line2D([0], [0], color="seagreen", lw=6, alpha=0.6, label="Pedestrian refuge island"),
         Line2D([0], [0], color="slateblue", lw=6, alpha=0.35, label="Raised crossing"),
-        Patch(facecolor="gold", alpha=0.5, hatch="//", edgecolor="goldenrod", label="Lane narrowing / corner hatching"),
+        Patch(facecolor="gold", alpha=0.5, edgecolor="goldenrod",
+               label="Lane narrowing / corner hatching - wash, with the real strokes on it"),
         Line2D([0], [0], color="goldenrod", lw=1.5, label="Lane narrowing - line only (no chevron fill)"),
-        Patch(facecolor="orangered", alpha=0.40, hatch="xx", edgecolor="orangered",
+        Patch(facecolor="orangered", alpha=0.40, edgecolor="orangered",
                label="Daylighting - no parking (R.S. 39:4-138)"),
         Patch(facecolor="peru", alpha=0.6, edgecolor="saddlebrown", label="Mountable apron"),
         # One row for both kinds: the dotted extension is the same paint, and the dashes are in
@@ -1041,8 +1311,8 @@ def legend_handles():
                label="Bike lane - green surface"),
         Patch(facecolor="slategrey", alpha=0.18, edgecolor="slategrey",
                label="Bike lane - EXISTING, unpainted asphalt"),
-        Patch(facecolor="mediumseagreen", alpha=0.35, hatch="\\\\", edgecolor="seagreen",
-               label="Bike lane buffer"),
+        Patch(facecolor="mediumseagreen", alpha=0.35, edgecolor="seagreen",
+               label="Bike lane buffer - the hatched one; the lane itself is unstriped green"),
         Line2D([0], [0], color="goldenrod", lw=1.3, ls="--",
                label="Two-way bike lane - contraflow divider (MUTCD yellow)"),
         # The two ends of the facility (MUTCD 9E.11, 9E.09 - STANDARDS.md section 2). The box is

@@ -13,10 +13,12 @@ of each.
 """
 from dataclasses import dataclass, field
 
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 
 from src.geometry.model import build_pavement_polygon
-from src.render.crosswalks import (_match_crossings_to_legs,CROSSWALK_DEPTH_FT, crosswalk_bands_ft, crosswalk_reaches_ft,
+from src.geometry.coverage import CONTROL_NEAR_NODE_FT
+from src.render.coords import wgs84_to_state_plane
+from src.render.crosswalks import (_match_crossings_to_legs, CROSSWALK_DEPTH_FT, crosswalk_bands_ft, crosswalk_reaches_ft,
                                    resolve_crosswalk_offsets, resolve_crosswalk_skews,
                                    resolve_stop_bar_offsets, stop_bar_bands_ft)
 from src.sources.osm_context import fetch_stop_lines
@@ -33,6 +35,73 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
 STOP_LINE_RADIUS_M = 130
 
 
+def junction_is_signalized(model, leg_crossing_tags=(), traffic_control=None) -> bool:
+    """Is this junction signalized? A site's own observation where it made one, else OSM's.
+
+    THE PRECEDENCE IS `centerline_style`'s (src/geometry/treatments/state.py:from_model): config
+    is an eyes-on observation and wins BY BEING PRESENT, not by being true - a site that looked
+    and found no signal writes no `signals` block, so an absent key is silence rather than a
+    denial, and OSM answers it. Read as the whole answer it was a branch a crop of the network
+    always took the empty side of: a window has no config at all
+    (src/geometry/network/slice_design.py), so Broad x Greenwood - signalized, with four traced
+    stop bars across it - resolved as unsignalized in every drawing that was not a site.
+
+    OSM SAYS IT TWO WAYS AND EITHER IS ENOUGH, because neither is reliably present: 4 of this
+    project's 8 loadable junctions carry `crossing=traffic_signals` on their crossings and
+    lavallette_reese's carries none, while a `highway=traffic_signals` node sits on all 4 of the
+    signalized ones and none of the unsignalized ones.
+
+    `leg_crossing_tags` is the tags of the crossings matched TO THIS MODEL'S OWN LEGS, which is
+    what keeps the question about this junction: the crossings layer is fetched at 130 m and the
+    unfiltered tag picks up a neighbour's signal two junctions away (columbia_princeton sees 2,
+    wbroad_lanning 1). `traffic_control` is the node layer the renderers already hold; the same
+    130 m would false-positive columbia_princeton off a node 127 m away, so it is passed in at
+    the radius its owner chose rather than re-fetched here at a third one.
+    """
+    if "signals" in getattr(model, "config", {}):
+        return bool(model.config["signals"])
+    return (any(tags.get("crossing") == "traffic_signals" for tags in leg_crossing_tags)
+            or any(node["tags"].get("highway") == "traffic_signals"
+                   for node in traffic_control or ()))
+
+
+def _legs_that_may_derive_a_bar(model, matched: dict, traffic_control=None) -> frozenset | None:
+    """The legs a bar may be INVENTED for, or None where every leg may.
+
+    ONE BOOLEAN CANNOT ANSWER THIS FOR A WINDOW. A site is one junction, so "is this junction
+    signalized" licenses the whole model; a crop of the network holds several, and the single
+    answer painted a derived stop bar across E Broad St at Broad x Blackwell - which OSM does not
+    signalize - because Broad x Greenwood, three legs away in the same model, does.
+
+    So the evidence is read PER LEG: this leg's own matched crossing tagged
+    `crossing=traffic_signals`, or a `highway=traffic_signals` node standing at this leg's
+    junction end. CONTROL_NEAR_NODE_FT is the measured "this node belongs to this junction"
+    distance (src/geometry/coverage.py - 15-43 ft for a node that does against 250 ft for one
+    that does not), rather than a third radius invented here.
+
+    None for a site, so a configured `signals` block keeps licensing the junction as a whole and
+    no site export moves: a config is an eyes-on observation of the junction, and asking it to be
+    re-evidenced leg by leg would discard it.
+    """
+    if "signals" in getattr(model, "config", {}):
+        return None if model.config["signals"] else frozenset()
+    nodes = [node for node in traffic_control or ()
+             if node["tags"].get("highway") == "traffic_signals"]
+    out = set()
+    for leg_name, leg in model.legs.items():
+        entry = matched.get(leg_name)
+        if entry is not None and entry[4].get("crossing") == "traffic_signals":
+            out.add(leg_name)
+            continue
+        mouth = leg.centerline.interpolate(0.0)
+        # lon/lat, as every control node in this project's layers carries them - the node
+        # fetchers emit {"lon", "lat", "tags"}, not the {"coords_wgs84"} a WAY carries.
+        if any(mouth.distance(Point(*wgs84_to_state_plane.transform(node["lon"], node["lat"])))
+               <= CONTROL_NEAR_NODE_FT for node in nodes):
+            out.add(leg_name)
+    return frozenset(out)
+
+
 @dataclass(frozen=True)
 class SceneGeometry:
     """Every marking position one DesignState implies, resolved once and shared.
@@ -40,9 +109,10 @@ class SceneGeometry:
     Frozen on purpose: a consumer that could adjust one field in passing is how the three
     views drift apart.
 
-    `stop_bar_offsets` and `stop_bar_bands` are empty for an unsignalized junction - a stop
-    bar is only drawn where the site config declares a `signals` block, the same gate
-    src/render/props.py uses for the signal hardware itself.
+    `stop_bar_offsets` and `stop_bar_bands` carry every bar OSM has traced across an approach,
+    signalized or not, plus one derived per untraced approach at a junction
+    junction_is_signalized() calls signalized. So they are empty only where nobody traced a bar
+    AND nothing says there is a signal.
     """
     model: object
     state: object
@@ -72,7 +142,8 @@ class SceneGeometry:
     @classmethod
     def resolve(cls, model: "IntersectionModel", state: "DesignState", crossings: list[dict],
                  stop_lines: list[dict] | None = None, pavement=None,
-                 kerb_ways: list[dict] | None = None) -> "SceneGeometry":
+                 kerb_ways: list[dict] | None = None,
+                 traffic_control: list[dict] | None = None) -> "SceneGeometry":
         """Resolve one scenario's marking geometry. `crossings` is the fetched OSM layer.
 
         The order below is a real dependency chain, which is the other reason this belongs in
@@ -108,17 +179,19 @@ class SceneGeometry:
         reaches = crosswalk_reaches_ft(state, offsets, skews, pavement, marked)
         bands = crosswalk_bands_ft(state, offsets, skews, CROSSWALK_DEPTH_FT, pavement, reaches)
 
-        # A TRACED STOP BAR IS A PAINTED STOP BAR, signalized or not. The `signals` block only
-        # licenses DERIVING one for an approach nobody traced, which is why it is now passed to
-        # the resolver rather than gating the whole call: as a gate it discarded the four
-        # surveyed bars at Broad x Greenwood whenever the drawing was a crop with no site config.
-        # Still only FETCHED at a signalized junction, so an unsignalized site adds no Overpass
-        # round trip it did not make before - a supplied layer is used whenever it is given.
-        signalized = bool(model.config.get("signals"))
-        if stop_lines is None and signalized:
+        # A TRACED STOP BAR IS A PAINTED STOP BAR, signalized or not - so THE LAYER IS NOT GATED
+        # AT ALL. Only the DERIVATION, hanging a bar off a crosswalk offset for an approach
+        # nobody traced, is a claim a junction has to earn; that gate moved into the resolver,
+        # and this fetch was left behind holding the other half of it. Gated, a caller that
+        # supplies no layer gets no bars whatever OSM traced, which is how the four surveyed bars
+        # at Broad x Greenwood stayed off every drawing of it that was not a site. Not a round
+        # trip either way: this is a view of the same cached snapshot the crossings above came
+        # from (src/sources/osm_context.py:_layer).
+        if stop_lines is None:
             stop_lines = fetch_stop_lines(model.center_wgs84, radius_m=STOP_LINE_RADIUS_M)
-        stop_bar_offsets = resolve_stop_bar_offsets(state, offsets, stop_lines,
-                                                     derive_unsurveyed=signalized)
+        stop_bar_offsets = resolve_stop_bar_offsets(
+            state, offsets, stop_lines,
+            derive_for_legs=_legs_that_may_derive_a_bar(model, matched, traffic_control))
         from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
         from src.geometry.surveyed import surveyed_crossings_in_frame
 

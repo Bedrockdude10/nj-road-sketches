@@ -11,7 +11,7 @@ from src.geometry.intersection import IntersectionModel
 from src.checks import PAD_MAX_DISTANCE_FROM_CURB_FT, _all_curb_lines
 from src.geometry.model import bollard_points_ft, build_pavement_polygon, leg_clearance_ft
 from src.geometry.treatments import DesignState
-from src.render.coords import wgs84_to_state_plane
+from src.render.coords import FT_TO_M, wgs84_to_state_plane
 
 STREETLIGHT_SIDEWALK_SETBACK_FT = 4
 SIGN_SIDEWALK_SETBACK_FT = 3
@@ -69,6 +69,52 @@ TACTILE_PAD_WIDTH_FT = 3.0
 PAD_MAX_STEP_FT = 12.0   # past this, the modelled pavement has swallowed the footway
                               # over a much wider radius for context, and three of Columbia &
                               # Princeton's 'ramps' were 350+ ft away at a different junction
+
+
+# ---- How big each prop IS, as opposed to where it stands --------------------------------
+# The 3D render builds every prop at a real size. The plan view has to draw the same object at
+# the same size, or how big a signal pole looks is a fact about the window rather than about the
+# street - so both views read these, and a pad is not the only prop whose geometry has to agree
+# with its placement.
+#
+# Each one mirrors a constant of the same name in scripts/blender/blender_props.py. That module
+# runs in Blender's own interpreter and cannot be imported here (.importlinter), so the two are a
+# copy by necessity - the pair that drifts silently - and
+# tests/test_props.py:test_prop_dimensions_match_the_3d_builders pins them against each other by
+# AST, the way the stroke widths already are.
+#
+# Written as the metre figure the builder passes to bpy, divided out. A hand-rounded 0.131 ft
+# would be a THIRD figure, and the rounding is where the drift starts. A RADIUS stays a radius
+# and a WIDTH a width, matching the call that uses it: a cylinder takes radius=, a cube takes a
+# scale, and converting between them on the way across is how a prop gets drawn at twice its size.
+SIGN_POST_RADIUS_FT = 0.04 / FT_TO_M
+SIGN_PLATE_THICKNESS_FT = 0.03 / FT_TO_M
+STOP_SIGN_PLATE_RADIUS_FT = 0.3 / FT_TO_M
+YIELD_SIGN_PLATE_RADIUS_FT = 0.38 / FT_TO_M
+BIKE_WARNING_PLATE_RADIUS_FT = 0.38 / FT_TO_M
+SCHOOL_ZONE_PLATE_RADIUS_FT = 0.35 / FT_TO_M
+# The two rectangular white plates - NO TURN ON RED (R10-11) and the turn-box R9-23 - are one
+# builder in 3D, so they are one size here. They are told apart by colour, which is all a plan
+# view of two identical plates can honestly do.
+RECTANGULAR_PLATE_WIDTH_FT = 0.3 / FT_TO_M
+RECTANGULAR_PLATE_THICKNESS_FT = 0.02 / FT_TO_M
+RRFB_PLATE_WIDTH_FT = 0.4 / FT_TO_M
+RRFB_PLATE_THICKNESS_FT = 0.03 / FT_TO_M
+RRFB_POST_RADIUS_FT = 0.05 / FT_TO_M
+PUSHBUTTON_POST_RADIUS_FT = 0.04 / FT_TO_M
+PUSHBUTTON_HOUSING_WIDTH_FT = 0.13 / FT_TO_M
+PUSHBUTTON_HOUSING_DEPTH_FT = 0.06 / FT_TO_M
+# The head's own short post (0.05 m) stands inside this in plan, so only the head is drawn.
+PED_SIGNAL_HEAD_WIDTH_FT = 0.28 / FT_TO_M
+TRAFFIC_SIGNAL_POLE_RADIUS_FT = 0.1 / FT_TO_M
+MAST_ARM_RADIUS_FT = 0.05 / FT_TO_M
+VEHICLE_SIGNAL_HEAD_WIDTH_FT = 0.32 / FT_TO_M
+HYDRANT_RADIUS_FT = 0.09 / FT_TO_M
+BOLLARD_RADIUS_FT = 0.05 / FT_TO_M
+# NO STREETLIGHT SIZE EXISTS ANYWHERE IN THIS REPO. add_streetlight imports an external Poly
+# Haven glTF, and the procedural fallback beside it says in its own docstring that it is "not
+# what ships" - so measuring that fallback would be publishing a figure for an object the render
+# does not build. The plan view draws a streetlight as a marker until somebody states a size.
 
 
 def _merged_crossing_tags(line: LineString, crossing_tags: dict, nodes_ft: list[dict]) -> dict:

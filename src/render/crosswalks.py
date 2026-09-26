@@ -534,15 +534,22 @@ def match_stop_lines_to_legs(legs: dict, stop_lines: list[dict]) -> dict:
 
 def resolve_stop_bar_offsets(state: DesignState, crosswalk_offsets: dict[str, tuple[float, str]],
                               stop_lines: list[dict] | None = None,
-                              derive_unsurveyed: bool = True) -> dict[str, float]:
+                              derive_for_legs: frozenset | None = None) -> dict[str, float]:
     """{leg_name: offset_ft} - where an approach's stop bar sits.
 
-    A SURVEYED BAR DRAWS WHEREVER IT IS PAINTED. `derive_unsurveyed` governs only the fallback
+    A SURVEYED BAR DRAWS WHEREVER IT IS PAINTED. `derive_for_legs` governs only the fallback
     below - hanging a bar off a crosswalk offset for an approach nobody traced - which is a
     claim a junction has to earn by being signalized. The two were one gate, in the caller, and
     it threw away real data: a crop of the network has no site config to declare signals, so
     four traced `road_marking=stop_line` ways at Broad x Greenwood were handed to this function
     and never asked for.
+
+    PER LEG, and `None` for "every leg", because a WINDOW HOLDS SEVERAL JUNCTIONS and one
+    boolean cannot speak for them. Licensing the whole model off one junction's signals painted
+    a derived bar across E Broad St at Broad x Blackwell, which OSM does not signalize, because
+    Broad x Greenwood three legs away in the same model does. A site stays `None`: its config is
+    an eyes-on observation of the junction as a whole, and re-evidencing it leg by leg would
+    throw that away. See scene._legs_that_may_derive_a_bar for where the set comes from.
 
     Prefers the SURVEYED position: a road_marking=stop_line way is the painted bar itself, so
     its distance along the leg is the answer, not something to infer. Ten are mapped across
@@ -561,7 +568,7 @@ def resolve_stop_bar_offsets(state: DesignState, crosswalk_offsets: dict[str, tu
         min_offset_ft = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
         line = surveyed.get(leg_name)
         if line is None:
-            if not derive_unsurveyed:
+            if derive_for_legs is not None and leg_name not in derive_for_legs:
                 continue   # nobody traced one here and nothing licenses inventing it
             # NOTHING STOPS ON A LEG TRAFFIC LEAVES BY. The derivation below hangs a bar off
             # every leg that has a crosswalk, which is right on a two-way street because every

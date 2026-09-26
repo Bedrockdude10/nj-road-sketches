@@ -121,9 +121,10 @@ def surveyed_crossings_in_frame(model: "IntersectionModel", crossings: list[dict
     leg match on that list's identity).
 
     Fetched otherwise from CROSSING_CONTEXT_RADIUS_M taken THROUGH context_radius_m, so the search
-    widens with the frame as the kerbs, roads and driveways already do. src/render/export.py and
-    src/render/plan_view.py still fetch crossings at a flat 130 m (426.5 ft), narrower than the
-    2.5x frame's 431.2 ft reach, and every step past 2.5x widens that gap.
+    widens with the frame as the kerbs, roads and driveways already do. That is a DIFFERENT number
+    from the one the two renderers fetch crossings at, which is frame_covering_radius_m - the reach
+    to the sheet's own corner, 242.3 m at Broad & Greenwood at 3x. The two agree about the frame
+    and not about how far past it to look, and only the wider one is guaranteed to cover the sheet.
     """
     frame = junction_frame(model)
     if crossings is None:
@@ -133,8 +134,11 @@ def surveyed_crossings_in_frame(model: "IntersectionModel", crossings: list[dict
         from src.render.frame import context_radius_m
         from src.sources.osm_context import fetch_crossings
 
-        crossings = fetch_crossings(model.center_wgs84,
-                                    radius_m=context_radius_m(CROSSING_CONTEXT_RADIUS_M))
+        # The centre goes in so a drawing that declared no reach of its own is not served the last
+        # site's - src/render/frame.py:_reach_for.
+        crossings = fetch_crossings(
+            model.center_wgs84,
+            radius_m=context_radius_m(CROSSING_CONTEXT_RADIUS_M, model.center_wgs84))
     traced = []
     for record in crossings:
         line = _traced_line_ft(record)
