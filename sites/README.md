@@ -46,7 +46,13 @@ intersection:
   existing_marked_crosswalks: [...]   # leg names that currently have ANY marked crosswalk (checked against
                                        # real imagery/knowledge, not assumed)
 
-corridor:                             # free-form - corridor-level facts from an SLD or similar, for reference
+corridor:                             # NOT a dumping ground. A key belongs here if something READS it, or
+                                       # if it is a MEASUREMENT with no other home (the sld_* figures come off
+                                       # NJDOT straight-line diagrams and exist nowhere else). A key that
+                                       # restates an OSM tag does not belong: OSM is the source, and a second
+                                       # copy here is a fact that can go stale silently. Ten such keys -
+                                       # lanes, one_way, truck_route, turn_lanes, functional_class,
+                                       # jurisdiction and the rest - were deleted for exactly that reason.
   ...
 
 legs:

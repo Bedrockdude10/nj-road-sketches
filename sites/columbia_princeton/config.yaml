@@ -60,9 +60,7 @@ intersection:
     ["columbia_ave_west", "columbia_ave_east", "princeton_ave_north", "princeton_ave_south"]
 
 corridor:
-  jurisdiction: "County"   # Princeton Ave is CR 569; Columbia Ave is a borough local road
   speed_limit_mph: 25      # OSM maxspeed=25 mph on both streets
-  lanes: 2                 # OSM lanes=2 on both streets
 
 legs:
   princeton_ave_north:

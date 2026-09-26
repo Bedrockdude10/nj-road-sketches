@@ -56,9 +56,7 @@ intersection:
   existing_marked_crosswalks: ["louellen_st_west"]
 
 corridor:
-  jurisdiction: "County"
   speed_limit_mph: 25   # OSM maxspeed=25 mph on both W Broad St ways; Louellen St is 30 mph
-  lanes: 2              # OSM lanes=2 on both W Broad St ways (Louellen St untagged)
   sld_pavement_width_ft: 48  # Route 518 nominal/segment-average - see legs.*.curb_to_curb_ft
   # RESOLVES an open question in the inventory. LIMITATIONS.md section 7 flags
   # "Louellen Street is tagged CR 518 in OSM and that looks wrong - CR 518 is the

@@ -52,10 +52,8 @@ intersection:
   existing_marked_crosswalks: ["w_broad_st_northeast", "n_lanning_ave_north", "s_lanning_ave_south"]
 
 corridor:
-  jurisdiction: "County"
   speed_limit_mph: 25   # OSM maxspeed=25 mph on West Broad Street way 27459436. Both Lanning
                         # Avenue ways are untagged.
-  lanes: 2              # OSM lanes=2 on all three ways
   # NO sld_pavement_width_ft. The other Broad St sites carry 48 ft from the Route 518 segment
   # average, and it does not apply here: this is CR 654, a different SRI, and the traced kerbs
   # below put the real roadway at 32-33 ft. A 48 ft nominal would size every offset on this

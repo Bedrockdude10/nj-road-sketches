@@ -71,17 +71,7 @@ intersection:
   existing_marked_crosswalks: ["princeton_ave_south", "e_prospect_st_east", "e_prospect_st_west"]
 
 corridor:
-  jurisdiction: "County (Princeton Ave, CR 569) x local (East Prospect St, borough)"
   speed_limit_mph: 25          # OSM maxspeed=25 mph on Princeton Ave
-  lanes: 2                     # OSM lanes=2
-  functional_class: "Rural Major Collector"   # OSM HFCS on Princeton Ave
-  truck_route: >
-    NJDOT designated state truck network - Princeton Ave carries hgv=designated and
-    hgv:state_network=yes, sourced in OSM to NJDOT's chapter 32 truck access rules. The
-    binding constraint on any cross-section here; see the header note.
-  parking: >
-    Princeton Ave carries parking:both:restriction=no_parking for its whole length in the
-    borough, so there is no on-street parking to reclaim or to displace at this junction.
   old_name: "Union Avenue"     # OSM old_name on Princeton Ave - useful for archive searches
 
 legs:

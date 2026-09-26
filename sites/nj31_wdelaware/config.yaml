@@ -57,16 +57,12 @@ intersection:
     ["nj31_north", "nj31_south", "w_delaware_east", "w_delaware_west"]
 
 corridor:
-  jurisdiction: "State (NJ 31, SRI 00000031__) x local (Pennington Boro / Hopewell Twp)"
   speed_limit_mph: 35      # NJ 31; W Delaware Ave is signed 25 (OSM maxspeed:type=sign)
-  truck_route: "NJDOT designated state truck network - hgv=designated, NHS=STRAHNET"
-  lanes: 3                 # every approach: two through/turn lanes one way, one the other
-  turn_lanes: >
-    OSM records turn:lanes on all four approaches - `left|none` northbound and southbound on
-    NJ 31, and the same on both W Delaware approaches. So each approach has a left-turn
-    pocket, which is where the third lane goes and why these legs are wide for two-lane
-    streets.
 
+# WHY THESE LEGS ARE WIDE FOR TWO-LANE STREETS: OSM records turn:lanes `left|none` on all four
+# approaches, so each carries a left-turn pocket and that is where the third lane goes. Kept as a
+# comment because the key that said it restated the OSM tag, and a second copy of a tag goes stale
+# silently - but the explanation is not in the tag and is not obvious from the widths alone.
 legs:
   nj31_north:
     sri: "00000031__"

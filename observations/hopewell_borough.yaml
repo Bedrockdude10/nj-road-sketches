@@ -1,3 +1,32 @@
 # Field observations for Hopewell Borough - additive OSM tags, format and rules pinned in
-# src/sources/observations.py. Empty for now; the per-site config observations
-# (existing_marked_crosswalks etc.) are being migrated here separately.
+# src/sources/observations.py. An observation is an OSM TAG ON AN OSM ELEMENT, so no consumer
+# downstream ever learns observations exist; it reads the tag.
+#
+# MIGRATED FROM sites/*/config.yaml, where a street-view observation about the street was being
+# kept as a property of OUR MODEL of the street. `support=*` is how OSM says what holds a signal
+# up, and none of the 36 highway=traffic_signals nodes in these snapshots carries one - so this
+# was not a duplicate of an OSM tag, it was the only copy of a fact, filed where OSM could not
+# see it.
+observations:
+  - element: node/104048876
+    tags:
+      support: mast_arm
+    source: >
+      Street-view photo review, Rollo, 2026-07-02, corrected the same day: the first reading
+      called this a short davit arm and it is a full-width mast arm - a horizontal arm from the
+      corner pole out over the roadway, with the 3-section head hanging above the travel lanes,
+      at all 4 corners. NOT a pole-mounted rigid/davit arm, NOT span-wire. A direct visual
+      observation, not a field survey. Migrated verbatim from
+      sites/broad_st_greenwood/config.yaml:signals.pole_type.
+
+# NOT MIGRATED, AND THE REASON MATTERS. ebroad_princeton and wbroad_louellen both record
+# `pole_type` too, and both say in their own words: "UNCONFIRMED. No street-view review has been
+# done for this junction. Mast arm is assumed because that is what was confirmed at the other
+# CR 518 signal in the borough (Broad/Greenwood), not because it was observed here."
+#
+# An assumption written into this file becomes a tag on an OSM element, and every reader
+# downstream would take it for survey. `source` is required here precisely so that cannot
+# happen quietly - there is no honest source line for an inference. They stay in config, marked
+# unconfirmed, until somebody looks. Hopewell's other signal nodes are node/104041625 (E Broad
+# x Princeton Ave) and node/104043149 (W Broad x Louellen St), both verified against the
+# snapshot at 0.0 ft from their junction's centre.

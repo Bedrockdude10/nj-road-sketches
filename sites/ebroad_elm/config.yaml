@@ -37,10 +37,8 @@ intersection:
   existing_marked_crosswalks: ["s_elm_st_south", "e_broad_st_west"]
 
 corridor:
-  jurisdiction: "County"
   speed_limit_mph: 25   # OSM maxspeed=25 mph on East Broad Street and North Elm Street.
                         # South Elm Street is untagged.
-  lanes: 2              # OSM lanes=2 on all four ways
   sld_pavement_width_ft: 48  # Route 518 nominal/segment-average - see legs.*.curb_to_curb_ft,
                               # which are the real widths and are 8-16 ft narrower
 

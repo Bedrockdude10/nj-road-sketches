@@ -52,14 +52,9 @@ intersection:
                                "reese_ave_east", "reese_ave_west"]
 
 corridor:
-  jurisdiction: "State"
-  functional_class: "Urban Principal Arterial"
   # OSM `maxspeed=35 mph` on Grand Central Ave. Note the SB carriageway is posted 45 -
   # the pair is not symmetric, which matters for any turn-speed argument.
   speed_limit_mph: 35
-  lanes: 2
-  one_way: true          # OSM `oneway=yes` on the whole NB carriageway
-  median_type: "None"
   median_width_ft: 0
 
 # EVERY WIDTH BELOW IS MEASURED OFF DANNY'S OWN TRACED KERB, not estimated and not read
@@ -92,7 +87,7 @@ legs:
     # about what ought to be there. Correct this to `none` if a street-view check finds bare
     # asphalt between the lanes.
     centerline_style: single_white_dashed
-    # WHICH WAY that one direction runs, which `corridor.one_way: true` does not say and which
+    # WHICH WAY that one direction runs, which a bare one-way flag does not say and which
     # both the lean of an angled bay and a with-traffic bike lane's arrow need. NJDOT calls SRI
     # 00000035__ "South to North" and OSM tags the whole carriageway `oneway=yes`. Note that
     # BOTH Grand Central legs say "north" while their bearings are 6.6 and 186.7: a leg's

@@ -50,16 +50,12 @@ intersection:
 # east, at the Route 569/Hamilton Ave signal - NOT at Greenwood Ave, unlike OSM's
 # naming, which splits West/East right at Greenwood).
 corridor:
-  jurisdiction: "County"
-  functional_class: "Urban Minor Arterial"
   # 25, not 30 (corrected 2026-08-15). OSM carries maxspeed=25 mph on every Broad St way through
   # the borough - CR 518 and CR 654 alike - and Danny confirms 25 is posted the whole length. The
   # 30 here disagreed with both, and with this project's two other Broad St sites, which already
   # said 25. It matters beyond bookkeeping: speed drives the turn-speed metric, and it is the
   # premise of every traffic-calming argument the proposals make.
   speed_limit_mph: 25
-  lanes: 2
-  median_type: "None"
   median_width_ft: 0
   shoulder_width_ft_per_side: 2
   sld_pavement_width_ft: 48  # nominal/segment-average - see legs.*.curb_to_curb_ft for corner-specific ground truth

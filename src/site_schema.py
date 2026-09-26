@@ -155,18 +155,17 @@ class Leg(Strict):
     #: The compass direction ALL traffic on this leg runs, where the carriageway is one-way.
     #: None means two-way, which is the ordinary case and the default.
     #:
-    #: WHY A LEG AND NOT THE CORRIDOR BLOCK: `corridor:` is free-form by design (see
-    #: SiteConfig.corridor) and nothing derives geometry from it, while this decides which way
-    #: an angled bay leans and which way a with-traffic bike lane points. It is also genuinely
+    #: WHY A LEG AND NOT THE CORRIDOR BLOCK: `corridor:` is free-form and unvalidated (see
+    #: SiteConfig.corridor), while this decides which way an angled bay leans and which way a
+    #: with-traffic bike lane points. It is also genuinely
     #: per leg - at NJ 35 & Reese the two Grand Central approaches are one-way northbound and
     #: the two Reese approaches are two-way, so one key on the junction could not say it.
     #:
     #: AND NOT DERIVABLE FROM `bearing_deg`: both legs of a street point OUTWARD from the
     #: junction by construction, so a one-way street's northern approach runs north and its
     #: southern approach runs north as well - the same compass direction, opposite leg
-    #: directions. That is the whole reason leg_heads_toward exists, and the reason
-    #: `corridor.one_way: true` alone was not enough: it records that there is one direction,
-    #: not which.
+    #: directions. That is the whole reason leg_heads_toward exists, and the reason a bare
+    #: one-way flag was not enough: it records that there is one direction, not which.
     traffic_heads_toward: Literal[VALID_TRAFFIC_DIRECTIONS] | None = None  # type: ignore[valid-type]
     #: Parking as it is on the ground along this leg, or absent where nobody has looked. ABSENT
     #: IS NOT "NO PARKING" - it is "unrecorded", the same distinction SurveyedCrossing.is_marked
@@ -220,9 +219,12 @@ class SiteConfig(Strict):
     intersection: Intersection
     legs: dict[str, Leg] = Field(min_length=2)
     treatments: Treatments
-    # Free-form by design (sites/README.md): corridor-level reference facts off an SLD, for a
-    # human reader. Nothing derives geometry from it, so it is the one section that may carry
-    # whatever a particular source happens to publish.
+    # Free-form and unvalidated by design (sites/README.md): corridor-level reference facts
+    # off an SLD or a survey, the one section that may carry whatever a particular source
+    # happens to publish. NOT inert, so "nothing reads it" is no licence to restate OSM here -
+    # `speed_limit_mph` is read (src/geometry/treatments/state.py) and gates the sharrow. A key
+    # belongs here if something reads it, or if it is a measurement with no other home; a copy
+    # of a tag the pipeline already reads can only go stale against it.
     corridor: dict = {}
     signals: Signals | None = None
     props: Props | None = None

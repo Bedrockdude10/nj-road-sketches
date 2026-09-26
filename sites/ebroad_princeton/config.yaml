@@ -56,13 +56,11 @@ intersection:
   existing_marked_crosswalks: ["e_broad_st_west", "princeton_ave_south"]
 
 corridor:
-  jurisdiction: "County"
   # CR 518 corridor facts carried over from the NJDOT Straight Line Diagram
   # (data/00000518__8.000-11.000.pdf) used for sites/broad_st_greenwood. This
   # junction is on the same route, ~1,050 ft east of Greenwood Ave, so the
   # corridor-level values apply; the per-leg widths below do NOT come from them.
   speed_limit_mph: 25   # OSM maxspeed=25 mph on both East Broad Street and Princeton Avenue
-  lanes: 2              # OSM lanes=2 on both streets
   sld_pavement_width_ft: 48  # Route 518 nominal/segment-average - see legs.*.curb_to_curb_ft
 
 legs:
