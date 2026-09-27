@@ -1028,6 +1028,33 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     return PlotResult(violations=violations, metrics=scene.metrics(paint))
 
 
+def _draw_the_datum(ax, leg, up_to_ft: float) -> None:
+    """The leg's alignment, drawn only where no centerline paint covers it.
+
+    A CONSTRUCTION LINE MAY NOT SIT IN A MARKING'S GAP. This ran the full length of every leg,
+    which put it exactly down the middle of a double yellow - and a double yellow's gap is 0.10 m
+    where this stroke is 0.9 pt, so the stroke is WIDER THAN THE GAP AT EVERY DPI (both scale
+    with the sheet together). Measured on the 300 dpi sheet: gold at x=304-306, gold at
+    x=310-313, and #3b6ea5 at x=308 filling the three pixels between them. The stripes were
+    right and the annotation drawn over them made the 2D disagree with a 3D render that has no
+    datum at all.
+
+    Nothing is lost by stopping where the paint starts: past that station the alignment is
+    visibly BETWEEN the two stripes, which is what the datum was there to show. Where a leg
+    carries no centerline paint it still runs the whole way, which is where it was always
+    needed most - every width in the drawing is an offset from it.
+    """
+    from shapely.ops import substring
+
+    if up_to_ft <= 0:
+        return
+    shown = substring(leg.centerline, 0.0, min(up_to_ft, leg.centerline.length))
+    if shown.is_empty or shown.geom_type != "LineString":
+        return
+    # Thin, blue, dash-dot, and deliberately unobtrusive - it is not a marking on the road.
+    ax.plot(*shown.xy, color="#3b6ea5", lw=0.9, ls=(0, (7, 3, 1, 3)), alpha=0.9, zorder=4)
+
+
 def _draw_centerlines(ax, scene: SceneGeometry):
     """The leg centerline (the measurement datum) and the painted centerline on top of it.
 
@@ -1042,17 +1069,15 @@ def _draw_centerlines(ax, scene: SceneGeometry):
     state = scene.state
     bodies: dict[str, list] = {}
     for leg_name, leg in state.legs.items():
-        # The datum: thin, grey, dotted, the full length of the leg. Deliberately
-        # unobtrusive - it is a construction line, not a marking on the road.
-        ax.plot(*leg.centerline.xy, color="#3b6ea5", lw=0.9, ls=(0, (7, 3, 1, 3)), alpha=0.9,
-                zorder=4)
-
         style = state.centerline_style(leg_name)
-        if style == "none" or leg_name not in scene.crosswalk_offsets:
+        painted = style != "none" and leg_name in scene.crosswalk_offsets
+        start_ft = (centerline_start_ft(scene.crosswalk_offsets[leg_name].offset_ft,
+                                         scene.stop_bar_offsets.get(leg_name),
+                                         leg_name in scene.marked_crosswalks)
+                    if painted else leg.centerline.length)
+        _draw_the_datum(ax, leg, up_to_ft=start_ft)
+        if not painted:
             continue
-        start_ft = centerline_start_ft(scene.crosswalk_offsets[leg_name].offset_ft,
-                                        scene.stop_bar_offsets.get(leg_name),
-                                        leg_name in scene.marked_crosswalks)
         # The stripes themselves come from src/render/crosswalks.py, so this view and the render
         # draw the same paint. Drawn solid whatever the style, because a dashed style arrives as
         # separate dash segments rather than as one line with a pattern on it.
