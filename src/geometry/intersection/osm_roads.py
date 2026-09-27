@@ -13,6 +13,8 @@ from shapely.geometry import LineString, Point
 from src.render.coords import wgs84_to_state_plane
 from src.sources.osm_context import fetch_roads
 from src.geometry.model import (
+    Alignment,
+    leg_bearing_deg,
     line_direction,
     station_offset_many,
 )
@@ -20,10 +22,37 @@ from src.geometry.intersection.junction import RoadSpan
 
 
 
-def _bearing_deg(from_pt, to_pt) -> float:
-    """Compass bearing (0=N, 90=E, clockwise) from from_pt to to_pt."""
-    dx, dy = to_pt[0] - from_pt[0], to_pt[1] - from_pt[1]
-    return (90 - np.degrees(np.arctan2(dy, dx))) % 360
+def _piece_bearing_deg(piece: LineString) -> float:
+    """Which way one split piece points, from its junction end outward.
+
+    THE ONE DERIVATION IS leg_frame.leg_bearing_deg, reached through the Alignment it reads - a
+    piece IS a centreline that starts at the junction, which is all that function asks for. It
+    was written out a second time here, as a compass bearing from the resolved node to the
+    piece's far end, and the two agree exactly: `_snap_to_center` puts every piece's first
+    vertex on that node before it gets here (measured at 0.000 ft over all 34 leg-pieces at the
+    nine sites, at frame scales 1x, 2.5x and 3x), and a chord's bearing is translation-invariant
+    besides.
+
+    Measuring the piece's OWN chord is what makes one call independent of one junction. A window
+    onto the borough document holds several, so a bearing taken from the window's centre would
+    be a fact about where the crop was taken rather than about the street.
+    """
+    return leg_bearing_deg(Alignment(centerline=piece))
+
+
+def _declared_bearing_deg(legs_cfg: dict | None, name: str) -> float | None:
+    """The bearing config.yaml declares for this leg, or None where it declares none.
+
+    CONFIG IS AN OVERRIDE AND IT WINS BY BEING PRESENT - DesignState.centerline_style's
+    precedence, for the same reason: a human's statement outranks what was derived, and the way
+    to say "nothing stated" is to be absent rather than to carry a sentinel that has to be
+    recognised at every reader.
+
+    None is therefore not a default bearing and must not become one. Which HALF of a road a leg
+    is cannot be measured off the road - both halves are there - so an absent declaration is
+    answered by the assignment being forced, or by refusing; see _assign_leg_pieces.
+    """
+    return (legs_cfg or {}).get(name, {}).get("bearing_deg")
 
 
 def _bearing_diff(a: float, b: float) -> float:
@@ -62,15 +91,33 @@ def _snap_to_center(piece, center_ft: Point):
     return affinity.translate(piece, xoff=center_ft.x - x0, yoff=center_ft.y - y0)
 
 
-def _assign_leg_pieces(pieces: list, leg_names: list[str], legs_cfg: dict, center_ft: Point,
+def _assign_leg_pieces(pieces: list, leg_names: list[str], legs_cfg: dict | None = None,
+                        center_ft: Point | None = None,
                         sri: str = "?") -> dict[str, object]:
     """
     Match centerline pieces (all sharing one SRI, split at the intersection) to
-    the configured leg names that reference that SRI, by nearest compass bearing.
+    the leg names that reference that SRI, by nearest compass bearing.
     Generalizes to any number of pieces per SRI (2 for a through road, 1 for a
     dead-end/stub leg) and any intersection shape - nothing here assumes a
-    4-way or perpendicular roads, only that each leg's config entry has an
-    accurate `bearing_deg`.
+    4-way or perpendicular roads.
+
+    A PIECE'S BEARING IS MEASURED, A LEG NAME'S IS DECLARED, and that asymmetry is the whole
+    of this function. `_piece_bearing_deg` reads which way a piece points off the piece; a
+    NAME is a string, so which half of a road it means is the one thing here that no geometry
+    answers - both halves are on the ground and they differ only in what they are called.
+    `bearing_deg` in config.yaml is that label, it is consulted through
+    `_declared_bearing_deg`, and it wins by being present.
+
+    WHERE IT IS ABSENT THE ASSIGNMENT HAS TO BE FORCED, or this refuses. One piece and one
+    name is forced - there is nothing to tell apart - and that is the case a caller with no
+    config has: a window onto the borough document, whose legs carry a street name and nothing
+    else. Two unlabelled names on a through road is not forced, and picking by piece order
+    there is a coin flip that draws an approach's whole treatment on the wrong side of the
+    junction, so it raises with the two bearings that settle it.
+
+    `center_ft` is accepted and no longer read. It was the datum the bearings were taken from,
+    which tied one call to one junction; a piece's own chord is the same number at a
+    configured site (see _piece_bearing_deg) and the right one in a window holding several.
 
     THE COUNTS HAVE TO MATCH, and when they do not it is a config error worth naming.
     A road network splits an SRI at the junction into as many pieces as there are
@@ -93,9 +140,13 @@ def _assign_leg_pieces(pieces: list, leg_names: list[str], legs_cfg: dict, cente
     The leftover piece's bearing is reported because it IS the `bearing_deg` the missing
     leg needs, so the message contains the fix rather than just the diagnosis.
     """
+    bearings = [_piece_bearing_deg(piece) for piece in pieces]
     if len(pieces) != len(leg_names):
-        bearings = [_bearing_deg((center_ft.x, center_ft.y), p.coords[-1]) for p in pieces]
-        declared = ", ".join(f"{n} ({legs_cfg[n]['bearing_deg']:.1f} deg)" for n in leg_names)
+        declared = ", ".join(
+            f"{name} ({stated:.1f} deg)"
+            if (stated := _declared_bearing_deg(legs_cfg, name)) is not None
+            else f"{name} (no bearing_deg declared)"
+            for name in leg_names)
         raise ValueError(
             f"SRI {sri} splits into {len(pieces)} piece(s) at this junction "
             f"(bearings {', '.join(f'{b:.1f}' for b in bearings)} deg) but the config declares "
@@ -108,14 +159,40 @@ def _assign_leg_pieces(pieces: list, leg_names: list[str], legs_cfg: dict, cente
                "a leg on an SRI with no piece here is drawn as nothing at all.")
         )
 
-    assigned = {}
-    remaining_names = list(leg_names)
-    for piece in pieces:
-        far_bearing = _bearing_deg((center_ft.x, center_ft.y), piece.coords[-1])
-        best_name = min(remaining_names, key=lambda n: _bearing_diff(far_bearing, legs_cfg[n]["bearing_deg"]))
-        assigned[best_name] = piece
-        remaining_names.remove(best_name)
-    return assigned
+    # BEST PAIR FIRST, across every (declared leg, piece) at once, rather than walking the
+    # pieces and giving each its nearest name. Those agree wherever the declarations are
+    # unambiguous - measured over the nine sites, every leg beats the runner-up by 71-90 deg -
+    # but the per-piece walk can STRAND a name: the first piece it looks at takes the only
+    # declared candidate left, and a name that would have been a better fit for it is handed a
+    # piece pointing the other way. It could not bite while every leg was required to declare
+    # a bearing, because then the two orders coincide; it bites as soon as some legs declare
+    # one and some do not, which is what making the declaration optional allows.
+    claimed_by: dict[int, str] = {}
+    for _apart, index, name in sorted(
+            (_bearing_diff(bearings[index], stated), index, name)
+            for name in leg_names
+            if (stated := _declared_bearing_deg(legs_cfg, name)) is not None
+            for index in range(len(pieces))):
+        if index in claimed_by or name in claimed_by.values():
+            continue
+        claimed_by[index] = name
+
+    spare_names = [name for name in leg_names if name not in claimed_by.values()]
+    spare_pieces = [index for index in range(len(pieces)) if index not in claimed_by]
+    if len(spare_names) > 1:
+        raise ValueError(
+            f"SRI {sri} carries {len(spare_names)} legs that declare no bearing_deg "
+            f"({', '.join(spare_names)}), and {len(spare_pieces)} of its pieces are unclaimed "
+            f"(bearings {', '.join(f'{bearings[i]:.1f}' for i in spare_pieces)} deg). Which "
+            f"half of a road a leg is cannot be read off the road - both halves are there - so "
+            f"give those legs a `bearing_deg` in config.yaml, using the bearings above. Only a "
+            f"leg left with a single piece needs no declaration.")
+    if spare_names:
+        claimed_by[spare_pieces[0]] = spare_names[0]
+
+    # Keyed in PIECE order, as the per-piece walk left it: a Leg is built per entry by the
+    # caller, so this dict's order is `IntersectionModel.legs`' order.
+    return {claimed_by[index]: piece for index, piece in enumerate(pieces)}
 
 
 # A leg is matched to the OSM way whose geometry it lies along: within this far of the

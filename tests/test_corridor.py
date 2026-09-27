@@ -1294,3 +1294,91 @@ def test_a_route_decision_stops_at_the_town_line():
     # A township is NOT its borough - the names differ by the word that says which government
     # this is, and _street_name (which strips a trailing type off a STREET) would equate them.
     assert BROAD_ST_TWO_WAY_BIKEWAY.legs_on(junction("Hopewell Township")) == []
+
+
+#: The Broad St & Greenwood Ave junction centre, which is also the window the committed slices in
+#: output/slices are cut around (scripts/render_slice.py's own usage line). A LITERAL rather than
+#: the site config's, because these tests are about the model that has NO config to read.
+GREENWOOD_WGS84 = (-74.7619598, 40.389179)
+
+
+def _junction_stating_no_town(center_wgs84=GREENWOOD_WGS84):
+    """A model shaped like the one a WINDOW builds: streets, a centre, and an empty
+    `intersection` block. That is network/slice_design.py's own config, verbatim - a crop of the
+    borough document knows which streets it holds and has never been told which town it is in."""
+    from types import SimpleNamespace
+
+    from shapely.geometry import Point
+
+    return SimpleNamespace(
+        legs={"broad_st_east": object(), "broad_st_west": object()},
+        center_wgs84=None if center_wgs84 is None else Point(*center_wgs84),
+        config={"intersection": {},
+                "legs": {"broad_st_east": {"street_name": "East Broad Street"},
+                         "broad_st_west": {"street_name": "West Broad Street"}}})
+
+
+def test_a_junction_that_states_no_town_is_placed_by_the_boundary_that_contains_it():
+    """THE TOWN GUARD MUST NOT FAIL OPEN, and until this it did on the one path that needed it.
+
+    `intersection.municipality` is a config key, so a model built from the borough document - a
+    window, whose config is `{"intersection": {}}` - answered None, and `_legs_on_route` let a
+    route decision through REGARDLESS OF TOWN. That the committed slices came out right was luck
+    of a kind: scripts/render_slice.py keys `route_decision_for` on the document's own
+    `municipality` column before `apply_to` runs, so the only decision ever offered was the right
+    one. The guard was dead on that path and unenforced on the other.
+
+    It is not a fact the config owns. OSM's admin_level=8 relation says which polygon holds the
+    junction, which is what municipal_limits_ft is already resolved from at load
+    (src/geometry/intersection/municipality.py), and it agrees with the config at 8 of this
+    project's 9 sites - the 9th, lavallette_reese, has no OSM answer at all because its ring is
+    clipped by the snapshot area. So config stays an override that wins BY BEING PRESENT (the
+    precedence DesignState.centerline_style uses) and the boundary answers underneath it.
+    """
+    from src.geometry.treatments.corridor import BROAD_ST_TWO_WAY_BIKEWAY, municipality_of
+
+    window = _junction_stating_no_town()
+    assert municipality_of(window) == "Hopewell Borough"
+    assert BROAD_ST_TWO_WAY_BIKEWAY.legs_on(window) == ["broad_st_east", "broad_st_west"]
+    # AND THE GUARD IS NOW LIVE THERE: the same window refuses another town's Broad Street,
+    # which is the assertion that fails against a guard keyed on config alone.
+    elsewhere = dataclasses.replace(BROAD_ST_TWO_WAY_BIKEWAY, municipality="Lavallette Borough")
+    assert elsewhere.legs_on(window) == []
+
+
+def test_a_junction_in_no_known_town_is_refused_rather_than_treated():
+    """NOBODY CAN SAY WHICH TOWN THIS IS is not a licence to apply a route decision.
+
+    `route_decision_for` already refuses this: the town is a required half of its key and there
+    is no wildcard. The gate in `legs_on` exists because a site's scenarios apply a decision
+    object directly, so it has to refuse the same thing - and an empty list will not do, because
+    that is the answer for "this route does not reach this junction" and CorridorCalming prints
+    "nothing is calmed here" off it. A junction whose town could not be read would be reported as
+    a junction on another street.
+    """
+    from src.geometry.treatments.corridor import BROAD_ST_TWO_WAY_BIKEWAY
+
+    nowhere = _junction_stating_no_town(center_wgs84=None)
+    with pytest.raises(ValueError, match="no town"):
+        BROAD_ST_TWO_WAY_BIKEWAY.legs_on(nowhere)
+
+
+def test_which_town_a_junction_is_in_does_not_depend_on_what_loaded_before_it(monkeypatch):
+    """The boundary fetch asks at ITS OWN radius, not at whatever reach the last load declared.
+
+    `context_radius_m` widens every fetch to cover the longest leg the model being built will
+    draw, and `municipal_boundary_ft` takes that declaration with no centre of its own - correct
+    inside the load that made it, and stale for anyone who asks later. wbroad_lanning declares
+    2,307.5 ft, and after it the same boundary fetch at the window centre below opens a 703.3 m
+    window, falls outside every snapshot area, and raises SiteOutsideSnapshotError. The town a
+    junction is in is not a function of what ran before it in the process.
+    """
+    from src.render import frame
+    from src.geometry.treatments.corridor import municipality_of
+
+    # The state a wbroad_lanning load leaves behind: its own centre has claimed the declaration
+    # (kerb_sources and paved both pass a centre during every load), and the reach is its
+    # 2,307.5 ft southwest leg.
+    monkeypatch.setattr(frame, "_drawn_reach_ft", 2307.5)
+    monkeypatch.setattr(frame, "_drawn_reach_center", (-74.7674488, 40.3861181))
+    assert municipality_of(_junction_stating_no_town()) == "Hopewell Borough"

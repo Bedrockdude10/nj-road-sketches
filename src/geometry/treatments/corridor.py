@@ -42,19 +42,69 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
 
 
 def municipality_of(model: "IntersectionModel") -> str | None:
-    """Which town this junction is in, as its config states it, or None if it does not.
+    """Which town this junction is in: what the site states, else which boundary contains it.
 
     THE SECOND HALF OF A ROUTE'S KEY. A street name alone does not identify a street: nearly
     every New Jersey borough has a Broad Street, so a decision matched on name alone would draw
     one town's bikeway down another town's road the day a second town is modelled - and it would
     draw it correctly-shaped and confidently labelled, which is the expensive kind of wrong.
 
-    None means a PARTIAL MODEL, not a junction in no town: src/site_schema.py requires
-    `intersection.municipality`, so every real config has one and only the deliberately partial
-    test doubles do not. Those keep matching, because refusing them would say "this street is in
-    no town" about an object that simply is not a site.
+    CONFIG WINS BY BEING PRESENT, which is DesignState.centerline_style's precedence: a site that
+    names its town has overridden the survey and no boundary is fetched. Underneath it the
+    OBSERVED fact, because which polygon holds a junction is not a thing a config knows better -
+    OSM's admin_level=8 relation is where `municipal_limits_ft` already comes from
+    (src/geometry/intersection/municipality.py), and measured across this project's nine sites
+    the two agree at eight. The ninth, lavallette_reese, has no OSM answer at all: its ring is
+    clipped by the snapshot area and dropped rather than closed for, which is exactly the case
+    the config key exists to cover, so the key is not redundant and is not going anywhere.
+
+    AND IT IS WHAT MAKES THE GUARD LIVE ON THE DOCUMENT PATH. A model built from a window
+    (network/slice_design.py) carries `{"intersection": {}}` - it knows its streets and has never
+    been told its town - so config alone answered None for every crop and _legs_on_route let any
+    route decision through. Nothing was drawn wrong, because scripts/render_slice.py keys
+    route_decision_for on the document's own `municipality` column before apply_to runs, but the
+    guard was dead there and unenforced everywhere else.
+
+    None now means NOBODY CAN SAY - no stated town and no boundary that contains the centre - and
+    _legs_on_route refuses on it rather than treating the street.
     """
-    return (model.config.get("intersection") or {}).get("municipality")
+    stated = (model.config.get("intersection") or {}).get("municipality")
+    return stated if stated else _containing_municipality(getattr(model, "center_wgs84", None))
+
+
+def _containing_municipality(center_wgs84) -> str | None:
+    """OSM's name for the admin_level=8 polygon holding a point, or None where it cannot say.
+
+    THE CENTRE IS PASSED TO context_radius_m AND IT IS NOT AT municipality.py's OWN CALL. That
+    one reads the radius with no centre, which hands it whatever reach the last
+    `load_intersection_model` declared - right inside the load that declared it, and stale for
+    anyone asking afterwards. A treatment asks afterwards by definition: after wbroad_lanning's
+    load declares its 2,307.5 ft southwest leg, this same fetch at the Broad & Greenwood window
+    centre opens a 703.3 m window, falls outside every snapshot area and raises. Which town a
+    junction is in may not depend on what ran before it in the process - see
+    src/render/frame.py:_reach_for, whose whole point is that a caller passing its own centre is
+    told 0.0 unless the declaration is its own.
+
+    A REFUSED WINDOW IS "CANNOT SAY", NOT A TRACEBACK OUT OF A TREATMENT. Both refusals caught
+    below are about the SNAPSHOT and not about the street - a point no downloaded area covers,
+    or an offline run with that area uncached - and the caller already has the message worth
+    printing: _legs_on_route names the route and says why it will not apply it.
+    """
+    if center_wgs84 is None:
+        return None
+    # Function-level: the intersection package is layered above the treatments, and the sources
+    # layer under both. Same reason as the terminus import in _end_where_it_leaves_town.
+    from src.geometry.intersection.municipality import BOUNDARY_CONTEXT_RADIUS_M
+    from src.render.frame import context_radius_m
+    from src.sources.data_loader import OfflineCacheMiss
+    from src.sources.osm_context import SiteOutsideSnapshotError, fetch_municipality_containing
+
+    try:
+        found = fetch_municipality_containing(
+            center_wgs84, context_radius_m(BOUNDARY_CONTEXT_RADIUS_M, center_wgs84))
+    except (SiteOutsideSnapshotError, OfflineCacheMiss):
+        return None
+    return None if found is None else found[0]
 
 
 def legs_on_road(model: "IntersectionModel", road: str) -> list[str]:
@@ -87,14 +137,30 @@ def same_municipality(one: str, other: str) -> bool:
 
 
 def _legs_on_route(model: "IntersectionModel", road: str, municipality: str) -> list[str]:
-    """`legs_on_road`, refusing a junction in a DIFFERENT town.
+    """`legs_on_road`, refusing a junction in a DIFFERENT town, and one in no known town.
 
     Both route decisions share it, and both mean the same thing by an empty list: this route does
-    not reach this junction, so leave its cross-sections alone. A junction whose config names no
-    town (a partial test double) is not refused - see municipality_of.
+    not reach this junction, so leave its cross-sections alone.
+
+    IT USED TO FAIL OPEN, and the case it failed open on was the whole document: a model with no
+    stated town answered None and the decision applied regardless. With municipality_of reading
+    the boundary too, "no town" stops meaning "not a site" and starts meaning what it says.
+
+    SO IT RAISES, AND AN EMPTY LIST WOULD NOT DO. `route_decision_for` refuses the same lookup -
+    the town is half its key and there is no wildcard - and this gate exists only because a
+    site's scenarios apply a decision object directly, bypassing it. Returning [] would file the
+    refusal under the other meaning above, which CorridorCalming prints "no leg of this junction
+    is on {road}" off: a junction whose town could not be read, reported as a junction on another
+    street. A check that cannot see anything has to say so rather than pass.
     """
     here = municipality_of(model)
-    if here is not None and not same_municipality(here, municipality):
+    if here is None:
+        raise ValueError(
+            f"{road} is a route through {municipality}, and this junction is in no town this "
+            f"project can name: its config states no intersection.municipality and no OSM "
+            f"admin_level=8 boundary contains its centre. A route is (street, town) - applying "
+            f"this one here would be a claim about whose street it is that nothing supports.")
+    if not same_municipality(here, municipality):
         return []
     return legs_on_road(model, road)
 

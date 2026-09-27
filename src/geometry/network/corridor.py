@@ -506,10 +506,22 @@ def corridors_from_models(models: dict[str, "IntersectionModel"]) -> list[Corrid
 
 
 def _municipalities_of(models: dict[str, "IntersectionModel"], pieces: list[dict]) -> tuple[str, ...]:
-    """The towns this chain runs through, in order, without repeats. See Corridor.municipalities."""
+    """The towns this chain runs through, in order, without repeats. See Corridor.municipalities.
+
+    ASKED THROUGH municipality_of AND NOT OFF THE CONFIG, which is what this read twice over.
+    These towns are what `route_decision_for` is keyed on downstream, and the whole point of that
+    key is that it means the same thing at both ends: a chain whose junctions state no town would
+    have come back `()` here and been refused a decision it is entitled to, while the same model
+    resolved fine one layer down. One derivation of "which town is this junction in".
+    """
+    # Function-level: treatments/corridor.py imports `_street_name` from this package, so a
+    # module-level import back would close the cycle. Same back edge, same reason, as the
+    # cross-street import in _build_corridor - see the package docstring.
+    from src.geometry.treatments.corridor import municipality_of
+
     towns: list[str] = []
     for piece in pieces:
-        town = (models[piece["site"]].config.get("intersection") or {}).get("municipality")
+        town = municipality_of(models[piece["site"]])
         if town and town not in towns:
             towns.append(town)
     return tuple(towns)
