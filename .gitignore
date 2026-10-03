@@ -200,16 +200,13 @@ data/
 output/.textures/
 output/.cache/
 
-# The 3D renders themselves: ~3 MB each and growing by one per proposal per site (60 MB
-# across 21 files already). They are regenerable from the committed geometry_*.json by
-# scripts/phase4_render_3d.py, so the reconstruction is preserved in git while the
-# pictures of it are not. Everything else under output/ - the geometry JSON, the phase 2
-# plan views and the phase 3 before/after plots - IS committed: small, diffable, and the
-# 2D plan view is the reviewable artifact this project checks its 3D renders against.
-output/**/phase4_render_*.png
-# Same rule for a slice's 3D still, which render_slice.py --3d writes beside its 2D sheet:
-# the sheet and the geometry JSON are committed, the picture built from them is not.
-output/slices/*_3d.png
+# Every rendered picture under output/ - phase 1-4 plots, before/after sheets, strip
+# diagrams, slice sheets, 3D stills. They are regenerable from the committed
+# geometry_*.json (scripts/build_all.py, phase4_render_3d.py, render_slice.py), and ~25 MB
+# of binary PNG diffs were bloating the repo. The geometry JSON IS committed: small,
+# diffable, and the layer this project diagnoses from (see CLAUDE.md).
+output/**/*.png
+output/*.png
 
 .DS_Store
 .DS_Store
