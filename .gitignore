@@ -200,13 +200,14 @@ data/
 output/.textures/
 output/.cache/
 
-# Every rendered picture under output/ - phase 1-4 plots, before/after sheets, strip
-# diagrams, slice sheets, 3D stills. They are regenerable from the committed
-# geometry_*.json (scripts/build_all.py, phase4_render_3d.py, render_slice.py), and ~25 MB
-# of binary PNG diffs were bloating the repo. The geometry JSON IS committed: small,
-# diffable, and the layer this project diagnoses from (see CLAUDE.md).
+# Everything the scripts write under output/: rendered PNGs and the geometry_*.json /
+# slice *_3d.json exports. All regenerable (scripts/build_all.py, export_all_scenarios.py,
+# render_slice.py), and ~38 MB of binary/JSON churn was bloating the repo. Rebuilding the
+# JSON needs the licensed data/ download, so a clone without it has none until it does.
 output/**/*.png
 output/*.png
+output/**/geometry_*.json
+output/slices/*_3d.json
 
 .DS_Store
 .DS_Store
