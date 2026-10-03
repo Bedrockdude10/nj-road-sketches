@@ -27,6 +27,7 @@ intersection:
   # The town this junction is in, and the key a corridor decision is looked up by
   # (src/geometry/treatments/corridor.py) - street names repeat between towns.
   municipality: "Pennington Borough"
+  osm_area: pennington_borough   # the OSM world this junction is a view onto - sites/osm_areas.yaml
   center_wgs84: [-74.7989728, 40.3272925]
   street1: "NJ 31"
   street2: "West Delaware Avenue"

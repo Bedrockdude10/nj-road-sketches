@@ -229,8 +229,8 @@ def _corners_of(groups: list[dict[str, Leg]], kerb_lines: list[LineString]) -> d
     return corners
 
 
-def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
-                 ) -> tuple[IntersectionModel, DesignState]:
+def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None,
+                 osm_area: str | None = None) -> tuple[IntersectionModel, DesignState]:
     """The (model, state) for one slice, ready for export_scenario or plot_design_state.
 
     `features` is a slice of the document in state-plane feet - what render_slice.slice_around
@@ -296,6 +296,8 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None
     corner_fillets = _corners_of(groups, kerb_lines) if osm is not None else {}
 
     model = IntersectionModel(
+        osm_area=osm_area,
+        osm=osm or {},
         # `legs` is how legs_on_road tells which approaches are on a route, and therefore the
         # only reason a route decision reaches a crop at all. The street's own OSM name, so the
         # document and the decision are keyed on one string.

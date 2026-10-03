@@ -641,6 +641,124 @@ def fetch_municipality_containing(center_wgs84: Point, radius_m: float) -> tuple
     return _layer("municipality", center_wgs84, radius_m, build)
 
 
+class UnknownAreaError(KeyError):
+    """An area name that sites/osm_areas.yaml does not declare."""
+
+
+#: Every layer `osm_layers` returns. The names are the ones consumers already know them by.
+OSM_LAYERS = ("buildings", "crossings", "sidewalks", "driveways", "parking_aisles",
+              "parking_lots", "traffic_control", "street_furniture", "kerbs", "roads",
+              "stop_lines", "municipalities")
+
+_AREA_LAYERS_MEMO: dict[str, tuple] = {}
+
+
+def osm_layers(area: str) -> dict[str, list]:
+    """Every OSM layer this project reads, over the WHOLE snapshot area - the one way into OSM.
+
+    THERE IS NO CENTRE AND NO RADIUS. A drawing is a view onto a world, and what exists in that
+    world is not a question about where the camera stands: a circle about a junction decided
+    which driveways opened a kerb, which signals governed a node and which town a street was in,
+    and each of those answers moved with the circle. A consumer that needs "the ones that
+    belong to this leg / node / view" asks that geometric question of the whole layer.
+
+    Field observations (observations/<area>.yaml) are merged here, so every consumer - a site,
+    a slice, the borough - reads one set of tags.
+
+    Same element shapes the per-layer readers have always returned, so a consumer swaps its
+    source and nothing else. `municipalities` is [(name, ring)] for every admin_level=8 ring
+    that closes inside the area; `municipality_containing` answers "which town is this in".
+    """
+    from src.sources.observations import apply_observations, load_observations
+
+    try:
+        bbox = SNAPSHOT_AREAS[area]
+    except KeyError:
+        raise UnknownAreaError(
+            f"no OSM area named {area!r} - declared areas: {', '.join(SNAPSHOT_AREAS)}. "
+            f"Add it to {SNAPSHOT_AREAS_FILE.parent.name}/{SNAPSHOT_AREAS_FILE.name}.") from None
+    raw = fetch_borough_osm(bbox=bbox)
+    cached = _AREA_LAYERS_MEMO.get(area)
+    if cached is not None and cached[0] is raw:
+        return cached[1]
+    snapshot = apply_observations(raw, load_observations(area))
+    ways = [(way, _way_coords(snapshot, way)) for way in snapshot["ways"]]
+    nodes = list(snapshot["nodes"].values())
+
+    def ways_where(predicate, min_coords: int, **extra):
+        return [{"coords_wgs84": coords, "tags": way.get("tags") or {}, "id": way["id"],
+                 "node_ids": way.get("nodes", []), **{k: f(way) for k, f in extra.items()}}
+                for way, coords in ways
+                if predicate(way.get("tags") or {}) and len(coords) >= min_coords]
+
+    def nodes_where(predicate):
+        return [{"lon": n["lon"], "lat": n["lat"], "tags": n.get("tags") or {}, "id": n["id"]}
+                for n in nodes if predicate(n.get("tags") or {})]
+
+    buildings = ways_where(is_building, 3)
+    for building in buildings:
+        recorded = height_from_tags(building["tags"])
+        building["height_m"], building["height_source"] = recorded if recorded else (None, None)
+    kerbs = ways_where(is_kerb, 2)
+    kerbs += [{"coords_wgs84": None, **n} for n in nodes_where(is_kerb)]
+
+    layers = {
+        "buildings": buildings,
+        "crossings": ways_where(is_crossing_way, 2),
+        "sidewalks": ways_where(is_sidewalk, 2),
+        "driveways": ways_where(is_driveway, 2),
+        "parking_aisles": ways_where(is_parking_aisle, 2),
+        "parking_lots": ways_where(is_parking_lot, 4),
+        "traffic_control": nodes_where(is_traffic_control),
+        "street_furniture": nodes_where(is_street_furniture),
+        "kerbs": kerbs,
+        "roads": ways_where(is_road, 2),
+        "stop_lines": ways_where(is_stop_line, 2),
+        "municipalities": _closed_municipal_rings(snapshot),
+    }
+    _AREA_LAYERS_MEMO[area] = (raw, layers)
+    return layers
+
+
+def _closed_municipal_rings(snapshot: dict) -> list[tuple[str | None, list]]:
+    """[(qualified name, ring)] for every admin_level=8 outer ring that closes in this snapshot.
+
+    A RING THAT DOES NOT CLOSE IS NOT A MUNICIPALITY: a town bigger than the snapshot has its
+    ring clipped to a straight edge down the bbox, which a leg can cross anywhere. Dropped
+    rather than closed for it - see `municipality_containing`.
+    """
+    nodes, ways = snapshot["nodes"], {w["id"]: w for w in snapshot["ways"]}
+    rings = []
+    for relation in snapshot.get("relations", []):
+        tags = relation.get("tags") or {}
+        if tags.get("boundary") != "administrative" or tags.get("admin_level") != "8":
+            continue
+        for member in relation.get("members", []):
+            if member.get("type") != "way" or member.get("role") not in ("outer", ""):
+                continue
+            way = ways.get(member["ref"])
+            if way is None:
+                continue
+            ring = [(nodes[nid]["lon"], nodes[nid]["lat"])
+                    for nid in way.get("nodes", []) if nid in nodes]
+            if len(ring) >= 4 and ring[0] == ring[-1]:
+                rings.append((_qualified_municipality(tags), ring))
+    return rings
+
+
+def municipality_containing(layers: dict, point_wgs84: Point) -> tuple | None:
+    """(name, ring) of the municipality this point stands in, from an area's own layers, or None.
+
+    BY CONTAINMENT, NOT BY NAME: OSM calls the borough "Hopewell" and its neighbour on this
+    corridor "Hopewell Township", so a name match returns the wrong town or none. None where no
+    closed ring holds the point - the same answer as a street that never leaves town.
+    """
+    for name, ring in layers.get("municipalities", ()):
+        if Polygon(ring).contains(point_wgs84):
+            return name, ring
+    return None
+
+
 def _qualified_municipality(tags: dict) -> str | None:
     """"Hopewell" + border_type=borough -> "Hopewell Borough", the form every config uses.
 

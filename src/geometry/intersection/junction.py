@@ -62,6 +62,11 @@ class IntersectionModel:
     # traced off the pavement - see src/geometry/intersection/municipality.py for why the end of
     # the drawn leg is not a substitute for it.
     municipal_limits_ft: dict = field(default_factory=dict)
+    # THE WORLD THIS JUNCTION IS A VIEW ONTO: the sites/osm_areas.yaml area, and every OSM layer
+    # over the whole of it (src/sources/osm_context.py:osm_layers). Consumers read `osm[layer]`
+    # and ask their own geometric question of it - there is no fetch about `center_wgs84`.
+    osm_area: str | None = None
+    osm: dict = field(default_factory=dict)
 
     @property
     def site_roadways(self) -> tuple:

@@ -18,6 +18,7 @@ data_sources:
 intersection:
   name: "E Broad St (CR 518) & Elm St, Hopewell Borough, NJ 08525"
   municipality: "Hopewell Borough"
+  osm_area: hopewell_borough   # the OSM world this junction is a view onto - sites/osm_areas.yaml
   center_wgs84: [-74.7533947, 40.3915081]
   street1: "East Broad Street"
   street2: "North Elm Street"

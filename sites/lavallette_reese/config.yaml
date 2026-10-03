@@ -24,6 +24,7 @@ data_sources:
 intersection:
   name: "NJ 35 NB (Grand Central Ave) & Reese Ave, Lavallette Borough, NJ 08735"
   municipality: "Lavallette Borough"
+  osm_area: lavallette_borough   # the OSM world this junction is a view onto - sites/osm_areas.yaml
   center_wgs84: [-74.0684420, 39.9733400]
   street1: "Grand Central Ave"
   street2: "Reese Ave"

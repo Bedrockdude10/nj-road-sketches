@@ -21,6 +21,7 @@ data_sources:
 intersection:
   name: "W Broad St (CR 654) & Lanning Ave, Hopewell Borough, NJ 08525"
   municipality: "Hopewell Borough"
+  osm_area: hopewell_wbroad_west   # the OSM world this junction is a view onto - sites/osm_areas.yaml
   center_wgs84: [-74.7674488, 40.3861181]
   street1: "West Broad Street"
   street2: "North Lanning Avenue"

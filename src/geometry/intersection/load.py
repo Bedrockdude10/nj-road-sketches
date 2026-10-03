@@ -9,6 +9,7 @@ from shapely.geometry import Point
 from shapely.ops import substring
 
 from src.sources.data_loader import load_parcels_near, load_road_network
+from src.sources.osm_context import osm_layers
 from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.municipality import municipal_limits_ft
 from src.render.frame import frame_scale, set_drawn_reach_ft
@@ -102,6 +103,8 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
 
     lon, lat = config["intersection"]["center_wgs84"]
     center = Point(lon, lat)
+    osm_area = config["intersection"]["osm_area"]
+    osm = osm_layers(osm_area)
     center_ft = gpd.GeoSeries([center], crs="EPSG:4326").to_crs("EPSG:3424").iloc[0]
 
     data_sources = config.get("data_sources", {})
@@ -218,6 +221,8 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
         corner_parcels = _no_parcels_layer(extra=("quadrant", "dist_ft"))
 
     return IntersectionModel(
+        osm_area=osm_area,
+        osm=osm,
         config=config,
         center_wgs84=center,
         center_ft=center_ft,

@@ -19,6 +19,7 @@ intersection:
   # The town this junction is in, and the key a corridor decision is looked up by
   # (src/geometry/treatments/corridor.py) - street names repeat between towns.
   municipality: "Hopewell Borough"
+  osm_area: hopewell_borough   # the OSM world this junction is a view onto - sites/osm_areas.yaml
   center_wgs84: [-74.7619598, 40.389179]
   # street1/street2/anchor_query are what scripts/phase1_audit.py used to
   # resolve center_wgs84 in the first place (src/sources/data_loader.py:geocode_intersection)

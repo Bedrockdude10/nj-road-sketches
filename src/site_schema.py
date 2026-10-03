@@ -82,6 +82,9 @@ class Intersection(Strict):
     #: borough has a Broad Street. Derived from prose it would be derived wrongly exactly once,
     #: and the symptom would be one town's bikeway drawn down another town's street.
     municipality: Sourced
+    #: The sites/osm_areas.yaml area this junction is a view onto. Every OSM layer comes from
+    #: that whole area (src/sources/osm_context.py:osm_layers) - never from a circle about here.
+    osm_area: str
     center_wgs84: tuple[float, float]
     street1: str
     street2: str
