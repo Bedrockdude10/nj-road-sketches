@@ -32,7 +32,6 @@ intersection:
     West/East Broad Street and North/South Greenwood Avenue all share one node.
     Cross-checked against the NJDOT SLD: this is Route 518 milepost 10.30, shown
     as a signalized intersection in data/00000518__8.000-11.000.pdf (page 1).
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # Confirmed by Danny: all 4 approaches have marked crosswalks today, in the
   # simple "lines" style (2 transverse boundary lines, no bars) - matches OSM's

@@ -35,7 +35,6 @@ intersection:
     and raised. Independently cross-checked: the resolved node is 0 ft from this
     junction's coordinate in the crosswalk inventory's own map.geojson, which was
     derived separately from surveyed photo GPS matched to OSM junction nodes.
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # A 3-leg T: Princeton Ave (CR 569) terminates at E Broad St from the south and
   # does NOT continue north. Hamilton Ave is a SEPARATE junction ~154 ft west (its

@@ -343,12 +343,15 @@ def _require_within_fixture(resolved: Path, bbox, layer: str) -> None:
             f"the county. {how_to_fix}")
     bounds = (tuple(bbox.total_bounds) if hasattr(bbox, "total_bounds")
               else tuple(float(v) for v in bbox))
-    if (bounds[0] < extent[0] or bounds[1] < extent[1]
-            or bounds[2] > extent[2] or bounds[3] > extent[3]):
+    # One box, or a list of them: a fixture cut around several areas that are far apart is not
+    # one box, and the box that bounds them would be most of the state.
+    boxes = [extent] if not isinstance(extent[0], (list, tuple)) else extent
+    if not any(box_[0] <= bounds[0] and box_[1] <= bounds[1]
+               and bounds[2] <= box_[2] and bounds[3] <= box_[3] for box_ in boxes):
         raise FixtureExtentExceeded(
             f"this read reaches outside the clipped {layer} fixture in {resolved.parent}.\n"
             f"  wanted: {tuple(round(v, 6) for v in bounds)}\n"
-            f"  clip:   {tuple(round(v, 6) for v in extent)}\n"
+            f"  clip:   {[tuple(round(v, 6) for v in box_) for box_ in boxes]}\n"
             f"{how_to_fix}")
 
 
@@ -425,15 +428,21 @@ def load_parcels(
                            expect_crs=NJ_STATE_PLANE_FT)
 
 
-def load_parcels_near(
-    center_wgs84: Point, radius_ft: float, path: Path | str = DEFAULT_PARCELS_PATH
-) -> gpd.GeoDataFrame:
-    """Load parcels within a square bbox (radius_ft) of a WGS84 point, reprojected
-    to NJ State Plane. Full parcel polygons are kept, not circle-clipped.
+def wgs84_box_in_state_plane(bbox_wgs84: tuple[float, float, float, float]) -> gpd.GeoSeries:
+    """A WGS84 bbox as a CRS-tagged box in NJ State Plane - the form load_parcels is queried in.
+
+    A CRS-tagged GeoSeries rather than a plain tuple, which is what lets pyogrio resolve the
+    parcel shapefile's own (slightly different, HARN-less) NAD83 NJ State Plane. Public because
+    scripts/make_data_fixture.py sizes its parcel clip with this same call.
     """
-    center_ft = gpd.GeoSeries([center_wgs84], crs=WGS84).to_crs(NJ_STATE_PLANE_FT).iloc[0]
-    bbox_geom = box(center_ft.x - radius_ft, center_ft.y - radius_ft, center_ft.x + radius_ft, center_ft.y + radius_ft)
-    # Passing a CRS-tagged GeoSeries (rather than a plain tuple) lets pyogrio resolve
-    # the parcel shapefile's own (slightly different, HARN-less) NAD83 NJ State Plane CRS.
-    parcels = load_parcels(bbox=gpd.GeoSeries([bbox_geom], crs=NJ_STATE_PLANE_FT), path=path)
-    return reproject_to_state_plane(parcels)
+    return gpd.GeoSeries([box(*bbox_wgs84)], crs=WGS84).to_crs(NJ_STATE_PLANE_FT)
+
+
+def load_parcels_in(
+    bbox_wgs84: tuple[float, float, float, float], path: Path | str = DEFAULT_PARCELS_PATH
+) -> gpd.GeoDataFrame:
+    """Every parcel touching a WGS84 bbox (an area's, normally), reprojected to NJ State Plane.
+
+    Full parcel polygons are kept - the box selects which parcels, it never trims one.
+    """
+    return reproject_to_state_plane(load_parcels(bbox=wgs84_box_in_state_plane(bbox_wgs84), path=path))

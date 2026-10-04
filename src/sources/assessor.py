@@ -37,10 +37,6 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
     # so importing them for real would close a cycle.
     from src.geometry.intersection.junction import IntersectionModel
 
-# How far out to load parcels for the join. Matches export.BUILDING_CONTEXT_RADIUS_M (130 m), the
-# radius buildings themselves are fetched at, so every building has a parcel to be found in.
-BUILDING_JOIN_RADIUS_FT = 130 / 0.3048
-
 # Where the number came from, exported per building. Ordered best to worst, which is also the
 # order they are tried.
 SOURCE_OSM_HEIGHT = "osm_height"          # the mapper measured it
@@ -129,12 +125,13 @@ def height_of(footprint, parcels, storeys: dict[str, float], osm_height=None) ->
     pin_field = _pin_field(parcels) if parcels is not None and len(parcels) else None
     if pin_field and storeys:
         best_pin, best_area = None, 0.0
-        for pin, geometry in zip(parcels[pin_field], parcels.geometry):
-            if geometry is None or geometry.is_empty or not geometry.intersects(footprint):
-                continue
+        # Through the spatial index: parcels now span the whole area, and a Python loop over all
+        # of them per building is thousands of intersection tests for the handful that touch it.
+        for position in parcels.sindex.query(footprint, predicate="intersects"):
+            geometry = parcels.geometry.iloc[position]
             shared = geometry.intersection(footprint).area
             if shared > best_area:
-                best_pin, best_area = str(pin).strip(), shared
+                best_pin, best_area = str(parcels[pin_field].iloc[position]).strip(), shared
         if best_pin in storeys:
             return BuildingHeight(storeys[best_pin] * METERS_PER_LEVEL, SOURCE_ASSESSOR)
     return BuildingHeight(DEFAULT_BUILDING_HEIGHT_M, SOURCE_ASSUMED)
@@ -153,20 +150,14 @@ def assessor_path(model: "IntersectionModel") -> Path | None:
     return ROOT_DIR / configured if configured else None
 
 
-def parcels_near_buildings(model: "IntersectionModel", radius_ft: float = BUILDING_JOIN_RADIUS_FT):
-    """The parcels an OSM footprint could sit in, out to the radius buildings are fetched at.
+def parcels_near_buildings(model: "IntersectionModel"):
+    """The parcels an OSM footprint can sit in: every parcel in the model's area, or None if the
+    site declares no parcels layer.
 
-    Not model.parcels: those are loaded to 300 ft for the corner/ROW context, and buildings come
-    from a 130 m (427 ft) circle, so the outer ring of them would find no parcel and silently take
-    the default height. The shapefile is spatially indexed - this read is too fast to measure.
+    There is no radius to keep in step with the one buildings are fetched at, because the join is
+    by overlap (height_of) and the parcels are read over the same area every OSM layer comes from.
     """
-    from src.geometry.intersection import ROOT_DIR
-    from src.sources.data_loader import load_parcels_near
-
-    configured = (model.config.get("data_sources") or {}).get("parcels")
-    if not configured:
-        return None
-    return load_parcels_near(model.center_wgs84, radius_ft=radius_ft, path=ROOT_DIR / configured)
+    return model.parcels if (model.config.get("data_sources") or {}).get("parcels") else None
 
 
 def describe_building_heights(heights: list[BuildingHeight]) -> str:

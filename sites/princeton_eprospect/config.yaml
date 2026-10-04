@@ -46,7 +46,6 @@ intersection:
     Cross-checked against NJDOT's own layer: SRI 00000569__ (ROUTE 569) and SRI 11051002__
     (E PROSPECT ST) are two of the four segments within 150 m, and they are the only two that
     reach this point.
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # THREE of the four legs are marked, and the unmarked one is the finding. OSM maps exactly
   # three crossing ways here - 376498222 (west leg), 376498293 (east leg), 376498296 (south

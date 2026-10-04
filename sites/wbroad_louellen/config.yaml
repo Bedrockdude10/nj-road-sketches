@@ -34,7 +34,6 @@ intersection:
     This one also resolved under the old endpoint-only match, because OSM splits
     West Broad Street into two ways here. Cross-checked: 0 ft from this junction's
     coordinate in the crosswalk inventory's own map.geojson.
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # A 3-leg junction, and NOT the "W Broad crossing Louellen" shape the name
   # suggests. CR 518 arrives from the northeast along W Broad St and turns WEST onto

@@ -32,12 +32,6 @@ intersection:
     to the northwest and 11647930 South Lanning Avenue to the southeast. A four-leg
     junction, and the two Lanning legs are separately named streets rather than one way
     through, which is why they are two legs here rather than one.
-  # 750 m, NOT the 150 m every other site uses. 150 m is 492 ft, and it is a HARD CAP on how
-  # far a leg's centerline is loaded - the southwest leg asked for 2,307.5 ft and came out 490,
-  # which looks like a treatment refusing rather than like a clip. This radius has to clear the
-  # longest working_length_ft on the sheet (703.5 m) with margin, and the snapshot area
-  # hopewell_wbroad_west is sized to contain it.
-  clip_radius_m: 750
   leg_working_length_ft: 130
   # The southwest leg overrides this to run the whole way to the borough line; see its
   # working_length_ft and the source note there, which is the one place in this repo a leg
