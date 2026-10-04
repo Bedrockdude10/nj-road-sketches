@@ -8,7 +8,7 @@ invariant in the suite and looks finished.
 
 Two of these tests are deliberately CONTROL CASES rather than bug reports. A checker that reports
 every layer as broken is worth nothing, so the kerbs layer - already fixed in `cb9c8b6`, drawn at
-the drawing radius - has to come out clean, and the kerb ramps layer has to come out clean at 1x
+the whole area's kerbs - has to come out clean, and the kerb ramps layer has to come out clean at 1x
 and dirty at 2.5x on the same code. If either of those ever goes the other way, the number in the
 failing test is the least of the problems.
 
@@ -28,11 +28,8 @@ from src.geometry.coverage import (CONTROL_NEAR_NODE_FT, CROSSING_DRAWN_FRACTION
                                    _markings_label, _read_drawing, coverage_gaps,
                                    describe_coverage)
 from src.geometry.treatments import DesignState
-from src.render.coords import FT_TO_M
 from src.render.frame import FRAME_SCALE_ENV, junction_frame
 from src.render.scene import SceneGeometry
-from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_street_furniture,
-                                     fetch_traffic_control)
 from tests.conftest import WIDE_FRAME_SCALE, needs_source_data
 
 # The frame docs/network-renderer-plan.md measures the gap at, and the frame output/ is drawn at.
@@ -44,7 +41,7 @@ WIDE_FRAME = str(WIDE_FRAME_SCALE)
 GREENWOOD_WIDE_RADIUS_FT = 431.2
 
 
-def a_drawing(model, radius_ft: float):
+def a_drawing(model):
     """(scene, everything the drawing puts on the ground) for one site's existing conditions.
 
     Paint AND crossing bands AND props, because all three are the drawing and none of them alone
@@ -58,31 +55,25 @@ def a_drawing(model, radius_ft: float):
     """
     with contextlib.redirect_stdout(io.StringIO()):
         state = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=radius_ft * FT_TO_M)
-        scene = SceneGeometry.resolve(model, state, crossings)
+        scene = SceneGeometry.resolve(model, state)
         paint, props = scene.build_paint_and_posts([])
     return scene, [*paint, *scene.crosswalk_bands.values(), *props,
                    *scene.surveyed_crossing_paint()]
 
 
-def a_full_drawing(model, radius_ft: float):
+def a_full_drawing(model):
     """The same, plus every prop the renderers build - the drawing a reader actually sees.
 
     src/render/props.py:build_props is what both views call, so the tactile pads and control
     hardware here are the ones in the picture rather than a re-derivation. Needed by any layer
     whose features are drawn as objects instead of as paint.
     """
-    radius_m = radius_ft * FT_TO_M
     with contextlib.redirect_stdout(io.StringIO()):
         from src.render.props import build_props
 
         state = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=radius_m)
-        scene = SceneGeometry.resolve(model, state, crossings)
-        props = build_props(model, state, scene.crosswalk_offsets, model.center_ft,
-                            fetch_traffic_control(model.center_wgs84, radius_m=radius_m),
-                            fetch_street_furniture(model.center_wgs84, radius_m=radius_m),
-                            crossings, fetch_kerbs(model.center_wgs84, radius_m=radius_m))
+        scene = SceneGeometry.resolve(model, state)
+        props = build_props(model, state, scene.crosswalk_offsets)
         paint, props = scene.build_paint_and_posts(props)
     return scene, [*paint, *scene.crosswalk_bands.values(), *props,
                    *scene.surveyed_crossing_paint()]
@@ -106,17 +97,6 @@ def drawn_ground(drawing: list):
     return unary_union(areas) if areas else None
 
 
-def surveyed_crossings_ft(model, radius_ft: float) -> list[LineString]:
-    """Every OSM crossing way whose geometry reaches inside the drawn frame, in feet."""
-    from src.geometry.intersection import to_state_plane
-
-    centre = junction_frame(model).center_ft
-    with contextlib.redirect_stdout(io.StringIO()):
-        fetched = fetch_crossings(model.center_wgs84, radius_m=radius_ft * FT_TO_M)
-    lines = [LineString(to_state_plane(c["coords_wgs84"])) for c in fetched]
-    return [line for line in lines if line.distance(centre) <= radius_ft]
-
-
 # --------------------------------------------------------------------------
 # Crossings: the gap this module was written for
 # --------------------------------------------------------------------------
@@ -133,8 +113,7 @@ def test_the_crossings_gap_is_what_the_drawing_does_not_contain(site_models, mon
     """
     monkeypatch.setenv(FRAME_SCALE_ENV, WIDE_FRAME)
     model = site_models["broad_st_greenwood"]
-    radius_ft = junction_frame(model).radius_ft
-    _scene, drawing = a_drawing(model, radius_ft)
+    _scene, drawing = a_drawing(model)
 
     # DRAWABLE ONLY. A crossing whose survey records no markings has nothing to draw, so it is
     # excluded from the count and named in a note instead (coverage.crossing_gaps). One of
@@ -197,7 +176,7 @@ def test_greenwoods_wide_frame_now_draws_every_crossing_it_records(site_models, 
     assert radius_ft == pytest.approx(GREENWOOD_WIDE_RADIUS_FT, abs=0.5), (
         "the frame moved - every number in this file is measured at this radius")
 
-    _scene, drawing = a_drawing(model, radius_ft)
+    _scene, drawing = a_drawing(model)
     assert gap_for(coverage_gaps(model, drawing), "crossings") is None, (
         "a crossing inside the frame has nothing drawn on it - the whole point of "
         "src/geometry/surveyed.py is that this cannot happen for a crossing whose markings are "
@@ -216,12 +195,12 @@ def test_a_narrower_frame_drops_fewer_crossings(site_models, monkeypatch):
 
     monkeypatch.setenv(FRAME_SCALE_ENV, WIDE_FRAME)
     wide_radius_ft = junction_frame(model).radius_ft
-    _scene, wide = a_drawing(model, wide_radius_ft)
+    _scene, wide = a_drawing(model)
     wide_gap = gap_for(coverage_gaps(model, wide), "crossings")
 
     monkeypatch.delenv(FRAME_SCALE_ENV, raising=False)
     near_radius_ft = junction_frame(model).radius_ft
-    _scene, near = a_drawing(model, near_radius_ft)
+    _scene, near = a_drawing(model)
     near_gap = gap_for(coverage_gaps(model, near), "crossings")
 
     assert near_radius_ft < wide_radius_ft
@@ -240,22 +219,22 @@ def test_the_kerbs_layer_reports_no_gap(site_models, monkeypatch, scale):
     """Every traced kerb inside the frame is drawn - the layer that was already fixed.
 
     THE PROOF THAT THIS CHECK IS NOT JUST ALWAYS RED. 29 of 29 at Broad & Greenwood's 431 ft
-    frame, and clean at 1x too. Both renderers take kerb_lines_with_tags_ft at
-    drawn_kerb_radius_ft(), which scales with the frame and comes to 984 ft at 2.5x, so the set
-    that is drawn cannot be narrower than the set that is in shot. Before `cb9c8b6` they took the
-    default NEAR set - within 80 ft of the junction centre, a test written for a corner-radius
-    circle fit - and 8,938 ft of traced kerb along the corridor was dropped.
+    frame, and clean at 1x too. Both renderers read the area's WHOLE kerb layer (`model.osm`), so
+    the set that is drawn cannot be narrower than the set that is in shot: the frame is a view and
+    decides nothing about which kerbs exist. That used to be a radius kept wider than the frame by
+    hand, and before `cb9c8b6` a corner-sized circle that dropped 8,938 ft of traced kerb along
+    the corridor.
     """
     if scale is None:
         monkeypatch.delenv(FRAME_SCALE_ENV, raising=False)
     else:
         monkeypatch.setenv(FRAME_SCALE_ENV, scale)
     model = site_models["broad_st_greenwood"]
-    _scene, drawing = a_drawing(model, junction_frame(model).radius_ft)
+    _scene, drawing = a_drawing(model)
 
     gaps = coverage_gaps(model, drawing)
     assert gap_for(gaps, "kerbs") is None, (
-        f"kerbs are collected by the DRAWING radius since cb9c8b6, so this layer is the control "
+        f"every kerb of the area is drawn whatever the frame, so this layer is the control "
         f"case for the whole module: {gap_for(gaps, 'kerbs')}")
 
 
@@ -276,14 +255,14 @@ def test_the_kerb_ramps_layer_is_clean_at_1x_and_dirty_at_2_5x(site_models, monk
     model = site_models["broad_st_greenwood"]
 
     monkeypatch.delenv(FRAME_SCALE_ENV, raising=False)
-    _scene, near = a_full_drawing(model, junction_frame(model).radius_ft)
+    _scene, near = a_full_drawing(model)
     assert gap_for(coverage_gaps(model, near), "kerb_ramps") is None, (
         "every ramp in the 1x frame belongs to this junction and is drawn")
 
     monkeypatch.setenv(FRAME_SCALE_ENV, WIDE_FRAME)
-    _scene, wide = a_full_drawing(model, junction_frame(model).radius_ft)
+    _scene, wide = a_full_drawing(model)
     gap = gap_for(coverage_gaps(model, wide), "kerb_ramps")
-    assert gap is not None and (gap.count, gap.total) == (7, 11)
+    assert gap is not None and (gap.count, gap.total) == (8, 12)
     assert all("tactile_paving=yes" in example for example in gap.examples), (
         "an example has to name the tag that says the ramp is there")
 
@@ -303,7 +282,7 @@ def test_the_traffic_control_layer_finds_the_stop_nodes_nobody_draws(site_models
     """
     monkeypatch.setenv(FRAME_SCALE_ENV, WIDE_FRAME)
     model = site_models["broad_st_greenwood"]
-    _scene, drawing = a_full_drawing(model, junction_frame(model).radius_ft)
+    _scene, drawing = a_full_drawing(model)
 
     gap = gap_for(coverage_gaps(model, drawing), "traffic_control")
     assert gap is not None and (gap.count, gap.total) == (2, 3)

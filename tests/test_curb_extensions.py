@@ -36,7 +36,6 @@ KERBSIDE_ZONE_EDGES = (BUFFER_EDGE_LINE, BIKE_LANE_EDGE_LINE)
 from src.geometry.paint import LANE_EDGE_LINE_WIDTH_FT
 from src.render.scene import SceneGeometry
 from src.site import load_site_scenarios, run_scenario
-from src.sources.osm_context import fetch_crossings
 
 from tests.conftest import needs_source_data
 from tests.test_sites import resolved_scene, scene_props
@@ -90,11 +89,10 @@ def test_set_corner_radius_alone_does_not_shorten_a_crossing(site_models):
     model = site_models["broad_st_greenwood"]
     with contextlib.redirect_stdout(io.StringIO()):
         base = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-        before = SceneGeometry.resolve(model, base, crossings)
+        before = SceneGeometry.resolve(model, base)
         corner = find_corner(base, "broad_st_east", "greenwood_ave_north")
         tightened = base.apply(SetCornerRadius(Corner(*corner), 15.0))
-        after = SceneGeometry.resolve(model, tightened, crossings)
+        after = SceneGeometry.resolve(model, tightened)
 
     assert tightened.corner_fillets[corner]["arc"].length < base.corner_fillets[corner]["arc"].length
     areas = (build_pavement_polygon(base.corner_fillets).area,
@@ -121,10 +119,9 @@ def test_a_curb_extension_shortens_the_crossing_it_daylights(site_models):
     model = site_models["broad_st_greenwood"]
     with contextlib.redirect_stdout(io.StringIO()):
         base = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-        before = SceneGeometry.resolve(model, base, crossings)
+        before = SceneGeometry.resolve(model, base)
         state = _bulb_out_broad_st(base, before)
-        after = SceneGeometry.resolve(model, state, crossings)
+        after = SceneGeometry.resolve(model, state)
 
     for leg_name, today_ft in BROAD_ST_TODAY.items():
         assert sum(before.crosswalk_reaches[leg_name]) == pytest.approx(today_ft, abs=0.05), (
@@ -155,8 +152,7 @@ def test_a_curb_extension_takes_real_ground_out_of_the_roadway(site_models):
     model = site_models["broad_st_greenwood"]
     with contextlib.redirect_stdout(io.StringIO()):
         base = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-        state = _bulb_out_broad_st(base, SceneGeometry.resolve(model, base, crossings))
+        state = _bulb_out_broad_st(base, SceneGeometry.resolve(model, base))
         before_area = build_pavement_polygon(base.corner_fillets).area
         after_area = build_pavement_polygon(state.corner_fillets).area
     assert after_area < before_area - 500.0, (
@@ -176,8 +172,7 @@ def test_a_bulbout_fits_inside_the_ordinance_no_parking_length(site_models):
     model = site_models["broad_st_greenwood"]
     with contextlib.redirect_stdout(io.StringIO()):
         base = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-        state = _bulb_out_broad_st(base, SceneGeometry.resolve(model, base, crossings))
+        state = _bulb_out_broad_st(base, SceneGeometry.resolve(model, base))
 
     assert state.treatments_of(AddCurbExtension), "nothing was built"
     for extension in state.treatments_of(AddCurbExtension):
@@ -328,10 +323,9 @@ def test_every_bulbout_corner_gets_an_apron_out_to_its_own_measured_radius(site_
     model = site_models["broad_st_greenwood"]
     with contextlib.redirect_stdout(io.StringIO()):
         base = DesignState.from_model(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
         measured = {corner: pieces["radius_ft"]
                     for corner, pieces in base.corner_fillets.items()}
-        state = _bulb_out_broad_st(base, SceneGeometry.resolve(model, base, crossings))
+        state = _bulb_out_broad_st(base, SceneGeometry.resolve(model, base))
 
     aprons = {t.apron_corner(state): t.apron for t in state.treatments_of(AddCurbExtension)}
     assert len(aprons) == 4, "every treated corner needs its swept path back"

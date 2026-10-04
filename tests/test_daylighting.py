@@ -357,14 +357,12 @@ def test_no_marked_parking_within_25_ft_of_any_intersecting_street(site_models):
 
     from src.geometry.daylighting import SIDELINE_SETBACK_FT, parkable_runs_ft
     from src.render.scene import SceneGeometry
-    from src.sources.osm_context import fetch_crossings
 
     checked = 0
     for site, model in site_models.items():
         with contextlib.redirect_stdout(io.StringIO()):
             state = DesignState.from_model(model)
-            scene = SceneGeometry.resolve(
-                model, state, crossings=fetch_crossings(model.center_wgs84, radius_m=130))
+            scene = SceneGeometry.resolve(model, state)
         crossings = model.cross_streets
         for leg_name, streets in crossings.items():
             for side in ("left", "right"):

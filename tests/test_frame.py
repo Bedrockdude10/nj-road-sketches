@@ -28,12 +28,9 @@ TOL_FT = 0.01
 
 def _export(model, state, name, out_path):
     from src.render.export import export_scenario
-    from src.sources.osm_context import fetch_crossings
 
     with contextlib.redirect_stdout(io.StringIO()):
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-        path = export_scenario(model, state, name, out_path, buildings=[], crossings=crossings,
-                               theme={})
+        path = export_scenario(model, state, name, out_path, theme={})
     return json.loads(Path(path).read_text())
 
 
@@ -86,7 +83,7 @@ def test_the_shared_frame_is_the_one_the_render_computed_for_itself(site, site_m
     model = site_models[site]
     data = _export(model, DesignState.from_model(model), "existing", tmp_path / f"{site}.json")
 
-    rings = data.get("pavement_near", []) + data.get("pavement_far", [])
+    rings = data["pavement"]
     xs = [x for ring in rings for x, _y in ring]
     ys = [y for ring in rings for _x, y in ring]
     reach = max((math.hypot(*leg["far_m"]) for leg in data["legs"]), default=0.0)
@@ -161,14 +158,12 @@ def test_the_centerline_paint_follows_the_road_in_both_views(site, site_models, 
     from src.render.crosswalks import (DOUBLE_YELLOW_SEPARATION_FT, NARROW_LINE_WIDTH_M,
                                        centerline_paint_ft, centerline_start_ft)
     from src.render.scene import SceneGeometry
-    from src.sources.osm_context import fetch_crossings
 
     model = site_models[site]
     state = DesignState.from_model(model)
     data = _export(model, state, "existing", tmp_path / f"{site}.json")
     with contextlib.redirect_stdout(io.StringIO()):
-        scene = SceneGeometry.resolve(model, state,
-                                      fetch_crossings(model.center_wgs84, radius_m=130))
+        scene = SceneGeometry.resolve(model, state)
 
     painted_legs = 0
     for exported in data["legs"]:
@@ -237,56 +232,81 @@ def _legs_only_model(reach_ft: float):
     return SimpleNamespace(center_ft=Point(0, 0), legs=legs, corner_fillets={})
 
 
-def test_the_covering_radius_reaches_the_corners_of_its_own_square():
+def test_the_far_corner_of_the_sheet_is_in_the_view():
     """A drawing covers its WINDOW, and the window is the square Frame.bounds_ft() describes.
 
     The plan view sets its axes straight from those bounds, so the farthest ground on the sheet
-    is a CORNER, not a point on the inscribed circle. A radius measured to the edge leaves the
-    four corners - 11.13% of the sheet's area at coincident centres - fetched from nothing.
+    is a CORNER, not a point on the inscribed circle. Membership in the view - what the coverage
+    audit counts as "in the frame" - has to be that square: a feature in a corner is on the sheet
+    (11.13% of its area at coincident centres is outside the inscribed circle), and one just past
+    the edge is not.
+
+    Used to be the covering radius a fetch needed to supply; nothing is fetched to a radius any
+    more, so the property that survives is what the VIEW counts as shown.
     """
-    from src.render.frame import frame_covering_radius_m, junction_frame
+    from src.geometry.coverage import _in_frame
+    from src.render.frame import junction_frame
 
     model = _legs_only_model(500.0)
     frame = junction_frame(model)
     xmin, xmax, ymin, ymax = frame.bounds_ft()
-    corner_ft = max(model.center_ft.distance(Point(x, y))
-                    for x in (xmin, xmax) for y in (ymin, ymax))
-    # base_m=1 so the floor cannot stand in for the arithmetic under test.
-    supplied_ft = frame_covering_radius_m(model, 1.0) / FT_TO_M
-    assert supplied_ft + TOL_FT >= corner_ft, (
-        f"the fetch reaches {supplied_ft:.1f} ft and the sheet's far corner is at "
-        f"{corner_ft:.1f} ft - {corner_ft / supplied_ft - 1:.1%} of the way out again, so the "
-        f"corners of the picture are drawn from data nobody asked for")
+    inside, out_ft = _in_frame(model, frame)
+
+    corner = Point(xmax - 1.0, ymax - 1.0)
+    assert corner.distance(frame.center_ft) > frame.radius_ft, (
+        "the probe is supposed to sit outside the inscribed circle, where only a square view "
+        "can count it")
+    assert inside(corner), "a feature in the far corner of the sheet is on the sheet"
+    assert inside(LineString([(xmin + 1.0, ymin + 1.0), (xmin + 3.0, ymin + 1.0)]))
+    assert not inside(Point(xmax + 1.0, frame.center_ft.y)), "ground past the edge is not shown"
+    assert out_ft(corner) == pytest.approx(model.center_ft.distance(corner), abs=TOL_FT), (
+        "distance is reported from the JUNCTION, which is what a reader means by 'N ft out'")
 
 
 @needs_source_data
 @pytest.mark.parametrize("site", SITES)
-def test_the_covering_radius_reaches_the_corners_on_a_wide_sheet(site, wide_site_models):
-    """The same claim on the sheet a reader is actually looking at.
+def test_the_sheet_is_drawn_over_ground_the_world_holds_at_every_scale(site, site_models,
+                                                                       wide_site_models):
+    """Every corner of the sheet lies inside the OSM area the model reads - at 1x and on the wide one.
 
-    At 1x every site floors on the base radius, so the arithmetic is invisible there; the frame
-    scale is what carries the corner past it. NOTE the scale has to be set again here - the
-    fixture restores the environment when it returns, and the frame is read at DRAW time.
+    The world is the whole area and the sheet is a view onto it, so the only way a view can show
+    ground the world knows nothing about is a frame that reaches outside the area (which reads as
+    "nothing mapped there"). That is what the covering radius used to guarantee by fetching far
+    enough; now it is a claim about the frame against the area, and the frame scale is what carries
+    a corner out - NOTE it has to be set again here, the fixture restores the environment and the
+    frame is read at DRAW time.
     """
     import os
 
-    from src.render.frame import FRAME_SCALE_ENV, frame_covering_radius_m, junction_frame
+    from shapely.geometry import Polygon
+
+    from src.geometry.intersection import to_state_plane
+    from src.render.frame import FRAME_SCALE_ENV, junction_frame
+    from src.sources.osm_context import SNAPSHOT_AREAS
     from tests.conftest import WIDE_FRAME_SCALE
 
-    model = wide_site_models[site]
+    west, south, east, north = SNAPSHOT_AREAS[site_models[site].osm_area]
+    # Densified edges: the state-plane grid is not the lon/lat one, so a box is not a box.
+    ring = ([(west + (east - west) * t / 20, south) for t in range(20)]
+            + [(east, south + (north - south) * t / 20) for t in range(20)]
+            + [(east - (east - west) * t / 20, north) for t in range(20)]
+            + [(west, north - (north - south) * t / 20) for t in range(20)])
+    area = Polygon(to_state_plane(ring))
+
     previous = os.environ.get(FRAME_SCALE_ENV)
-    os.environ[FRAME_SCALE_ENV] = str(WIDE_FRAME_SCALE)
     try:
-        frame = junction_frame(model)
-        xmin, xmax, ymin, ymax = frame.bounds_ft()
-        corner_ft = max(model.center_ft.distance(Point(x, y))
-                        for x in (xmin, xmax) for y in (ymin, ymax))
-        supplied_ft = frame_covering_radius_m(model, 1.0) / FT_TO_M
+        for scale, model in ((1.0, site_models[site]), (WIDE_FRAME_SCALE, wide_site_models[site])):
+            os.environ[FRAME_SCALE_ENV] = str(scale)
+            xmin, xmax, ymin, ymax = junction_frame(model).bounds_ft()
+            for x in (xmin, xmax):
+                for y in (ymin, ymax):
+                    assert area.contains(Point(x, y)), (
+                        f"{site} at {scale}x: the sheet's corner ({x:.0f}, {y:.0f}) is "
+                        f"{area.exterior.distance(Point(x, y)):.0f} ft outside the "
+                        f"{model.osm_area} area, so the view shows ground the world holds "
+                        f"nothing for")
     finally:
         if previous is None:
             os.environ.pop(FRAME_SCALE_ENV, None)
         else:
             os.environ[FRAME_SCALE_ENV] = previous
-    assert supplied_ft + TOL_FT >= corner_ft, (
-        f"{site} at {WIDE_FRAME_SCALE}x: the fetch reaches {supplied_ft:.1f} ft and the sheet's "
-        f"far corner is at {corner_ft:.1f} ft")
