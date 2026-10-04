@@ -114,13 +114,11 @@ def test_both_views_get_the_same_paved_polygons(site_models, tmp_path):
 
     from src.geometry.treatments import DesignState
     from src.render.export import export_scenario
-    from src.sources.osm_context import fetch_crossings
 
     model = site_models["ebroad_princeton"]
     with contextlib.redirect_stdout(io.StringIO()):
         path = export_scenario(model, DesignState.from_model(model), "existing",
                                tmp_path / "paved.json",
-                               crossings=fetch_crossings(model.center_wgs84, radius_m=130),
                                theme={})
     exported = json.loads(Path(path).read_text())["paved_surfaces"]
     drawn = [p for p in model.paved_surfaces if p.surface is not None]

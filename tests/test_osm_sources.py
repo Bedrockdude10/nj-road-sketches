@@ -18,30 +18,50 @@ from src.sources.data_loader import OfflineCacheMiss, query_overpass
 def a_snapshot(ways=(), nodes=()):
     """A fake borough snapshot in the shape fetch_borough_osm returns.
 
-    Node coordinates sit inside the bbox the tests query, so the bbox filter keeps them and
-    the assertions are about intake rules rather than geography.
+    A way is (id, vertex_count, tags) or (id, vertex_count, tags, (dlon, dlat)) to put it
+    somewhere other than the junction. Everything sits inside the Hopewell area, so what the
+    assertions are about is intake rules rather than geography.
     """
     node_table, way_list = {}, []
     next_id = 100
     for tags in nodes:
         node_table[next_id] = {"type": "node", "id": next_id, "lon": LON, "lat": LAT, "tags": tags}
         next_id += 1
-    for way_id, vertex_count, tags in ways:
+    for way_id, vertex_count, tags, *where in ways:
+        dlon, dlat = where[0] if where else (0.0, 0.0)
         refs = []
         for i in range(vertex_count):
             node_table[next_id] = {"type": "node", "id": next_id,
-                                    "lon": LON + i * 1e-5, "lat": LAT + i * 1e-5, "tags": {}}
+                                    "lon": LON + dlon + i * 1e-5, "lat": LAT + dlat + i * 1e-5,
+                                    "tags": {}}
             refs.append(next_id)
             next_id += 1
         way_list.append({"type": "way", "id": way_id, "nodes": refs, "tags": tags})
-    return {"nodes": node_table, "ways": way_list}
+    return {"nodes": node_table, "ways": way_list, "relations": []}
 
 
-LON, LAT = -74.7600, 40.3890   # inside BOROUGH_BBOX
-CENTRE = Point(LON, LAT)
+LON, LAT = -74.7600, 40.3890   # inside hopewell_borough
+AREA = "hopewell_borough"
 
 
-def test_two_vertex_kerb_ways_are_kept(monkeypatch):
+@pytest.fixture
+def area_of(monkeypatch):
+    """`osm_layers(AREA)` over a fake snapshot, with no field observations unless asked.
+
+    The area's real observations/<area>.yaml names real elements, and a snapshot that lacks them
+    is (rightly) refused - so a test of intake rules must not inherit it. The layer memo is
+    swapped for a private one so a fake never survives into another test.
+    """
+    def build(snapshot, observations=()):
+        monkeypatch.setattr(osm_context, "fetch_borough_osm", lambda *a, **k: snapshot)
+        monkeypatch.setattr(osm_context, "_AREA_LAYERS_MEMO", {})
+        monkeypatch.setattr("src.sources.observations.load_observations",
+                            lambda area, path=None: list(observations))
+        return osm_context.osm_layers(AREA)
+    return build
+
+
+def test_two_vertex_kerb_ways_are_kept(area_of):
     """A straight run of kerb is two points, and straight runs are most of what gets traced.
 
     The old `len(geom) < 3` rule - really a circle-fitting precondition applied at the wrong
@@ -49,38 +69,123 @@ def test_two_vertex_kerb_ways_are_kept(monkeypatch):
     Princeton, and 5 of 12 at W Broad & Louellen. Those sides then fell back to centerline
     offsets on legs the surveyor had actually traced.
     """
-    snapshot = a_snapshot(ways=[(1, 2, {"barrier": "kerb"}), (2, 3, {"barrier": "kerb"})])
-    monkeypatch.setattr(osm_context, "fetch_borough_osm", lambda *a, **k: snapshot)
-    kerbs = osm_context.fetch_kerbs(CENTRE, radius_m=120)
+    kerbs = area_of(a_snapshot(ways=[(1, 2, {"barrier": "kerb"}),
+                                      (2, 3, {"barrier": "kerb"})]))["kerbs"]
     assert len(kerbs) == 2, "the 2-vertex way must survive"
     assert min(len(k["coords_wgs84"]) for k in kerbs) == 2
 
 
-def test_a_one_vertex_way_is_still_dropped(monkeypatch):
+def test_a_one_vertex_way_is_still_dropped(area_of):
     """One point is not a line - there is no kerb to follow."""
-    snapshot = a_snapshot(ways=[(1, 1, {"barrier": "kerb"})])
-    monkeypatch.setattr(osm_context, "fetch_borough_osm", lambda *a, **k: snapshot)
-    assert osm_context.fetch_kerbs(CENTRE, radius_m=120) == []
+    assert area_of(a_snapshot(ways=[(1, 1, {"barrier": "kerb"})]))["kerbs"] == []
 
 
-def test_kerb_node_ids_are_kept(monkeypatch):
+def test_kerb_node_ids_are_kept(area_of):
     """Node ids are how a kerb is matched to the crossing it serves - one lowered kerb
     serving two crossings is distinguishable from two separate ramps only through these."""
-    snapshot = a_snapshot(ways=[(7, 2, {"barrier": "kerb"})])
-    monkeypatch.setattr(osm_context, "fetch_borough_osm", lambda *a, **k: snapshot)
-    assert osm_context.fetch_kerbs(CENTRE, radius_m=120)[0]["node_ids"]
+    assert area_of(a_snapshot(ways=[(7, 2, {"barrier": "kerb"})]))["kerbs"][0]["node_ids"]
 
 
-def test_kerb_tags_are_kept_whatever_their_value(monkeypatch):
+def test_kerb_tags_are_kept_whatever_their_value(area_of):
     """kerb=lowered is a corner RAMP - the corner return itself. Filtering to kerb=raised
     dropped whole traced corners in favour of a fitted guess."""
-    snapshot = a_snapshot(ways=[
+    kerbs = area_of(a_snapshot(ways=[
         (1, 2, {"barrier": "kerb", "kerb": "raised"}),
         (2, 2, {"barrier": "kerb", "kerb": "lowered", "tactile_paving": "yes"}),
-    ])
-    monkeypatch.setattr(osm_context, "fetch_borough_osm", lambda *a, **k: snapshot)
-    kerbs = osm_context.fetch_kerbs(CENTRE, radius_m=120)
+    ]))["kerbs"]
     assert {k["tags"].get("kerb") for k in kerbs} == {"raised", "lowered"}
+
+
+def test_a_kerb_node_is_a_kerb_with_no_line(area_of):
+    """A lowered-kerb NODE (a ramp mapped as a point) is a kerb too, and it has no coordinates
+    list - the one thing consumers branch on to tell it from a way."""
+    kerbs = area_of(a_snapshot(nodes=[{"barrier": "kerb", "kerb": "lowered"}]))["kerbs"]
+    assert len(kerbs) == 1
+    assert kerbs[0]["coords_wgs84"] is None
+    assert (kerbs[0]["lon"], kerbs[0]["lat"]) == (LON, LAT)
+
+
+def test_a_layer_is_the_whole_area_not_a_circle_about_somewhere(area_of):
+    """THE PROPERTY A RADIUS USED TO DECIDE, now stated as its absence. Two kerbs 1.1 km apart
+    (0.010 deg of longitude is 0.85 km, 0.0065 deg of latitude 0.72 km, at 40.39 N)
+    are both in the area's kerbs: what exists in the world does not depend on where a camera
+    stands, and "which ones belong to this leg" is a question the consumer puts to the layer.
+
+    The old reader kept an element only if a vertex fell inside a window about the centre, so
+    the second kerb was visible from one site and not the other.
+    """
+    near = (1, 2, {"barrier": "kerb"})
+    far = (2, 2, {"barrier": "kerb"}, (-0.010, 0.0065))
+    layers = area_of(a_snapshot(ways=[near, far]))
+    assert {k["id"] for k in layers["kerbs"]} == {1, 2}
+    ids = {k["id"]: k["coords_wgs84"][0] for k in layers["kerbs"]}
+    assert abs(ids[2][0] - ids[1][0]) > 0.009 and abs(ids[2][1] - ids[1][1]) > 0.006
+
+
+def test_every_layer_is_present_even_when_empty(area_of):
+    """The same layer names every consumer already read, all of them, so a consumer swaps its
+    source and nothing else. An absent key would read as "this area has no sidewalks" in some
+    places and as a KeyError in others."""
+    layers = area_of(a_snapshot())
+    assert set(layers) == set(osm_context.OSM_LAYERS)
+    assert all(rows == [] for rows in layers.values())
+
+
+def test_each_layer_selects_its_own_tags(area_of):
+    layers = area_of(a_snapshot(ways=[
+        (1, 4, {"building": "yes", "height": "9"}),
+        (2, 2, {"footway": "crossing"}),
+        (3, 2, {"footway": "sidewalk"}),
+        (4, 2, {"highway": "service", "service": "driveway"}),
+        (5, 2, {"highway": "residential"}),
+    ]))
+    assert [b["id"] for b in layers["buildings"]] == [1]
+    assert layers["buildings"][0]["height_m"] == 9.0
+    assert [c["id"] for c in layers["crossings"]] == [2]
+    assert [c["id"] for c in layers["sidewalks"]] == [3]
+    assert [c["id"] for c in layers["driveways"]] == [4]
+    assert 5 in {r["id"] for r in layers["roads"]}
+
+
+def test_field_observations_are_merged_so_every_consumer_reads_one_set_of_tags(area_of):
+    """A site, a slice and the borough all read osm_layers, so an observation merged anywhere
+    else would reach one of them and not another - the princeton_eprospect bug, a site correct
+    and its slice wrong. The tag is added, and the cached snapshot is not mutated to do it."""
+    from src.sources.observations import ObservationEntry
+
+    snapshot = a_snapshot(ways=[(1, 2, {"footway": "crossing"})])
+    seen = ObservationEntry(element="way/1", tags={"crossing:markings": "zebra"},
+                            source="walked it, for a test")
+    layers = area_of(snapshot, observations=[seen])
+    assert layers["crossings"][0]["tags"] == {"footway": "crossing", "crossing:markings": "zebra"}
+    assert snapshot["ways"][0]["tags"] == {"footway": "crossing"}, "the snapshot was mutated"
+
+
+def test_an_observation_cannot_override_what_osm_says(area_of):
+    """OSM stays authoritative: the same key with a different value is refused, not merged."""
+    from src.sources.observations import ObservationEntry, ObservationError
+
+    seen = ObservationEntry(element="way/1", tags={"footway": "sidewalk"}, source="for a test")
+    with pytest.raises(ObservationError):
+        area_of(a_snapshot(ways=[(1, 2, {"footway": "crossing"})]), observations=[seen])
+
+
+def test_layers_are_built_once_per_snapshot(area_of):
+    """A batch build asks for the same area ~27 times; re-deriving every layer each time is
+    waste, and identity is what shows it was served rather than rebuilt."""
+    snapshot = a_snapshot(ways=[(1, 2, {"barrier": "kerb"})])
+    first = area_of(snapshot)
+    assert osm_context.osm_layers(AREA) is first
+
+
+def test_an_area_nobody_declared_is_refused_and_the_declared_ones_are_named():
+    """An unknown name must raise rather than return an empty world, which is what "nothing
+    mapped here" looks like and exactly how ground truth disappears in this project."""
+    with pytest.raises(osm_context.UnknownAreaError) as raised:
+        osm_context.osm_layers("trenton")
+    message = str(raised.value)
+    assert "trenton" in message and "hopewell_borough" in message, message
+    assert "osm_areas.yaml" in message, "the message must name what to edit"
 
 
 def test_a_dangling_node_reference_is_refused(monkeypatch):
@@ -98,13 +203,6 @@ def test_a_dangling_node_reference_is_refused(monkeypatch):
     with pytest.raises(RuntimeError, match="don't resolve"):
         osm_context.fetch_borough_osm()
     osm_context._MEMO.clear()
-
-
-def test_a_site_outside_the_snapshot_is_refused():
-    """Reaching outside the downloaded bbox returns NOTHING, silently - which is exactly
-    how ground truth disappears in this project. It must raise instead."""
-    with pytest.raises(osm_context.SiteOutsideSnapshotError):
-        osm_context.assert_within_snapshot(Point(-75.5, 40.0), radius_m=130)
 
 
 def test_the_test_suite_cannot_reach_the_network():

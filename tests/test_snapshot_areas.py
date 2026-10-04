@@ -1,4 +1,4 @@
-"""Which downloaded OSM snapshot a site is served from.
+"""Which downloaded OSM area a site is a view onto.
 
 The snapshot was ONE bbox covering Hopewell Borough, and a site outside it was refused with
 "widen BOROUGH_BBOX and delete the cached snapshot". Taking that advice for a site in the
@@ -14,9 +14,8 @@ committed fixture is named after.
 import pytest
 from shapely.geometry import Point
 
-from src.sources.osm_context import (SNAPSHOT_AREAS, SiteOutsideSnapshotError,
-                                      _area_for, _load_snapshot_areas, _snapshot_path,
-                                      assert_within_snapshot)
+from src.sources.osm_context import (SNAPSHOT_AREAS, UnknownAreaError, _load_snapshot_areas,
+                                      _snapshot_path, osm_layers)
 
 HOPEWELL_BBOX = (-74.7760, 40.3830, -74.7500, 40.3970)
 BROAD_AND_GREENWOOD = Point(-74.7614, 40.3893)
@@ -30,9 +29,19 @@ def test_hopewells_cache_key_is_unchanged():
     assert _snapshot_path(HOPEWELL_BBOX).name == "borough_33409013af7cbb1a.json"
 
 
+def _contains(bbox, point):
+    west, south, east, north = bbox
+    return west <= point.x <= east and south <= point.y <= north
+
+
 def test_each_borough_is_served_from_its_own_area():
-    assert _area_for(BROAD_AND_GREENWOOD, 130) == SNAPSHOT_AREAS["hopewell_borough"]
-    assert _area_for(NJ31_AND_W_DELAWARE, 130) == SNAPSHOT_AREAS["pennington_borough"]
+    """Which area a site belongs to is no longer found by searching for the one that holds a
+    circle about it: the config names it. So what has to hold is that the name is the right
+    one - the area it names is the area the junction stands in."""
+    assert _contains(SNAPSHOT_AREAS["hopewell_borough"], BROAD_AND_GREENWOOD)
+    assert not _contains(SNAPSHOT_AREAS["hopewell_borough"], NJ31_AND_W_DELAWARE)
+    assert _contains(SNAPSHOT_AREAS["pennington_borough"], NJ31_AND_W_DELAWARE)
+    assert not _contains(SNAPSHOT_AREAS["pennington_borough"], BROAD_AND_GREENWOOD)
 
 
 def test_the_two_areas_have_different_cache_keys():
@@ -40,35 +49,54 @@ def test_the_two_areas_have_different_cache_keys():
     assert len(paths) == len(SNAPSHOT_AREAS), "two areas sharing a cache file would overwrite"
 
 
-def test_a_site_in_no_area_is_refused_and_told_which_areas_exist():
-    """Trenton - a real place, and not one this project has a snapshot of."""
-    with pytest.raises(SiteOutsideSnapshotError) as raised:
-        assert_within_snapshot(Point(-74.7429, 40.2206), 130)
+def test_an_area_nobody_declared_is_refused_and_told_which_areas_exist():
+    """A site naming an area that does not exist - Trenton's, say, a real place and not one this
+    project has a snapshot of - must raise and say what the choices are, not read as an empty
+    world. The error comes from the one way into OSM, so it holds for a site, a slice and the
+    borough alike."""
+    with pytest.raises(UnknownAreaError) as raised:
+        osm_layers("trenton")
     message = str(raised.value)
     assert "hopewell_borough" in message and "pennington_borough" in message, message
-    assert "SNAPSHOT_AREAS" in message, "the message must name what to edit"
+    assert "osm_areas.yaml" in message, "the message must name what to edit"
 
 
-def test_a_window_straddling_an_edge_is_refused_not_half_served():
-    """The failure this whole guard exists for: a context window partly outside its area
-    returns the elements that happen to be inside and NOTHING for the rest, which looks
-    like geometry rather than like an error. A point just inside an area's edge with a
-    radius that reaches past it must raise, not quietly return half a junction.
+def _margin_m(point, bbox):
+    """Metres from a point to the nearest edge of a bbox, to a few percent at this latitude."""
+    west, south, east, north = bbox
+    return min((point.x - west) * 85_000.0, (east - point.x) * 85_000.0,
+               (point.y - south) * 111_000.0, (north - point.y) * 111_000.0)
 
-    The NORTH edge, and not the west one this used to use. Hopewell now has a second area
-    for the W Broad corridor west of Lanning, and it overlaps the first - so a point inside
-    Hopewell's west edge is genuinely served by that neighbour, and asserting it is refused
-    would be asserting the areas do not overlap, which is a different claim and a false one.
-    Nothing reaches north of 40.3970, so that edge still tests what this is for.
+
+def test_a_site_near_its_areas_edge_is_caught_not_half_served():
+    """THE FAILURE THE OLD WINDOW GUARD EXISTED FOR, re-expressed. Data stops at an area's edge,
+    and a junction drawn beside it shows the elements that happen to be inside and NOTHING for
+    the rest - which looks like geometry rather than like an error. There is no context window
+    to test against any more, so the guard moves to the site: its centre must sit well inside
+    the area it names.
+
+    250 m is the largest radius any site was ever read with, so it is the least reach a drawing
+    has been shown to want past its centre. The tightest margin today is 289 m (ebroad_elm).
+    Not a probe at Hopewell's west edge: hopewell_wbroad_west overlaps it, so a point there is
+    genuinely served by a neighbour, and "it is refused" would be a false claim.
     """
-    north_edge = Point(-74.7614, HOPEWELL_BBOX[3] - 0.0002)
-    with pytest.raises(SiteOutsideSnapshotError):
-        assert_within_snapshot(north_edge, 130)
+    from src.site import list_sites, load_site_config
+
+    for site in list_sites():
+        intersection = load_site_config(site)["intersection"]
+        centre = Point(*intersection["center_wgs84"])
+        margin = _margin_m(centre, SNAPSHOT_AREAS[intersection["osm_area"]])
+        assert margin >= 250, (
+            f"{site} is {margin:.0f} m from the edge of {intersection['osm_area']}: everything "
+            f"past it is silently absent from the drawing")
 
 
-def test_a_site_well_inside_an_area_passes():
-    assert_within_snapshot(BROAD_AND_GREENWOOD, 130)
-    assert_within_snapshot(NJ31_AND_W_DELAWARE, 250)
+def test_the_margin_check_sees_a_point_at_the_edge():
+    """Verified to fail, which a check that has only ever passed does not prove: a point 20 m
+    inside Hopewell's north edge is under the 250 m the test above demands."""
+    near_north = Point(-74.7614, HOPEWELL_BBOX[3] - 0.0002)
+    assert _margin_m(near_north, HOPEWELL_BBOX) < 250
+    assert _margin_m(BROAD_AND_GREENWOOD, HOPEWELL_BBOX) >= 250
 
 
 # --- the areas are declared in sites/osm_areas.yaml, so the file is a boundary too ---------
@@ -110,14 +138,16 @@ def test_an_area_over_the_apis_limit_is_refused_at_load(tmp_path):
     assert "sq deg" in str(raised.value)
 
 
-def test_every_site_this_project_models_falls_inside_an_area():
-    """The porting check: a new site whose town has no snapshot area is refused at build time
-    with a message about the area, and this says the same thing for the whole set at once."""
-    from shapely.geometry import Point as _Point
-
+def test_every_site_this_project_models_falls_inside_the_area_it_names():
+    """The porting check: a new site is a name in config.yaml and an entry in osm_areas.yaml, and
+    nothing but this ties the two. A typo reads downstream as UnknownAreaError at build time, and
+    an area that does not hold the junction reads as an empty street - so say both for the whole
+    set at once."""
     from src.site import list_sites, load_site_config
 
     for site in list_sites():
-        config = load_site_config(site)
-        lon, lat = config["intersection"]["center_wgs84"]
-        assert_within_snapshot(_Point(lon, lat), config["intersection"]["clip_radius_m"])
+        intersection = load_site_config(site)["intersection"]
+        area = intersection["osm_area"]
+        assert area in SNAPSHOT_AREAS, f"{site}: {area!r} is not in sites/osm_areas.yaml"
+        assert _margin_m(Point(*intersection["center_wgs84"]), SNAPSHOT_AREAS[area]) > 0, (
+            f"{site} stands outside {area} {SNAPSHOT_AREAS[area]}")

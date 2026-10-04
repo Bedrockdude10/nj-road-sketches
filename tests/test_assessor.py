@@ -54,13 +54,12 @@ def test_the_buildings_are_as_tall_as_the_records_say(site, site_models, tmp_pat
 
     from src.geometry.treatments import DesignState
     from src.render.export import export_scenario
-    from src.sources.osm_context import DEFAULT_BUILDING_HEIGHT_M, fetch_crossings
+    from src.sources.osm_context import DEFAULT_BUILDING_HEIGHT_M
 
     model = site_models[site]
     with contextlib.redirect_stdout(io.StringIO()):
         path = export_scenario(model, DesignState.from_model(model), "existing",
                                tmp_path / f"{site}.json",
-                               crossings=fetch_crossings(model.center_wgs84, radius_m=130),
                                theme={})
     buildings = json.loads(Path(path).read_text())["buildings"]
     assert buildings, f"{site} exported no buildings"
@@ -94,13 +93,12 @@ def test_a_height_nobody_recorded_says_so(site_models, tmp_path):
 
     from src.geometry.treatments import DesignState
     from src.render.export import export_scenario
-    from src.sources.osm_context import DEFAULT_BUILDING_HEIGHT_M, fetch_crossings
+    from src.sources.osm_context import DEFAULT_BUILDING_HEIGHT_M
 
     model = site_models["broad_st_greenwood"]
     with contextlib.redirect_stdout(io.StringIO()):
         path = export_scenario(model, DesignState.from_model(model), "existing",
                                tmp_path / "flagged.json",
-                               crossings=fetch_crossings(model.center_wgs84, radius_m=130),
                                theme={})
     buildings = json.loads(Path(path).read_text())["buildings"]
     assumed = [b for b in buildings if b["height_source"] == SOURCE_ASSUMED]
@@ -132,13 +130,11 @@ def test_a_building_keeps_its_flat_roof(site, site_models, tmp_path):
 
     from src.geometry.treatments import DesignState
     from src.render.export import export_scenario
-    from src.sources.osm_context import fetch_crossings
 
     model = site_models[site]
     with contextlib.redirect_stdout(io.StringIO()):
         path = export_scenario(model, DesignState.from_model(model), "existing",
                                tmp_path / f"{site}_roofs.json",
-                               crossings=fetch_crossings(model.center_wgs84, radius_m=130),
                                theme={})
     mangled = []
     for i, b in enumerate(json.loads(Path(path).read_text())["buildings"]):

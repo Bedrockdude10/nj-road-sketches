@@ -20,7 +20,7 @@ MINIMAL = {
         "street2": "Other St",
         "anchor_query": "Test Street, Nowhere, NJ",
         "resolution_method": "made up for a test",
-        "clip_radius_m": 150,
+        "osm_area": "hopewell_borough",
         "leg_working_length_ft": 130,
         "existing_marked_crosswalks": ["test_st_west"],
     },
@@ -79,6 +79,23 @@ def test_a_misspelled_key_is_rejected():
     broken["legs"]["test_st_west"]["bearing_dg"] = broken["legs"]["test_st_west"].pop("bearing_deg")
     with pytest.raises(SiteConfigError, match="bearing_dg"):
         validate_site_config(broken)
+
+
+def test_a_site_that_names_no_osm_area_is_rejected():
+    """The area is the world a site is a view onto and nothing else decides it - there is no
+    centre-and-radius to fall back on - so a config that omits it must fail here rather than
+    reach a loader with no answer to "which OSM data"."""
+    missing = config()
+    del missing["intersection"]["osm_area"]
+    with pytest.raises(SiteConfigError, match="osm_area"):
+        validate_site_config(missing)
+
+
+def test_a_clip_radius_is_rejected_not_silently_ignored():
+    """The circle is gone. A config that still carries clip_radius_m is describing a read that no
+    longer happens, so it would be believed and do nothing - extra=forbid is what stops that."""
+    with pytest.raises(SiteConfigError, match="clip_radius_m"):
+        validate_site_config(config(intersection={"clip_radius_m": 150}))
 
 
 def test_a_misspelled_section_is_rejected():
