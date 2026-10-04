@@ -103,7 +103,7 @@ All violations are collected and reported together, each carrying coordinates so
 Everything specific to one intersection lives under `sites/<name>/`; `src/` has no hardcoded site data. To add one:
 
 1. `python scripts/phase1_audit.py --street1 "Main St" --street2 "Oak Ave" --anchor "Main St, Sometown, NJ"` — resolves the intersection point via OSM and prints what the road network records there.
-2. If the site is in a town this project has no OSM snapshot of, add one line to `sites/osm_areas.yaml` — a bbox with margin for the context radius. One download, and nothing already cached moves. (`SiteOutsideSnapshotError` names this file if you skip it.)
+2. Name the site's OSM area in its config (`intersection.osm_area`). If the town has no snapshot yet, add one line to `sites/osm_areas.yaml` — a bbox around the whole town. One download, and nothing already cached moves. (`UnknownAreaError` names this file if you skip it.)
 3. Create `sites/<name>/config.yaml` (copy `sites/broad_st_greenwood/config.yaml`) — `center_wgs84` from step 1, `data_sources`, and one `legs` entry per approach with a `bearing_deg` (compass, 0=N/90=E/clockwise, from the intersection outward). That bearing is the **only** thing that has to be geometrically accurate for `src/geometry/intersection/` to tell the legs apart; nothing assumes 4 legs or perpendicular roads, so 3-way/5-way/skewed junctions all work the same way. `sites/README.md` documents every key.
 4. Create `sites/<name>/scenarios.py` exposing `build_demo_scenario(baseline) -> DesignState`.
 5. Run the Quick start commands with `--site <name>`.
@@ -130,9 +130,9 @@ Getting this wrong is the most expensive mistake available here. A fact modelled
 
 ### A real-world fact belongs on the model, fetched once
 
-Driveways were once fetched and projected in **three** places, each with its own radius constant. If a new element comes from OSM:
+Driveways were once fetched and projected in **three** places, each with its own radius constant. OSM is now read once per area by `osm_layers(area)`, over the whole snapshot — there is no centre and no radius, so what exists never depends on where a camera stands. If a new element comes from OSM:
 
-1. Add the fetcher to `src/sources/osm_context.py` (it will be a view over the same cached borough snapshot — no new network call).
+1. Add a layer to `OSM_LAYERS` in `src/sources/osm_context.py` (a view over the same cached area snapshot — no new network call). A consumer that wants "the ones belonging to this leg/node" asks that geometric question of the whole layer.
 2. Project it to feet **in `src/geometry/intersection/`**, store it as a frozen dataclass on the model, and give that dataclass the derived geometry every consumer wants (`Driveway.surface`, not a width for each renderer to re-widen).
 3. If `DesignState.from_model()` reads it, guard the attribute — the test doubles are deliberately partial models.
 4. Refresh the test fixture separately from the cache (see Tests).
@@ -253,7 +253,7 @@ state = baseline.apply(
 
 The Blender side cannot import `src`, so its own reasoning cannot live in a module docstring this project's tests can reach. What follows is therefore kept here.
 
-**Textures.** `src/render/assets.py` fetches real CC0 PBR textures from Poly Haven (`asphalt_01` for pavement, `pavement_02` for sidewalks), caching to `output/.textures/`. Anything within the "near zone" (past the farthest crosswalk plus a buffer, `export.py:_split_near_far`) gets 4k, everything else 2k, split by intersecting with a circle so a piece can straddle the boundary. `blender_materials.py:make_textured_material()` falls back to a flat color if a texture is missing — Phase 4 must never hard-fail without network access. Each piece gets a real-world-scaled planar UV projection so tiling reads consistently across differently-sized pieces.
+**Textures.** `src/render/assets.py` fetches real CC0 PBR textures from Poly Haven (`asphalt_01` for pavement, `pavement_02` for sidewalks), caching to `output/.textures/`. Every surface uses one 2k tier: a world has no single junction to measure a "near zone" from, and at a 2 m tile 2k is already 1 mm per texel, far below a pixel's ground footprint (see `blender_scene.build_scene`; `--texture-res 4k` is kept for comparison). `blender_materials.py:make_textured_material()` falls back to a flat color if a texture is missing — Phase 4 must never hard-fail without network access. Each piece gets a real-world-scaled planar UV projection so tiling reads consistently across differently-sized pieces.
 
 **Streetlights.** A real Poly Haven model (`street_lamp_01`, glTF at 1k — the 8k default would be enormous for a background prop) is fetched once as a hidden template; each corner gets a linked duplicate at that corner's fillet-arc midpoint (real geometry) pushed a few feet onto the sidewalk (an approximation, flagged in the prop's `"source"`). Falls back to a procedural pole+box.
 
