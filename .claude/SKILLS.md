@@ -200,14 +200,11 @@ ft out sets the width for all 425 ft, and a treatment two derivations downstream
 
 Note also which fixture is which, because it is the opposite of what you would guess:
 `tests/conftest.py` has **`site_models` at 1×** and **`wide_site_models` at `WIDE_FRAME_SCALE =
-2.5`**, and the geometry goldens (`digests`, `test_geometry_regression.py`) build from the **1×** one
-— so the goldens cannot see anything the wide sheet does. The parking flip above moves nothing in
-any golden. **The goldens are the 1× half; the INVARIANTS are swept at both** —
-`test_every_scenario_satisfies_the_invariants` on `site_models` and
-`..._on_the_wide_sheet` on `wide_site_models`, which is the render's own frame. That second one
-exists because at 1× the sweep reported nothing on any site while 2.5× reported a fatal
-`markings_collide` that refused a shipped render's 3D export. A green golden still says nothing
-about a number in `output/`; that is what `--frame-scale` on `measure_drawn.py` is for.
+2.5`**. **The INVARIANTS are swept at both** — `test_every_scenario_satisfies_the_invariants` on
+`site_models` and `..._on_the_wide_sheet` on `wide_site_models`, which is the render's own frame.
+That second one exists because at 1× the sweep reported nothing on any site while 2.5× reported a
+fatal `markings_collide` that refused a shipped render's 3D export. Correctness of any measurement
+in `output/` is verified locally with `--frame-scale` on `measure_drawn.py`, never through CI.
 
 ---
 
@@ -260,7 +257,7 @@ cross-section is.
 
 ---
 
-## 3. Adding a marking touches six places, and the seventh is the golden
+## 3. Adding a marking touches six places
 
 README.md has the six-place table. Two additions to it:
 
@@ -268,13 +265,12 @@ README.md has the six-place table. Two additions to it:
    white `marking_mat` and only the centreline channel in yellow. A yellow marking routed through
    an edge-line channel renders white in 3D and yellow in 2D, with nothing to catch it.
 2. **`POLYLINE_CHANNELS` in `tests/test_geometry_regression.py` is derived from
-   `markings.CHANNELS`** — so a new channel gets a golden automatically. It was a hardcoded list
-   and it drifted immediately: a marking with 30 segments, drawn in both views, had no golden.
+   `markings.CHANNELS`** — maintaining consistency in the determinism test. It was a hardcoded list
+   and it drifted immediately: a marking with 30 segments, drawn in both views, was never tested.
 
-**Pin extent, not just position.** The digest pinned `stop_bar_centre_m` and `stop_bar_axis` but
-not the span, so moving where the bar starts changed nothing in any golden. Same hole existed for
-the crosswalk reach and for `centerline_paint_m`. If you add a marking, pin where it is *and how
-far it goes*.
+Change detection is handled by `scripts/diff_exports.py` and `scripts/verify.py`, which compare
+before/after exports precisely. After adding a marking, verify it with `scripts/measure_drawn.py`
+to confirm position and extent.
 
 ---
 
@@ -346,9 +342,6 @@ unless you actually opened the document.
 
 1. Write the test; **confirm it fails** against the pre-change code.
 2. `scripts/export_all_scenarios.py /tmp/before` → change → `/tmp/after` → `scripts/diff_exports.py`.
-3. `./scripts/test.sh` (includes lint, import contracts, goldens).
+3. `./scripts/test.sh` (includes lint, import contracts, and invariant checks).
 4. `scripts/build_all.py --render-3d`, **and open the PNGs**.
 5. Measure the drawn geometry numerically (see §0).
-
-A golden failure is not automatically a bug. Read the diff, confirm every moved number is one you
-meant to move, then `--force-regen` and commit the goldens **in the same commit as the cause**.

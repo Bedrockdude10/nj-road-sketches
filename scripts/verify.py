@@ -33,9 +33,8 @@ a claim about somebody else's mess, so it is stamped with the revision and time 
 
 Both halves of that comparison are taken against the tests that ACTUALLY RAN, never against
 the whole baseline, because -k deselects most of the suite and a skip runs nothing either.
-Compared against the whole baseline, `-k traced_curbs` congratulated itself with FIXED 9 for
-nine goldens it had not so much as executed. They are reported as NOT RUN instead: the honest
-answer, which is that this run says nothing about them.
+Deselected tests are reported as NOT RUN: the honest answer, which is that this run says nothing
+about them.
 
 WHY THE INPUTS ARE WIRED IN TWO WAYS. The before side runs in a git worktree at --base, and
 README's loop warns you to symlink the gitignored data/ into it or every run dies at once and

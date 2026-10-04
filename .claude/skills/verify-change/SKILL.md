@@ -1,6 +1,6 @@
 ---
 name: verify-change
-description: Verify a change to this repo's geometry, markings, renders or numbers before calling it done. Use after editing anything under src/ or scripts/, when a golden test fails, or when asked whether a change is correct. Runs the export/diff/test/render/measure loop in cost order.
+description: Verify a change to this repo's geometry, markings, renders or numbers before calling it done. Use after editing anything under src/ or scripts/, or when asked whether a change is correct. Runs the export/diff/test/render/measure loop in cost order.
 ---
 
 # Verifying a change here
@@ -45,9 +45,8 @@ the scene, builds the paint and props and asserts every invariant, without spend
 ```
 
 The whole suite runs once, through `verify.py`, not after every edit; a hook refuses an
-unnarrowed `test.sh` (prefix `FULL_SUITE=1` to override). Never bare `pytest`. Includes lint, import contracts and goldens. A golden failure is not
-automatically a bug — read the diff, confirm every moved number is one you meant to move, then
-`--force-regen` and commit the goldens **in the same commit as the cause**.
+unnarrowed `test.sh` (prefix `FULL_SUITE=1` to override). Never bare `pytest`. Includes lint and
+import contracts. Determinism and invariant checks run against the geometry to catch silent drift.
 
 ## 4. Render, and open the PNGs
 

@@ -48,10 +48,10 @@ render inside the loop is a round trip that cannot answer the question you asked
 
 ## What CI cannot see
 
-`data/` is a 391 MB licensed download kept out of git, and every golden and whole-site test is
+`data/` is a 391 MB licensed download kept out of git, and every whole-site test is
 marked `needs_source_data` — those **skip**, not fail, when it is absent. A green tick on
 `main` is green over the subset that does not need it, so geometry changes have to be verified
-locally.
+locally with `scripts/verify.py`.
 
 ## Prose
 
