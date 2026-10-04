@@ -28,6 +28,7 @@ from src.geometry.intersection.fitting import (_centre_legs_on_traced_kerbs, _fi
 from src.geometry.intersection.junction import IntersectionModel
 from src.geometry.intersection.load import _build_corners
 from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
+from src.geometry.intersection.state_centreline import attach_state_centrelines
 from src.geometry.intersection.paved import _paved_surfaces_ft, to_state_plane
 from src.geometry.model.traced_kerbs import corner_radii_from_kerbs
 from src.geometry.model import Leg, NJ_STATE_PLANE_FT, build_pavement_polygon
@@ -353,4 +354,7 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None,
         leg_osm_aligned={name: span.aligned for name, span in dominant.items()},
         cross_streets=cross_streets,
     )
+    # Attach registered state centrelines to legs if osm_area is provided
+    if osm_area is not None:
+        attach_state_centrelines(legs, osm_area)
     return model, DesignState(legs=legs, corner_fillets=corner_fillets)

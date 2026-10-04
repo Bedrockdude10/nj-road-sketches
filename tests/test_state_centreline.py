@@ -19,10 +19,11 @@ class TestRegisterLine:
     def test_S1_straight_line_registers_to_kerb_midpoint(self):
         """S1: register_line(LineString([(0,0),(200,0)]), K) moves every vertex to y = -6."""
         line = LineString([(0, 0), (200, 0)])
+        L = line.length
         result = register_line(line, K)
         coords = np.asarray(result.coords)
         np.testing.assert_allclose(coords[:, 1], -6.0, atol=0.01)
-        np.testing.assert_allclose(coords[:, 0], [0, 200], atol=0.01)
+        np.testing.assert_allclose(coords[:, 0], np.append(np.arange(0.0, L, 10.0), L), atol=0.01)
 
     def test_S2_reversed_line_registers_to_same_midpoint(self):
         """S2: register_line with reversed input [(200,0),(0,0)]."""

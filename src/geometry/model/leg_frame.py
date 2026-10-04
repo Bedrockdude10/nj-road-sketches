@@ -63,6 +63,7 @@ class Leg:
     # say which one they are showing - "ESTIMATE / PLACEHOLDER" over a line drawn from a
     # surveyor's trace is the project's own principle stated backwards.
     width_provenance: str | None = None
+    state_centreline: LineString | None = None
 
     def __post_init__(self):
         if self.curb_to_curb_ft is not None:

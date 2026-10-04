@@ -27,6 +27,7 @@ from src.geometry.model import (
 )
 from src.site import load_site_config
 from src.geometry.intersection.junction import ROOT_DIR, IntersectionModel
+from src.geometry.intersection.state_centreline import attach_state_centrelines
 from src.geometry.intersection.kerb_sources import (_kerb_lines_ft,
                                                     kerb_lines_with_tags_ft)
 from src.geometry.intersection.fitting import (_centre_legs_on_traced_kerbs,
@@ -218,6 +219,9 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     else:
         parcels = _no_parcels_layer()
         corner_parcels = _no_parcels_layer(extra=("quadrant", "dist_ft"))
+
+    # Attach registered state centrelines to legs
+    attach_state_centrelines(legs, osm_area)
 
     return IntersectionModel(
         osm_area=osm_area,
