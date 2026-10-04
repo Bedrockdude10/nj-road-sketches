@@ -16,8 +16,8 @@ from shapely.geometry import LineString, Point
 
 from src.geometry.model import (frame_at, line_direction, station_offset_many)
 from src.geometry.network.corridor import (Corridor)
-from src.geometry.network.kerb import (_complement_spans, _corridor_kerb_ways,
-                                       _intersect_spans, _kerb_samples_on, _merged_spans)
+from src.geometry.network.kerb import (complement_spans, _corridor_kerb_ways,
+                                       intersect_spans, _kerb_samples_on, merged_spans)
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:    # annotation-only: this type is layered above this package, so importing it
@@ -87,7 +87,7 @@ def corridor_facts(corridor: Corridor, models: dict[str, "IntersectionModel"]) -
     openings = _openings_on(corridor, models, kerb_ways)
     no_parking = tuple((side, _no_parking_zones_on(corridor, side, models, crossings))
                        for side in ("left", "right"))
-    parkable = tuple((side, _complement_spans([(zone.start_ft, zone.end_ft)
+    parkable = tuple((side, complement_spans([(zone.start_ft, zone.end_ft)
                                                for zone in zones], 0.0, corridor.length_ft))
                      for side, zones in no_parking)
     return CorridorFacts(openings=openings, crossings=crossings,
@@ -392,7 +392,7 @@ def marked_parking_capacity(corridor: Corridor, facts: CorridorFacts, side: str,
 
     runs = facts.by_side("parkable", side)
     if within:
-        runs = _intersect_spans(runs, within)
+        runs = intersect_spans(runs, within)
     stalls, measured_ft = 0, 0.0
     for lo, hi in runs:
         measured_ft += hi - lo
@@ -441,4 +441,4 @@ def osm_window_spans(corridor: Corridor,
         if any(area.contains(point) for area in areas):
             inside.append((float(station) - _WINDOW_SAMPLE_FT / 2,
                            float(station) + _WINDOW_SAMPLE_FT / 2))
-    return _intersect_spans(_merged_spans(inside), ((0.0, corridor.length_ft),))
+    return intersect_spans(merged_spans(inside), ((0.0, corridor.length_ft),))

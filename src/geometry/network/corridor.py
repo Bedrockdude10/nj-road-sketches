@@ -18,9 +18,9 @@ from shapely.geometry import LineString
 from src.geometry.context_roads import ROADWAY_DEFAULT_WIDTH_FT
 from src.geometry.model import (STRIP_SAMPLE_FT, frame_at, is_through_street, line_direction,
                                 place_in_measured_frame, station_offset_many)
-from src.geometry.network.kerb import (KerbRun, _complement_spans,
-                                       _corridor_kerb_ways, _intersect_spans, _junction_kerb_runs,
-                                       _merged_spans, _traced_end_ft, _traced_kerb_runs,
+from src.geometry.network.kerb import (KerbRun, complement_spans,
+                                       _corridor_kerb_ways, intersect_spans, _junction_kerb_runs,
+                                       merged_spans, _traced_end_ft, _traced_kerb_runs,
                                        junction_corner_reach_ft)
 from src.geometry.network.road import (Road, _kerb_offset_at, roads_from_model)
 from typing import TYPE_CHECKING
@@ -162,12 +162,12 @@ class Corridor:
         working length is not reported as coverage. This is the denominator every count in
         scripts/corridor_report.py is printed beside.
         """
-        return _merged_spans([(run.start_ft, run.end_ft) for run in self.kerb_runs
+        return merged_spans([(run.start_ft, run.end_ft) for run in self.kerb_runs
                               if run.side == side and run.is_traced])
 
     def both_traced_spans(self) -> tuple[tuple[float, float], ...]:
         """Where BOTH kerbs are traced - the only stations at which a width is a measurement."""
-        return _intersect_spans(self.traced_spans("left"), self.traced_spans("right"))
+        return intersect_spans(self.traced_spans("left"), self.traced_spans("right"))
 
     def traced_ft(self, side: str) -> float:
         return sum(hi - lo for lo, hi in self.traced_spans(side))
@@ -186,19 +186,19 @@ class Corridor:
         reaches its working length whether or not the tracing does, so a width IS reported there.
         That is the per-leg model's answer; it is not a survey, so it is not counted as coverage.
         """
-        return tuple((lo, hi) for lo, hi in _complement_spans(self.both_traced_spans(),
+        return tuple((lo, hi) for lo, hi in complement_spans(self.both_traced_spans(),
                                                               0.0, self.length_ft)
                      if hi - lo >= min_ft)
 
     def measurable_spans(self) -> tuple[tuple[float, float], ...]:
         """Where both sides have SOME kerb to read - traced, or a modelled junction's own line."""
-        return _intersect_spans(
-            *[_merged_spans([(run.start_ft, run.end_ft) for run in self.kerb_runs
+        return intersect_spans(
+            *[merged_spans([(run.start_ft, run.end_ft) for run in self.kerb_runs
                              if run.side == side]) for side in ("left", "right")])
 
     def unmeasurable_gaps_ft(self, min_ft: float = 0.0) -> tuple[tuple[float, float], ...]:
         """The stretches where `width_at_ft` answers None because there is nothing to read."""
-        return tuple((lo, hi) for lo, hi in _complement_spans(self.measurable_spans(),
+        return tuple((lo, hi) for lo, hi in complement_spans(self.measurable_spans(),
                                                               0.0, self.length_ft)
                      if hi - lo >= min_ft)
 
