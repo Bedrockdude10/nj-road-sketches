@@ -74,7 +74,7 @@ class TestAttachStateCentrelines:
         leg = Leg("test", LineString([(0, 0), (200, 0)]), curb_to_curb_ft=40.0)
         legs = {"test": leg}
 
-        attach_state_centrelines(legs, "test_area")
+        attach_state_centrelines(legs, "hopewell_borough")
 
         assert leg.state_centreline is not None
         assert abs(leg.state_centreline.length - 200.0) < 0.1
@@ -92,7 +92,7 @@ class TestAttachStateCentrelines:
         leg = Leg("test", LineString([(0, 0), (200, 0)]), curb_to_curb_ft=40.0)
         legs = {"test": leg}
 
-        attach_state_centrelines(legs, "test_area")
+        attach_state_centrelines(legs, "hopewell_borough")
 
         assert leg.state_centreline is None
 
@@ -108,7 +108,7 @@ class TestAttachStateCentrelines:
 
         # Clear cache before and after as per spec
         registered_state_centrelines.cache_clear()
-        result = registered_state_centrelines("test_area")
+        result = registered_state_centrelines("hopewell_borough")
         registered_state_centrelines.cache_clear()
 
         assert result == {}
