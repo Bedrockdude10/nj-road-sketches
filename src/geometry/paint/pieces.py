@@ -7,7 +7,7 @@ they are handed here, so nothing in this file depends on anything else in it.
 that treats a missing width as zero draws a line the collision check cannot see. That is how a
 marking came to be checked with no width at all.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from shapely.geometry import LineString, Polygon
 from src.geometry.markings import EDGE_LINE_WIDTH_M, PaintKind
@@ -49,6 +49,7 @@ class PaintPiece:
     # keeps half a spacing off an OPENING's fillet, whose chord runs at the hatch angle and so
     # reads as a stroke, but runs straight into a CROSSING's diagonal.
     rim: "RimCause | None" = None
+    datum: dict = field(default_factory=dict)
 
     @property
     def is_fill(self) -> bool:

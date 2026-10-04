@@ -63,6 +63,7 @@ class PaintContext:
     # dash_phase: one shape per kerb, so everything crossing an opening breaks at the same
     # stations rather than each marking dashing along its own length.
     dash_phases: dict = field(default_factory=dict)
+    last_pinched: np.ndarray = field(default_factory=lambda: np.array([]))
 
     def add_surface(self, kind, polygon) -> None:
         """Ground that is BUILT rather than painted, which every marking then stops at.
@@ -108,7 +109,7 @@ class PaintContext:
         return piece
 
     def add(self, kind, geometry, leg=None, side: str | None = None, beyond_ft=None,
-            shares_a_kerb=False):
+            shares_a_kerb=False, datum: dict | None = None):
         """Clip `geometry` clear of the crossings, keep what survives, return those pieces.
 
         beyond_ft drops any surviving piece that fell WHOLLY on the JUNCTION side of the
@@ -148,7 +149,7 @@ class PaintContext:
                 continue
             if kind.is_line and not kind.is_object and part.length < MIN_LINE_LENGTH_FT:
                 continue
-            piece = PaintPiece(kind, part, leg, side)
+            piece = PaintPiece(kind, part, leg, side, datum=datum or {})
             self.pieces.append(piece)
             added.append(piece)
         if shares_a_kerb:
@@ -490,6 +491,24 @@ class PaintContext:
                             self.junction_crossings, inner_offset_ft=inner_offset_ft,
                             crosswalk_is_marked=leg_name in self.marked,
                             mouth_end_ft=None if mouth is None else mouth[1])
+
+    def paint(self, kind, leg_name: str, side: str, span: tuple[float, float], outer, inner=None,
+              step_ft: float = 1.0, **add_kwargs) -> list[PaintPiece]:
+        """Paint a marking using the datum system.
+
+        Computes the geometry and datum for a marking defined by outer/inner references.
+        """
+        from src.geometry.paint.datum import place
+
+        leg = self.state.legs[leg_name]
+        s0, s1 = span
+        n = max(2, int(np.ceil((s1 - s0) / step_ft)) + 1)
+        s = np.linspace(s0, s1, n)
+        placed = place(leg, side, s, outer, inner)
+        self.last_pinched = placed.pinched_stations
+        if placed.geometry is None:
+            return []
+        return self.add(kind, placed.geometry, leg_name, side, datum=placed.datum, **add_kwargs)
 
 
 def curbside_paint_ft(state: "DesignState", crosswalk_offsets: dict, center_ft: "Point",
