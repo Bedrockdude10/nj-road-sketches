@@ -71,7 +71,7 @@ def sidewalk_span_ft(centerline: LineString, sidewalk_lines: list[LineString],
     `span_ft` is sidewalk-centerline to sidewalk-centerline. It is an UPPER BOUND on
     curb-to-curb, never the width itself: the curb is somewhere inside it, by a verge
     that varies a lot in practice (11.8 ft/side vs 4.0 ft/side on the two field-measured
-    legs in this project). See src/sources/osm_context.py:fetch_sidewalks.
+    legs in this project). See the `sidewalks` layer of src/sources/osm_context.py:osm_layers.
     """
     left, right = [], []
     for dist in distances_ft:

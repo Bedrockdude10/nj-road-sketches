@@ -155,32 +155,43 @@ def assign_kerbs_to_roads(centerlines: list, kerb_points: np.ndarray) -> list:
     Returns [(stations, offsets)] per centreline, holding only that road's own vertices.
 
     Nearest rather than "within reach of", because reach alone lets two parallel streets claim
-    each other's kerbs and both widen to meet in the middle. Computed as one numpy pass per
-    road over all vertices.
+    each other's kerbs and both widen to meet in the middle.
     """
     if not centerlines or not len(kerb_points):
         return [(np.empty(0), np.empty(0)) for _ in centerlines]
 
-    stations, offsets = [], []
-    for line in centerlines:
-        s, o = station_offset_many(line, kerb_points)
-        stations.append(s)
-        offsets.append(o)
-    station_grid, offset_grid = np.vstack(stations), np.vstack(offsets)
+    # Each road reads only the vertices that can be its own, so the work is the number of
+    # (road, vertex) pairs within reach of each other and not roads x every vertex in the area -
+    # which for a whole borough is a grid of hundreds of millions of cells. A vertex further from
+    # a road's bounding box than MAX_HALF_WIDTH_FT is further than that from the road itself, and
+    # nothing past MAX_HALF_WIDTH_FT is claimed, so the shortcut changes no answer.
+    n = len(kerb_points)
+    best = np.full(n, np.inf)
+    owner = np.full(n, -1)
+    station_of = np.zeros(n)
+    offset_of = np.zeros(n)
+    for i, line in enumerate(centerlines):
+        x0, y0, x1, y1 = line.bounds
+        near = np.flatnonzero((kerb_points[:, 0] >= x0 - MAX_HALF_WIDTH_FT)
+                              & (kerb_points[:, 0] <= x1 + MAX_HALF_WIDTH_FT)
+                              & (kerb_points[:, 1] >= y0 - MAX_HALF_WIDTH_FT)
+                              & (kerb_points[:, 1] <= y1 + MAX_HALF_WIDTH_FT))
+        if not len(near):
+            continue
+        s, o = station_offset_many(line, kerb_points[near])
+        # Off either end of a way, the station leaves [0, length] and the vertex is past what this
+        # way covers - not its kerb, however close the perpendicular distance looks.
+        reach = np.where((s >= 0) & (s <= line.length), np.abs(o), np.inf)
+        wins = reach < best[near]     # strict: the first of two equally near roads keeps it
+        taken = near[wins]
+        best[taken], owner[taken] = reach[wins], i
+        station_of[taken], offset_of[taken] = s[wins], o[wins]
 
-    # Off either end of a way, the station leaves [0, length] and the vertex is past what this
-    # way covers - not its kerb, however close the perpendicular distance looks.
-    lengths = np.asarray([line.length for line in centerlines], dtype=float)[:, None]
-    in_span = (station_grid >= 0) & (station_grid <= lengths)
-    reach = np.where(in_span, np.abs(offset_grid), np.inf)
-    nearest = np.argmin(reach, axis=0)
-    claimed = np.take_along_axis(reach, nearest[None, :], axis=0)[0] <= MAX_HALF_WIDTH_FT
-
-    out = []
-    for i in range(len(centerlines)):
-        mine = claimed & (nearest == i)
-        out.append((station_grid[i][mine], offset_grid[i][mine]))
-    return out
+    # Nearest rather than "within reach of", because reach alone lets two parallel streets claim
+    # each other's kerbs and both widen to meet in the middle.
+    claimed = best <= MAX_HALF_WIDTH_FT
+    return [(station_of[claimed & (owner == i)], offset_of[claimed & (owner == i)])
+            for i in range(len(centerlines))]
 
 
 def _edge_offsets(line: LineString, stations: np.ndarray, offsets: np.ndarray,

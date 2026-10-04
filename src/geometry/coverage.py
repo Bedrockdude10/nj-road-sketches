@@ -17,8 +17,8 @@ after a fix.
 
 WHAT THIS CANNOT SEE. A layer with nothing surveyed in it reports no gap, so an empty fetch reads
 as a faithful drawing. That hole is closed upstream rather than here:
-osm_context.snapshot_for_site refuses a site whose window reaches outside the downloaded area, and
-fetch_kerbs raises OSMDataUnavailableError rather than returning [] on an outage.
+osm_context.osm_layers refuses an area nobody declared and reads the downloaded snapshot whole, so
+a layer is empty only where nothing is mapped in the whole area.
 """
 import math
 from dataclasses import dataclass
@@ -26,7 +26,6 @@ from dataclasses import dataclass
 from shapely.geometry import LineString, Point
 from shapely.ops import unary_union
 
-from src.render.coords import FT_TO_M
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,
@@ -58,7 +57,7 @@ CONTROL_NEAR_NODE_FT = 60.0
 # Which OSM control nodes are drawn as something. highway=crossing is deliberately not one of
 # them: it is a node on a crossing WAY carrying the pedestrian detail that lives on the node
 # rather than the way (tactile_paving, button_operated, crossing:island - see
-# osm_context.fetch_traffic_control), so it is an attribute of a feature the crossings layer already
+# osm_context.osm_layers), so it is an attribute of a feature the crossings layer already
 # counts, not a second feature. Counting it would report the same crossings twice.
 CONTROL_KINDS = ("stop", "give_way", "traffic_signals")
 
@@ -124,18 +123,17 @@ def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | No
     Only layers WITH a gap come back; an empty list means the drawing is faithful.
 
     `osm` is what the drawing itself was built from - keyed `crossings`, `traffic_control`,
-    `kerb_ways`, the fetchers' own names (src/geometry/network/area.py:area_context writes this
-    dict; a slice hands it back). Auditing against a SECOND, independently fetched pull can
-    report a gap that only exists between two Overpass calls, and a crop of the borough document
-    has no centre and radius to fetch at in the first place. Unsupplied, a layer fetches exactly
-    as it always has.
+    `kerbs`, the area layers' own names (src/sources/osm_context.py:osm_layers). Unsupplied it is
+    `model.osm`, the layers the model was loaded with, so the audit reads the same list the
+    drawing did and cannot report a gap that only exists between two pulls.
     """
     # The same guard kerbs.py:kerb_openings_from_model uses, for the same reason: a model can be a
     # stand-in that carries legs and config and no OSM at all, and every geometry test in this
     # repo has to survive one of those rather than raising on it.
-    if not all(hasattr(model, attr) for attr in ("center_wgs84", "center_ft", "legs")):
+    if not all(hasattr(model, attr) for attr in ("center_wgs84", "center_ft", "legs", "osm")):
         return []
     radius_ft = _frame_radius_ft(model, frame_radius_ft)
+    osm = osm if osm is not None else model.osm
     drawing = _read_drawing(paint)
     gaps = [layer(model, drawing, radius_ft, osm) for layer in LAYERS]
     return [gap for gap in gaps if gap is not None]
@@ -311,7 +309,7 @@ def _uncovered(layer: str, features: list[tuple]) -> Uncovered | None:
 # ---------------------------------------------------------------------------
 
 def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
-                  osm: dict | None = None) -> Uncovered | None:
+                  osm: dict) -> Uncovered | None:
     """Surveyed pedestrian crossings the drawing does not draw.
 
     All crossings are traced WAYS carrying their own position, length and skew, so each one
@@ -334,14 +332,9 @@ def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: floa
     angles, and buffering it would let it "cover" a fifth of each); what counts here is a drawn
     line that runs ALONG the crossing rather than across it.
     """
-    from src.geometry.intersection.paved import _supplied
-    from src.sources.osm_context import fetch_crossings
-
     inside, out_ft = _in_frame(model, radius_ft)
     features, unrecorded = [], []
-    crossings = _supplied(osm, "crossings",
-                          lambda: fetch_crossings(model.center_wgs84, radius_m=radius_ft * FT_TO_M))
-    for crossing in crossings:
+    for crossing in osm["crossings"]:
         line = _line_ft(crossing["coords_wgs84"])
         if not inside(line):
             continue
@@ -387,40 +380,38 @@ def _markings_label(tags: dict | None) -> str:
 
 
 def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
-              osm: dict | None = None) -> Uncovered | None:
+              osm: dict) -> Uncovered | None:
     """Traced kerb ways in the frame that the render does not draw. THE CONTROL CASE.
 
-    Expected clean, for two different reasons on the two paths. A junction FETCHES its kerbs, and
-    both renderers bound that fetch by the same one number (drawn_kerb_radius_ft), so the only
-    question is whether the drawing radius covers the frame radius. A window SUPPLIES them, and
-    kerb_lines_with_tags_ft does not re-bound a supplied layer, so both sides of this comparison
-    are the same list and the question cannot arise - which is the point. It did arise: the
-    circle cut 11 of a 1,000 ft window's 58 in-frame kerb ways out of the drawing and this
-    reported every one of them.
+    Expected clean, and that is what makes it a control: a renderer is handed every traced kerb of
+    the area (kerb_lines_with_tags_ft with no relation asked) and crops it to its own view, so a
+    kerb in the frame that is not in the drawing's input is one that failed to project - a way
+    with no usable geometry. It cannot see a renderer that drops kerbs after being handed them;
+    that is what the in-frame kerb count against the rendered output is for.
 
-    Compared BY WAY ID rather than geometrically, because both sides of this comparison are the
-    same fetch through the same projection - a geometric test would add a tolerance to a
+    Compared BY WAY ID rather than geometrically, because both sides of this comparison
+    are the same layer through the same projection - a geometric test would add a tolerance to a
     comparison that has an exact answer.
     """
-    from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
+    from src.geometry.intersection import kerb_lines_with_tags_ft
 
     inside, out_ft = _in_frame(model, radius_ft)
-    kerb_ways = osm.get("kerb_ways") if osm else None
-    drawn_ids = {way_id for _line, _tags, way_id
-                 in kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                            radius_ft=drawn_kerb_radius_ft(), kerbs=kerb_ways)}
-    features = [(way_id in drawn_ids, out_ft(line),
+    handed_over = {way_id for _line, _tags, way_id in kerb_lines_with_tags_ft(osm)}
+    features = [(way_id in handed_over, out_ft(line),
                  f"traced kerb way {way_id}, {line.length:.0f} ft long, kerb={(tags or {}).get('kerb', 'untagged')}")
-                for line, tags, way_id in kerb_lines_with_tags_ft(model.center_wgs84,
-                                                                  model.center_ft,
-                                                                  radius_ft=radius_ft,
-                                                                  kerbs=kerb_ways)
+                for line, tags, way_id in _kerb_ways_ft(osm)
                 if inside(line)]
     return _uncovered("kerbs", features)
 
 
+def _kerb_ways_ft(osm: dict):
+    """(line in feet, tags, way id) for every traced kerb way of the area that has a line."""
+    return [(_line_ft(kerb["coords_wgs84"]), kerb.get("tags"), kerb.get("id"))
+            for kerb in osm["kerbs"] if len(kerb.get("coords_wgs84") or []) >= 2]
+
+
 def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
-                   osm: dict | None = None) -> Uncovered | None:
+                   osm: dict) -> Uncovered | None:
     """Surveyed kerb ramps - kerb ways tagged tactile_paving=yes - with no pad drawn on them.
 
     The traced KERB WAY is the ramp's geometry (OSM records a ramp as `barrier=kerb` tagged
@@ -433,10 +424,8 @@ def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: flo
 
     inside, out_ft = _in_frame(model, radius_ft)
     pads = drawing.props_of(("tactile_paving_pad",))
-    kerb_ways = osm.get("kerb_ways") if osm else None
     features = []
-    for line, tags, way_id in kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                                      radius_ft=radius_ft, kerbs=kerb_ways):
+    for line, tags, way_id in kerb_lines_with_tags_ft(osm):
         if (tags or {}).get("tactile_paving") != "yes" or not inside(line):
             continue
         near_ft = min((line.distance(pad) for pad in pads), default=float("inf"))
@@ -447,7 +436,7 @@ def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: flo
 
 
 def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
-                         osm: dict | None = None) -> Uncovered | None:
+                         osm: dict) -> Uncovered | None:
     """Surveyed stop / give-way / signal nodes with no hardware drawn for them.
 
     Matched on the prop TYPE as well as the distance, so a node is only covered by hardware of
@@ -457,15 +446,11 @@ def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_f
     which kerb its sign stands on (see _osm_control_props), and overstating the pairing would
     be worse than reporting the junction.
     """
-    from src.geometry.intersection.paved import _supplied
     from src.render.props import control_nodes_ft  # local: props imports geometry, avoid a cycle
-    from src.sources.osm_context import fetch_traffic_control
 
     inside, out_ft = _in_frame(model, radius_ft)
     features = []
-    nodes = _supplied(osm, "traffic_control",
-                      lambda: fetch_traffic_control(model.center_wgs84, radius_m=radius_ft * FT_TO_M))
-    for node in control_nodes_ft(nodes):
+    for node in control_nodes_ft(osm["traffic_control"]):
         kind = (node.get("tags") or {}).get("highway")
         if kind not in CONTROL_KINDS:
             continue

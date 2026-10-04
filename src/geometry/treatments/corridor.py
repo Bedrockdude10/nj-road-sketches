@@ -34,6 +34,7 @@ from src.geometry.treatments.bikeways import (BIKE_LANE_BOLLARD_SPACING_FT,
 from src.geometry.treatments.parking import (MarkedParking, hold_travel_lane_at_target,
                                              osm_derived_baseline)
 from src.geometry.treatments.state import DesignState
+from src.sources.osm_context import municipality_containing
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,
@@ -50,7 +51,7 @@ def municipality_of(model: "IntersectionModel") -> str | None:
     draw it correctly-shaped and confidently labelled, which is the expensive kind of wrong.
 
     CONFIG WINS BY BEING PRESENT, which is DesignState.centerline_style's precedence: a site that
-    names its town has overridden the survey and no boundary is fetched. Underneath it the
+    names its town has overridden the survey and no boundary is consulted. Underneath it the
     OBSERVED fact, because which polygon holds a junction is not a thing a config knows better -
     OSM's admin_level=8 relation is where `municipal_limits_ft` already comes from
     (src/geometry/intersection/municipality.py), and measured across this project's nine sites
@@ -69,41 +70,25 @@ def municipality_of(model: "IntersectionModel") -> str | None:
     _legs_on_route refuses on it rather than treating the street.
     """
     stated = (model.config.get("intersection") or {}).get("municipality")
-    return stated if stated else _containing_municipality(getattr(model, "center_wgs84", None))
+    return stated if stated else _containing_municipality(model)
 
 
-def _containing_municipality(center_wgs84) -> str | None:
-    """OSM's name for the admin_level=8 polygon holding a point, or None where it cannot say.
+def _containing_municipality(model: "IntersectionModel") -> str | None:
+    """OSM's name for the admin_level=8 polygon holding the junction node, or None where it cannot say.
 
-    THE CENTRE IS PASSED TO context_radius_m AND IT IS NOT AT municipality.py's OWN CALL. That
-    one reads the radius with no centre, which hands it whatever reach the last
-    `load_intersection_model` declared - right inside the load that declared it, and stale for
-    anyone asking afterwards. A treatment asks afterwards by definition: after wbroad_lanning's
-    load declares its 2,307.5 ft southwest leg, this same fetch at the Broad & Greenwood window
-    centre opens a 703.3 m window, falls outside every snapshot area and raises. Which town a
-    junction is in may not depend on what ran before it in the process - see
-    src/render/frame.py:_reach_for, whose whole point is that a caller passing its own centre is
-    told 0.0 unless the declaration is its own.
-
-    A REFUSED WINDOW IS "CANNOT SAY", NOT A TRACEBACK OUT OF A TREATMENT. Both refusals caught
-    below are about the SNAPSHOT and not about the street - a point no downloaded area covers,
-    or an offline run with that area uncached - and the caller already has the message worth
-    printing: _legs_on_route names the route and says why it will not apply it.
+    ASKED OF THE MODEL'S OWN AREA (`model.osm`), by containment of the junction node: which town a
+    junction is in is a fact about the network, and may not depend on what ran before it in the
+    process or on how far a view happens to reach. A model that carries no OSM layers - a stand-in,
+    or a window built without them - cannot say, and neither can a point no closed boundary holds
+    (lavallette_reese: its ring is clipped by the snapshot area and dropped, not closed for).
+    The caller already has the message worth printing: _legs_on_route names the route and says why
+    it will not apply it.
     """
-    if center_wgs84 is None:
+    osm = getattr(model, "osm", None)
+    center_wgs84 = getattr(model, "center_wgs84", None)
+    if not osm or center_wgs84 is None:
         return None
-    # Function-level: the intersection package is layered above the treatments, and the sources
-    # layer under both. Same reason as the terminus import in _end_where_it_leaves_town.
-    from src.geometry.intersection.municipality import BOUNDARY_CONTEXT_RADIUS_M
-    from src.render.frame import context_radius_m
-    from src.sources.data_loader import OfflineCacheMiss
-    from src.sources.osm_context import SiteOutsideSnapshotError, fetch_municipality_containing
-
-    try:
-        found = fetch_municipality_containing(
-            center_wgs84, context_radius_m(BOUNDARY_CONTEXT_RADIUS_M, center_wgs84))
-    except (SiteOutsideSnapshotError, OfflineCacheMiss):
-        return None
+    found = municipality_containing(osm, center_wgs84)
     return None if found is None else found[0]
 
 

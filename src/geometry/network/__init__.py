@@ -38,7 +38,7 @@ from src.geometry.network.road import (
                                     roads_from_model,
 )
 from src.geometry.network.kerb import (
-                                    CORRIDOR_KERB_RADIUS_M,
+                                    CORRIDOR_KERB_GAP_FT,
                                     KERB_FROM_JUNCTION,
                                     KERB_FROM_TRACING,
                                     KERB_RUN_JOIN_FT,
@@ -57,7 +57,6 @@ from src.geometry.network.kerb import (
                                     junction_corner_reach_ft,
 )
 from src.geometry.network.corridor import (
-                                    CORRIDOR_EXTENSION_FT,
                                     Corridor,
                                     JunctionOnRoad,
                                     _ALIGNMENT_BBOX_MARGIN_M,
@@ -114,8 +113,7 @@ from src.geometry.network.facts import (
 )
 
 __all__ = [
-                                    "CORRIDOR_EXTENSION_FT",
-                                    "CORRIDOR_KERB_RADIUS_M",
+                                    "CORRIDOR_KERB_GAP_FT",
                                     "KERB_FROM_JUNCTION",
                                     "KERB_FROM_TRACING",
                                     "KERB_RUN_JOIN_FT",

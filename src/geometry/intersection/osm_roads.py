@@ -11,7 +11,6 @@ from shapely import affinity
 from shapely.geometry import LineString, Point
 
 from src.render.coords import wgs84_to_state_plane
-from src.sources.osm_context import fetch_roads
 from src.geometry.model import (
     Alignment,
     leg_bearing_deg,
@@ -64,7 +63,6 @@ def _bearing_diff(a: float, b: float) -> float:
 # the snap below is worth reporting. Sub-foot gaps are digitizing noise; anything larger
 # is a real disagreement between the two sources and worth seeing in the phase output.
 SNAP_REPORT_THRESHOLD_FT = 2.0
-ROAD_CONTEXT_RADIUS_M = 130
 
 
 def _snap_distance_ft(line: LineString, center_ft: Point) -> float:
@@ -208,31 +206,25 @@ ROAD_MATCH_HIGHWAY_CLASSES = frozenset({
 })
 
 
-def _match_legs_to_osm_roads(legs: dict, center_wgs84: Point, center_ft: Point,
-                              roads: list[dict] | None = None) -> dict:
-    """{leg name: (tags, aligned)} for the OSM highway way each leg runs along.
+def _match_legs_to_osm_roads(legs: dict, osm: dict) -> dict:
+    """{leg name: [RoadSpan]} for the OSM highway ways each leg runs along.
 
     `aligned` is True when the way is drawn in the same direction the leg points outward.
     It decides whether OSM's left/right mean the leg's left/right or the reverse.
 
     Matched on geometry rather than on the street name in config.yaml: names disagree
     between sources ("W Broad St" vs "West Broad Street"), and a leg is a piece of a
-    specific way, not of a name.
+    specific way, not of a name. Every way of the area is a candidate and the leg's own
+    centreline decides which are its own, so no circle about a junction is needed to keep a
+    far-off street out.
 
-    A caller may SUPPLY the ways, and a window onto the borough document must - this is the one
-    call that carries OSM's operational tags onto the legs, and skipping it is not a missing
-    layer but a missing STATEMENT: 5 of the 7 named ways through Broad & Greenwood are
+    This is the one call that carries OSM's operational tags onto the legs, and skipping it is not
+    a missing layer but a missing STATEMENT: 5 of the 7 named ways through Broad & Greenwood are
     `overtaking=no`, and without this every one of them drew a dashed single yellow, which says
     on the sheet that passing is permitted where the survey says it is not. `parking:left` and
     `parking:right` travel the same road (see IntersectionModel.parking_restriction_spans).
     """
-    if roads is None:
-        try:
-            roads = fetch_roads(center_wgs84, radius_m=ROAD_CONTEXT_RADIUS_M)
-        except Exception as e:   # operational tags are an enhancement, not a dependency
-            print(f"  NOTE: couldn't read OSM road tags ({type(e).__name__}); centerline styles "
-                  f"fall back to the site config.")
-            return {}
+    roads = osm["roads"]
 
     # Projected once, outside the leg loop. Each candidate way was re-transformed for every
     # leg, so a 4-leg junction did the same coordinate transform four times per way.

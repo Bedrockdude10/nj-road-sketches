@@ -92,7 +92,7 @@ from src.geometry.treatments.corners import (AddCurbExtension, CURB_EXTENSION_DE
                                              VALID_DAYLIGHT_DEVICES,
                                              bulb_out_corner_pair,
                                              find_corner)
-from src.geometry.treatments.crossings import (CROSSING_CONTEXT_RADIUS_M, RaiseCrossing,
+from src.geometry.treatments.crossings import (RaiseCrossing,
                                                RefugeIsland,
                                                SetCenterlineStyle,
                                                ShiftCrosswalk,
@@ -137,7 +137,6 @@ __all__ = [
                                           "CORNER_APRON_DEFAULT_EXTENT_FT",
                                           "CORNER_HATCHING_DEFAULT_DEPTH_FT",
                                           "CORRIDOR_SIDE",
-                                          "CROSSING_CONTEXT_RADIUS_M",
                                           "CURB_EXTENSION_DEVICES",
                                           "CURB_EXTENSION_FACE_RADIUS_FT",
                                           "DAYLIGHT_DEVICES_AS_POSTS",

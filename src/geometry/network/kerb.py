@@ -42,11 +42,12 @@ if TYPE_CHECKING:    # annotation-only: this type is layered above this package,
 # WHAT IS NOT INVENTED. The kerb is the traced kerb and nothing else: where the tracing stops,
 # `width_at_ft` returns None rather than interpolating across the gap (see _kerb_offset_at).
 
-# How far out traced kerb is collected for a corridor. NOT the junction fetch's 120 m: Greenwood
-# Ave to Louellen St is 413 m, so 120 m circles leave 173 m never fetched. 400 m is the widest
-# radius whose window still fits every site's snapshot area (500 m fails at W Broad & Louellen).
-# at any member junction covers the whole block to the next one.
-CORRIDOR_KERB_RADIUS_M = 400
+# How long a stretch of street with NO traced kerb beside it still counts as the same street when
+# the road is carried out past its outermost modelled leg. Longer than a side street's mouth or a
+# driveway (the 34-48 ft untraced gaps at Broad St's cross streets), shorter than a block nobody has
+# traced - past that the tracing has stopped, and the road stops with it rather than leaping to the
+# next surveyed block and inventing a street across the gap.
+CORRIDOR_KERB_GAP_FT = 100.0
 
 # Two traced kerb ways whose station ranges come this close are one unbroken kerb. OSM splits a
 # kerb wherever a tag changes - at every dropped kerb across a driveway - so adjacent ways share
@@ -125,8 +126,7 @@ def _complement_spans(spans, lo: float, hi: float) -> tuple[tuple[float, float],
     return tuple((a, b) for a, b in out if b > a)
 
 
-def _traced_end_ft(align: LineString, node_ft: float, forward: bool, kerb_ways,
-                   max_ft: float, centre_xy=None) -> float:
+def _traced_end_ft(align: LineString, node_ft: float, forward: bool, kerb_ways) -> float:
     """The ABSOLUTE station on the alignment where the traced kerb stops, out from a junction node.
 
     Measured against NJDOT's alignment rather than the finished corridor, because the corridor
@@ -134,40 +134,39 @@ def _traced_end_ft(align: LineString, node_ft: float, forward: bool, kerb_ways,
     here cannot invent street.
 
     ANCHORED ON THE NODE, NOT ON THE SEAM, AND THAT IS THE WHOLE POINT. This used to take the end
-    of the junction piece and return a reach measured FROM it. Both the search window and the cap
-    were then relative to a point that moves with ROAD_SKETCHES_FRAME_SCALE, because the piece is a
-    frame-cut leg - so a wider sheet slid the window outward and the corridor discovered street
-    that a narrower sheet had not looked for. Greenwood Ave came out 1,695 ft at 1x and 1,891 ft at
-    2.5x, and a facility's governing cross-section is taken over the span, so the sheet was voting
-    on the design. A junction centre is a surveyed fact and does not move, so anchoring here makes
-    the answer a property of the survey and leaves the frame to crop.
+    of the junction piece and return a reach measured FROM it, which is a frame-cut leg - so a
+    wider sheet slid the window outward and the corridor discovered street that a narrower sheet
+    had not looked for. Greenwood Ave came out 1,695 ft at 1x and 1,891 ft at 2.5x, and a
+    facility's governing cross-section is taken over the span, so the sheet was voting on the
+    design. A junction centre is a surveyed fact and does not move, so anchoring here makes the
+    answer a property of the survey and leaves the frame to crop.
 
-    THE CAP IS A RADIUS, SO IT IS APPLIED AS ONE. `max_ft` is CORRIDOR_KERB_RADIUS_M - the distance
-    past which no kerb was FETCHED, and the fetch is a circle round the junction. Capping the
-    arc length instead let the road run past its own fetch window wherever the street bends, since
-    an arc is always longer than its chord: Broad St came out 4,655 ft with only 4,531 inside a
-    window, and an opening count over the last 124 ft would have been counting where nothing was
-    looked for. So a kerb point earns reach only if it is inside the circle as well as along the
-    road.
+    THE REACH IS WHERE THE TRACING STOPS, NOT A CIRCLE. Walking out from the node, the road goes on
+    while traced kerb is beside the alignment, and ends at the first stretch longer than
+    CORRIDOR_KERB_GAP_FT with none. A circle about the node used to do this job by accident -
+    nothing was fetched past it - and a corridor could be cut short wherever the street bent
+    inside it or run across a hole to the next block's tracing inside it.
     """
     from src.geometry.intersection import KERB_PLAUSIBLE_HALF_WIDTH_FT
 
     near, far = KERB_PLAUSIBLE_HALF_WIDTH_FT
-    lo = node_ft if forward else max(node_ft - max_ft, 0.0)
-    hi = min(node_ft + max_ft, align.length) if forward else node_ft
-    centre = (np.asarray(align.interpolate(node_ft).coords[0]) if centre_xy is None
-              else np.asarray(centre_xy, dtype=float))
-    end = node_ft
+    covered = []
     for line, _tags in kerb_ways.values():
-        points = _dense_kerb_points(line)
-        stations, offsets = station_offset_many(align, points)
+        if line.distance(align) > far:
+            continue
+        stations, offsets = station_offset_many(align, _dense_kerb_points(line))
         beside = (np.abs(offsets) >= near) & (np.abs(offsets) <= far)
-        within_radius = np.hypot(*(points - centre).T) <= max_ft
-        inside = beside & within_radius & (stations >= lo) & (stations <= hi)
-        if inside.any():
-            here = stations[inside]
-            end = max(end, float(here.max())) if forward else min(end, float(here.min()))
-    return end
+        covered.append(stations[beside & (stations >= 0.0) & (stations <= align.length)])
+    if not covered:
+        return node_ft
+    stations = np.unique(np.concatenate(covered))
+    out = np.sort(stations[stations >= node_ft] if forward else -stations[stations <= node_ft])
+    end = node_ft if forward else -node_ft
+    for station in out:
+        if station - end > CORRIDOR_KERB_GAP_FT:
+            break
+        end = max(end, float(station))
+    return end if forward else -end
 
 
 def _dense_kerb_points(line: LineString) -> np.ndarray:
@@ -182,18 +181,21 @@ def _dense_kerb_points(line: LineString) -> np.ndarray:
 
 
 def _corridor_kerb_ways(models: dict[str, "IntersectionModel"]) -> dict:
-    """{OSM way id: (LineString in feet, tags)} for every traced kerb near any member junction.
+    """{OSM way id: (LineString in feet, tags)} for every traced kerb in the members' areas.
 
     Keyed by way id and unioned across the members, so a kerb traced as one way down a whole block
-    is read once. Fetched at CORRIDOR_KERB_RADIUS_M rather than the junction radius - see the
-    constant.
+    is read once - and the members of a corridor usually share one area, whose layer is then read
+    once. Which of them lie along THIS road is each reader's own geometric test of the road.
     """
     from src.geometry.intersection import to_state_plane
-    from src.sources.osm_context import fetch_kerbs
 
     ways = {}
+    seen: set[int] = set()
     for model in models.values():
-        for kerb in fetch_kerbs(model.center_wgs84, radius_m=CORRIDOR_KERB_RADIUS_M):
+        if id(model.osm["kerbs"]) in seen:
+            continue
+        seen.add(id(model.osm["kerbs"]))
+        for kerb in model.osm["kerbs"]:
             coords = kerb.get("coords_wgs84")
             if not coords or len(coords) < 2:
                 continue          # a lone barrier=kerb NODE has no line to read
@@ -263,6 +265,10 @@ def _kerb_samples_on(centerline: LineString, node_stations, line: LineString) ->
     from src.geometry.model import CURB_POINT_CORNER_ZONE_FT, CURB_POINT_MAX_SKEW_DEG
 
     near, far = KERB_PLAUSIBLE_HALF_WIDTH_FT
+    # A kerb way further from the road than the plausible band cannot have a sample inside it, and
+    # the area holds every kerb there is - so it is turned away before it is densified.
+    if line.distance(centerline) > far:
+        return np.empty(0), np.empty(0), np.empty((0, 2)), np.zeros(0, bool)
     points = _dense_kerb_points(line)
     if len(points) < 2:
         return np.empty(0), np.empty(0), points, np.zeros(len(points), bool)

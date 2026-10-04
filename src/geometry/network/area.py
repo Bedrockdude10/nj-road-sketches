@@ -24,7 +24,8 @@ from src.render.coords import wgs84_to_state_plane
 from src.sources.observations import ELEMENT_FROM_OSM, apply_observations, load_observations
 from src.sources.osm_context import (SNAPSHOT_AREAS, fetch_borough_osm, is_building,
                                      is_crossing_way, is_driveway, is_kerb, is_parking_aisle,
-                                     is_parking_lot, is_road, is_sidewalk, is_stop_line)
+                                     is_parking_lot, is_road, is_sidewalk, is_stop_line,
+                                     osm_layers)
 
 Bbox = tuple[float, float, float, float]
 NodeXY = dict[int, tuple[float, float]]
@@ -115,10 +116,8 @@ def _snapshot_center(bbox: Bbox) -> tuple[float, float]:
 def _area_kerb_ways(snapshot: dict, xy: NodeXY) -> dict[int, tuple[LineString, dict]]:
     """{way id: (line in feet, tags)} for every traced kerb in the snapshot.
 
-    Read straight from the snapshot rather than per-junction at a radius, which is what
-    `_corridor_kerb_ways` must do. That radius is also a failure mode: ebroad_elm's 400 m window
-    reaches past the borough bbox and raises SiteOutsideSnapshotError, so the site cannot take
-    part in a corridor at all. An area has no centre to measure from, so the question disappears.
+    Read straight from the snapshot: an area has no centre to measure from, so no circle decides
+    which kerbs exist.
     """
     return {way["id"]: (line, way.get("tags") or {})
             for way in snapshot["ways"]
@@ -149,7 +148,7 @@ def area_corridors(area: str = "hopewell_borough",
     snapshot = snapshot if snapshot is not None else fetch_borough_osm(bbox=bbox)
     xy = _projected_nodes(snapshot["nodes"])
 
-    found = municipal_boundary_ft(Point(*_snapshot_center(bbox)))
+    found = municipal_boundary_ft(osm_layers(area), Point(*_snapshot_center(bbox)))
     if found is None:
         raise RuntimeError(f"no admin_level=8 boundary at the centre of {area!r} - its streets "
                            f"have nothing to clip to, and municipality is half of "
@@ -271,7 +270,7 @@ def _multipolygon_rows(snapshot: dict, xy: NodeXY, boundary: Polygon) -> tuple[l
     as `_connected_runs` reconstructs a corridor from OSM's own splits. A relation whose outer
     members don't close all the way round - here, because a member way sits outside this
     snapshot's bbox and was never downloaded - yields no ring and is counted as unresolved, never
-    closed for it (the same refusal `fetch_municipality_containing` makes for the admin ring).
+    closed for it (the same refusal `osm_layers` makes for the admin ring).
     """
     ways = {w["id"]: w for w in snapshot["ways"]}
     rows: list[dict] = []
@@ -320,10 +319,8 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
     (`height_from_tags`, `_markings_from_tags`), so storing either alongside the tags makes a
     second copy free to disagree with the first. The reader derives what it needs, once.
 
-    Read from the SAME snapshot `area_corridors` reads, not through `fetch_buildings` and
-    friends: those take a centre and a radius, and the largest radius that fits inside the
-    declared bbox is smaller than the borough, so the corners would lose their context. An area
-    has no centre to measure from, which is the same reason `_area_kerb_ways` exists.
+    Read from the SAME snapshot `area_corridors` reads. An area has no centre to measure from,
+    which is the same reason `_area_kerb_ways` exists.
 
     THE ONE MERGE POINT for observations/<area>.yaml (src/sources/observations.py): every
     field observation is additive OSM tags on an OSM element, applied to the snapshot here,
@@ -334,7 +331,7 @@ def area_context(area: str = "hopewell_borough", snapshot: dict | None = None) -
     snapshot = snapshot if snapshot is not None else fetch_borough_osm(bbox=bbox)
     snapshot = apply_observations(snapshot, load_observations(area))
     xy = _projected_nodes(snapshot["nodes"])
-    found = municipal_boundary_ft(Point(*_snapshot_center(bbox)))
+    found = municipal_boundary_ft(osm_layers(area), Point(*_snapshot_center(bbox)))
     if found is None:
         raise RuntimeError(f"no admin_level=8 boundary at the centre of {area!r}")
     _, boundary = found

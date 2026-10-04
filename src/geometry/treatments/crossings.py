@@ -153,16 +153,12 @@ def resolved_crossing_stations(model: "IntersectionModel", state: DesignState) -
     Local imports for the usual cycle: src/render/crosswalks.py imports DesignState from here.
     """
     from src.render.crosswalks import resolve_crosswalk_offsets
-    from src.sources.osm_context import fetch_crossings
 
-    crossings = fetch_crossings(model.center_wgs84, radius_m=CROSSING_CONTEXT_RADIUS_M)
+    # The area's whole crossings layer, which is the one the renderers resolve against too: each
+    # leg claims the crossings that lie across IT, so no radius is needed to keep the next
+    # junction's out.
     return {name: offset.offset_ft
-            for name, offset in resolve_crosswalk_offsets(state, crossings).items()}
-
-
-# Matches src/render/export.py and src/render/plan_view.py, so a crossing resolved for a
-# treatment is the same crossing the renderers resolve rather than one from a different radius.
-CROSSING_CONTEXT_RADIUS_M = 130
+            for name, offset in resolve_crosswalk_offsets(state, model.osm["crossings"]).items()}
 
 
 @dataclass(frozen=True)
