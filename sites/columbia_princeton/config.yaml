@@ -35,7 +35,6 @@ intersection:
     Also worth knowing: NJDOT records Columbia Ave under SRI 11051089__ - the SAME
     SRI as N/S Greenwood Ave, which NJDOT likewise names "COLUMBIA AVE" (see the
     main README's key findings). Here the NJDOT name is the correct one.
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # A full 4-leg crossing, and all four legs are marked. The inventory records
   # exactly four crossings here (Columbia W and E, Princeton N and S) and OSM maps

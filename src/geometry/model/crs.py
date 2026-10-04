@@ -48,19 +48,6 @@ def buffer_point_wgs84(point: Point, radius_m: float) -> tuple[float, float, flo
     return _buffer_bounds_wgs84(point.x, point.y, float(radius_m))
 
 
-def clip_to_radius(gdf: gpd.GeoDataFrame, center: Point, radius_m: float) -> gpd.GeoDataFrame:
-    """Clip a WGS84 GeoDataFrame to a circular radius (meters) around center,
-    trimming feature geometry (not just filtering by bbox)."""
-    center_gs = gpd.GeoSeries([center], crs=WGS84)
-    utm_crs = _utm_crs_at(center.x, center.y)
-    center_utm = center_gs.to_crs(utm_crs).iloc[0]
-    circle_wgs84 = gpd.GeoSeries([center_utm.buffer(radius_m)], crs=utm_crs).to_crs(WGS84).iloc[0]
-
-    clipped = gdf[gdf.intersects(circle_wgs84)].copy()
-    clipped["geometry"] = clipped.intersection(circle_wgs84)
-    return clipped[~clipped.geometry.is_empty]
-
-
 def reproject_to_state_plane(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Reproject a GeoDataFrame to NJ State Plane, NAD83(HARN) (feet)."""
     return gdf.to_crs(NJ_STATE_PLANE_FT)

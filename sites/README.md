@@ -40,7 +40,6 @@ intersection:
   anchor_query: "..."                 # a Nominatim-geocodable address/place to anchor the OSM search bbox
   resolution_method: >                # free text - document how you cross-checked the resolved point
     ...
-  clip_radius_m: 150                  # how far out to load/clip the road network around the center
   leg_working_length_ft: 130          # DEFAULT for how far each leg's centerline extends from the
                                        # intersection - a leg may override it with working_length_ft
   existing_marked_crosswalks: [...]   # leg names that currently have ANY marked crosswalk (checked against

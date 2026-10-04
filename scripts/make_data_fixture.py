@@ -5,8 +5,9 @@
 
 WHY. data/ is a 391 MB third-party download kept out of git, so every test that builds a real
 junction - 333 of 707, including every geometry golden - skips in CI and in any checkout without
-it. But a site reads 9 road segments out of NJDOT's 105,838 and the parcels within a few hundred
-feet: the union of all six sites, padded a quarter-mile, is under a megabyte. tests/fixtures/
+it. But a site reads only the road segments and parcels over its OSM AREA (sites/osm_areas.yaml) out
+of NJDOT's 105,838 segments and the whole county's parcels: the areas the sites sit in are a few
+square miles, a few megabytes. tests/fixtures/
 osm_cache already established the pattern for Overpass; this is the same trick for the two
 GIS layers and the tax list.
 
@@ -23,9 +24,9 @@ features - a wrong measurement that looks right:
     convert_road_network.py). A clip that is not a byte-faithful subset is deleted, not kept.
   * FIXTURE.json records how far the clip reaches, and load_road_network/load_parcels raise
     FixtureExtentExceeded on a read that runs off the edge of it (or on an unbounded read).
-    Note the read bbox comes from each site's `clip_radius_m`, NOT from ROAD_SKETCHES_FRAME_SCALE -
-    the frame scales leg lengths and the OSM context radius, not these two GIS reads - so
-    editing clip_radius_m or adding a site is what makes the guard fire.
+    The reads are over each site's OSM AREA and nothing else - not ROAD_SKETCHES_FRAME_SCALE, which
+    scales leg lengths - so a site in an area that is not in the clip is what makes the guard
+    fire, and a second site in an area that is, is not.
 
 tests/test_data_fixture.py closes the loop from the other side: it builds every site from the
 clip AND from the real data/ and compares the resolved models. That test needs the download, so
@@ -45,22 +46,18 @@ import geopandas as gpd
 import pandas as pd
 import pyogrio
 
-from src.geometry.model import NJ_STATE_PLANE_FT, WGS84, buffer_point_wgs84
+from src.geometry.model import NJ_STATE_PLANE_FT
 from src.site import list_sites, load_site_config
-from src.sources.assessor import BUILDING_JOIN_RADIUS_FT
 from src.sources.data_loader import (DATA_DIR, FIXTURE_MANIFEST_NAME, _resolve_indexed_path,
-                                     _unpack_single_part)
+                                     _unpack_single_part, wgs84_box_in_state_plane)
+from src.sources.osm_context import SNAPSHOT_AREAS
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = ROOT_DIR / "tests" / "fixtures" / "data"
 
-# The parcel reads are load.py's 300 ft context ring and assessor.py's building-join radius
-# (130 m); take the larger so the clip covers both.
-PARCEL_READ_RADIUS_FT = max(300.0, BUILDING_JOIN_RADIUS_FT)
-
-# A quarter mile past the furthest read any site makes today. Costs kilobytes and absorbs a
-# clip_radius_m edit or a new site a few streets over without a regenerate.
-DEFAULT_PAD_FT = 1320.0
+# Slack past each area's box. The loaders read EXACTLY the area, so this only has to absorb float
+# noise and a small edit to an area; a new area is a new box and a regenerate, which is correct.
+DEFAULT_PAD_FT = 300.0
 
 # Columns the parcel clip carries. NOT "all of them": LASTUPDATE is a shapefile Date, and OGR
 # cannot round-trip a date through a shapefile as anything but a string ("created as String
@@ -74,34 +71,47 @@ TAX_COLUMNS = ("GIS_PIN", "BLDG_DESC")
 FT_PER_DEG_LAT = 364000.0   # good to ~1% at this latitude; padding, not geometry
 
 
-def site_extents(sites: list[str]) -> tuple[tuple, tuple, dict]:
-    """(wgs84 roads bbox, NJ-plane parcels bbox, per-site detail) covering every site's reads.
+def site_reads(sites: list[str]) -> dict[str, dict]:
+    """{site: {"area", "roads_wgs84", "parcels_nj_ft", "layers"}} - the box each site's loaders read.
 
-    The bboxes are built with the SAME calls the loaders make - buffer_point_wgs84 at
-    clip_radius_m * 1.3 for roads, a square of PARCEL_READ_RADIUS_FT for parcels - rather than
-    re-derived here, because a fixture sized by a second copy of that arithmetic is exactly the
-    kind of agreeing-but-wrong pair this repo keeps getting bitten by.
+    The boxes ARE the area (SNAPSHOT_AREAS[intersection.osm_area]), and the parcel box is made by
+    the loaders' own wgs84_box_in_state_plane rather than re-derived here, because a fixture sized
+    by a second copy of that arithmetic is exactly the kind of agreeing-but-wrong pair this repo
+    keeps getting bitten by.
     """
-    road_boxes, parcel_boxes, detail = [], [], {}
+    reads = {}
     for site in sites:
         config = load_site_config(site)
-        lon, lat = config["intersection"]["center_wgs84"]
-        centre = gpd.points_from_xy([lon], [lat], crs=WGS84)[0]
-        clip_radius_m = config["intersection"]["clip_radius_m"]
-        roads = buffer_point_wgs84(centre, clip_radius_m * 1.3)
-        centre_ft = gpd.GeoSeries([centre], crs=WGS84).to_crs(NJ_STATE_PLANE_FT).iloc[0]
-        parcels = (centre_ft.x - PARCEL_READ_RADIUS_FT, centre_ft.y - PARCEL_READ_RADIUS_FT,
-                   centre_ft.x + PARCEL_READ_RADIUS_FT, centre_ft.y + PARCEL_READ_RADIUS_FT)
-        road_boxes.append(tuple(float(v) for v in roads))
-        parcel_boxes.append(parcels)
-        detail[site] = {"clip_radius_m": clip_radius_m, "roads_wgs84": road_boxes[-1],
-                        "parcels_nj_ft": parcels}
-    return _union(road_boxes), _union(parcel_boxes), detail
+        area = config["intersection"]["osm_area"]
+        bbox = tuple(float(v) for v in SNAPSHOT_AREAS[area])
+        parcels = tuple(float(v) for v in wgs84_box_in_state_plane(bbox).total_bounds)
+        reads[site] = {"area": area, "roads_wgs84": bbox, "parcels_nj_ft": parcels,
+                       "layers": config.get("data_sources") or {}}
+    return reads
 
 
-def _union(boxes: list[tuple]) -> tuple:
-    return (min(b[0] for b in boxes), min(b[1] for b in boxes),
-            max(b[2] for b in boxes), max(b[3] for b in boxes))
+def boxes_for(reads: dict[str, dict], layer: str, key: str, source: Path, pad_ft: float,
+              degrees: bool) -> list[tuple]:
+    """The padded, de-duplicated boxes of every site that reads `source` as `layer`.
+
+    A LIST, not their union: two areas that are far apart (Hopewell and Lavallette are 60 miles
+    apart) bound most of the state, and a clip of everything in between is not a fixture.
+    """
+    boxes: list[tuple] = []
+    for read in reads.values():
+        configured = read["layers"].get(layer)
+        if configured and ROOT_DIR / configured == source:
+            box_ = _pad(read[key], pad_ft, degrees=degrees)
+            if box_ not in boxes:
+                boxes.append(box_)
+    return boxes
+
+
+def read_boxes(source: Path, boxes: list, columns: list[str] | None = None) -> gpd.GeoDataFrame:
+    """The union of a bbox read per box, each feature once (by its FID in the source file)."""
+    frames = [gpd.read_file(source, bbox=box_, columns=columns, fid_as_index=True) for box_ in boxes]
+    merged = pd.concat(frames)
+    return merged[~merged.index.duplicated()].reset_index(drop=True)
 
 
 def _pad(bbox: tuple, pad_ft: float, degrees: bool) -> tuple:
@@ -115,13 +125,13 @@ def _pad(bbox: tuple, pad_ft: float, degrees: bool) -> tuple:
     return (bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad)
 
 
-def verify_identical(source_path: Path, bbox, written: Path, columns: list[str] | None = None) -> bool:
-    """Compare the written clip against the same bbox read of the source, exactly.
+def verify_identical(source_path: Path, boxes: list, written: Path, columns: list[str] | None = None) -> bool:
+    """Compare the written clip against the same boxes' reads of the source, exactly.
 
     Attributes and geometry WKB, after _unpack_single_part on both sides - which is what the
     loaders apply on every read, so this checks the data as it will actually be consumed.
     """
-    want = gpd.read_file(source_path, bbox=bbox, columns=columns)
+    want = read_boxes(source_path, boxes, columns)
     got = gpd.read_file(written, bbox=None, columns=columns)
     if len(want) != len(got):
         print(f"  MISMATCH: {len(want)} features in the source bbox, {len(got)} written.")
@@ -188,16 +198,16 @@ def layer_sources(sites: list[str]) -> dict[str, list[Path]]:
     return found
 
 
-def clip_roads(out: Path, bbox: tuple, source: Path) -> tuple[Path, Path, int]:
+def clip_roads(out: Path, boxes: list, source: Path) -> tuple[Path, Path, int]:
     """The roadway network, as FlatGeobuf - the format the loaders already prefer."""
     source = _resolve_indexed_path(source)
     target = out / (source.stem + ".fgb")
-    roads = gpd.read_file(source, bbox=bbox)
+    roads = read_boxes(source, boxes)
     roads.to_file(target, driver="FlatGeobuf")
     return source, target, len(roads)
 
 
-def clip_parcels(out: Path, bbox: tuple, source: Path) -> tuple[Path, Path, int]:
+def clip_parcels(out: Path, boxes: list, source: Path) -> tuple[Path, Path, int]:
     """The parcels, as a shapefile with the source .prj copied over byte for byte.
 
     MercerCountyParcels.shp is a COMPOUND CRS whose WKT matches no EPSG code (see
@@ -206,7 +216,7 @@ def clip_parcels(out: Path, bbox: tuple, source: Path) -> tuple[Path, Path, int]
     boundary check tests the same thing here as it does against the download.
     """
     target = out / source.name
-    parcels = gpd.read_file(source, bbox=_as_geoseries(bbox), columns=list(PARCEL_COLUMNS))
+    parcels = read_boxes(source, boxes, list(PARCEL_COLUMNS))
     parcels.to_file(target, driver="ESRI Shapefile")
     shutil.copyfile(source.with_suffix(".prj"), target.with_suffix(".prj"))
     return source, target, len(parcels)
@@ -244,9 +254,7 @@ def main() -> int:
         return 2
 
     sites = args.site or list_sites()
-    roads_bbox, parcels_bbox, detail = site_extents(sites)
-    roads_bbox = _pad(roads_bbox, args.pad_ft, degrees=True)
-    parcels_bbox = _pad(parcels_bbox, args.pad_ft, degrees=False)
+    reads = site_reads(sites)
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
     print(f"Clipping {len(sites)} site(s) out of data/, padded {args.pad_ft:.0f} ft -> {out}")
@@ -259,14 +267,20 @@ def main() -> int:
     # parcels rather than crossing them.
     clipped: list[tuple[str, Path, object, Path, list[str] | None]] = []
     pins: set[str] = set()
+    road_boxes: list[tuple] = []
+    parcel_boxes: list[tuple] = []
     for source in sources["road_network"]:
-        road_source, road_target, n_roads = clip_roads(out, roads_bbox, source)
-        print(f"  roads:   {n_roads} features from {road_source.name}")
-        clipped.append(("roads", road_source, roads_bbox, road_target, None))
+        boxes = boxes_for(reads, "road_network", "roads_wgs84", source, args.pad_ft, degrees=True)
+        road_boxes += [box_ for box_ in boxes if box_ not in road_boxes]
+        road_source, road_target, n_roads = clip_roads(out, boxes, source)
+        print(f"  roads:   {n_roads} features from {road_source.name} over {len(boxes)} area box(es)")
+        clipped.append(("roads", road_source, boxes, road_target, None))
     for source in sources["parcels"]:
-        parcel_source, parcel_target, n_parcels = clip_parcels(out, parcels_bbox, source)
-        print(f"  parcels: {n_parcels} polygons from {parcel_source.name}")
-        clipped.append(("parcels", parcel_source, _as_geoseries(parcels_bbox), parcel_target,
+        boxes = boxes_for(reads, "parcels", "parcels_nj_ft", source, args.pad_ft, degrees=False)
+        parcel_boxes += [box_ for box_ in boxes if box_ not in parcel_boxes]
+        parcel_source, parcel_target, n_parcels = clip_parcels(out, [_as_geoseries(b) for b in boxes], source)
+        print(f"  parcels: {n_parcels} polygons from {parcel_source.name} over {len(boxes)} area box(es)")
+        clipped.append(("parcels", parcel_source, [_as_geoseries(b) for b in boxes], parcel_target,
                         list(PARCEL_COLUMNS)))
         pins |= {str(pin).strip() for pin in gpd.read_file(parcel_target)["PAMS_PIN"].dropna()}
     for source in sources["tax_list"]:
@@ -298,9 +312,12 @@ def main() -> int:
                "the configured sites actually read. Read through ROAD_SKETCHES_DATA_DIR.",
         "pad_ft": args.pad_ft,
         "sites": sites,
-        "extents": {"roads": list(roads_bbox), "parcels": list(parcels_bbox)},
+        # A LIST OF BOXES per layer (one per area), which the loader's guard accepts a read inside
+        # any one of.
+        "extents": {"roads": [list(b) for b in road_boxes], "parcels": [list(b) for b in parcel_boxes]},
         "extent_crs": {"roads": "EPSG:4326", "parcels": NJ_STATE_PLANE_FT},
-        "per_site_reads": detail,
+        "per_site_reads": {site: {"area": r["area"], "roads_wgs84": r["roads_wgs84"],
+                                  "parcels_nj_ft": r["parcels_nj_ft"]} for site, r in reads.items()},
         "layers": written,
     }
     (out / FIXTURE_MANIFEST_NAME).write_text(json.dumps(manifest, indent=2) + "\n")

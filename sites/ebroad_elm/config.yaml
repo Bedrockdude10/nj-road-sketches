@@ -28,7 +28,6 @@ intersection:
     (ref=CR 518), North Elm Street way 1065749261 and South Elm Street way 11644989. A
     four-leg junction; Elm St is two separately named ways either side of Broad, so it is
     two legs here.
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # Crossings from OSM, both uncontrolled:
   #   s_elm_st_south   - way 363310290, crossing:markings=ladder

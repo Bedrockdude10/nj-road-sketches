@@ -35,12 +35,6 @@ intersection:
     against the NJDOT Roadway Network: the centrelines of SRI 00000035__ and SRI
     15151042__ intersect at (-74.0684452, 39.9733493), 3.5 ft from the OSM node - two
     independent sources agreeing to well under a lane width.
-  # 130 m, NOT the 150 m the Mercer sites use, and the difference is deliberate: the
-  # SOUTHBOUND carriageway of the same route is 141.6 m away, so a 150 m clip pulls Anna
-  # O Hankins Blvd into this junction's road network as a stub of a street that is a
-  # different SRI and a different junction. 130 m still exceeds the longest leg drawn
-  # here even on a 2.5x sheet (190 ft = 58 m, 475 ft = 145 m... see below).
-  clip_radius_m: 130
   leg_working_length_ft: 130
   # All four approaches carry an OSM-mapped `footway=crossing` (ways 1557764180/81/82/83,
   # one per leg, 26-48 ft out) traced by Danny 2026-09-10 along with the kerbs.

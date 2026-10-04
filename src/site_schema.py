@@ -90,7 +90,6 @@ class Intersection(Strict):
     street2: str
     anchor_query: str
     resolution_method: Sourced
-    clip_radius_m: float = Field(gt=0)
     leg_working_length_ft: float = Field(gt=0)
     existing_marked_crosswalks: list[str] = []
 

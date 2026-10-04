@@ -42,7 +42,6 @@ intersection:
     geocode_intersection matched OSM's `name` only, so the documented one-command
     re-resolution failed here with "could not find OSM ways matching 'NJ 31'". It now
     searches `name` and `ref` alike (tests/test_geocoding.py).
-  clip_radius_m: 150
   leg_working_length_ft: 130
   # All four legs are marked, and unusually well recorded: OSM maps four crossing ways here
   # (365618075 / 376500674 / 1341100456 / 1341100457), every one crossing=marked with

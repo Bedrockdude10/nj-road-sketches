@@ -1,5 +1,5 @@
 """
-Phase 1: resolve an intersection, load/clip/audit the road network around it,
+Phase 1: resolve an intersection, load/audit the road network over its area,
 and render a labeled plan-view sanity-check plot. This is the exploratory tool
 you run ONCE per new site, before sites/<site>/config.yaml exists - its job is
 to find out what NJDOT (or whatever road network file) actually recorded here,
@@ -21,9 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from shapely.geometry import box
 
 from src.sources.data_loader import DEFAULT_ROAD_NETWORK_PATH, geocode_intersection, load_road_network
-from src.geometry.model import NJ_STATE_PLANE_FT, buffer_point_wgs84, clip_to_radius, reproject_to_state_plane
+from src.geometry.model import NJ_STATE_PLANE_FT, reproject_to_state_plane
+from src.sources.osm_context import SNAPSHOT_AREAS
 from src.site import list_sites, load_site_config, site_output_dir
 
 ATTR_COLUMNS = [
@@ -33,14 +35,23 @@ ATTR_COLUMNS = [
 ]
 
 
-def print_segment_audit(clipped_wgs84, center):
+def area_containing(center) -> str:
+    """The sites/osm_areas.yaml area a point falls in - the world this junction would be a view onto."""
+    for name, (west, south, east, north) in SNAPSHOT_AREAS.items():
+        if west <= center.x <= east and south <= center.y <= north:
+            return name
+    raise SystemExit(f"{center.x:.6f}, {center.y:.6f} is in no area of sites/osm_areas.yaml "
+                     f"({', '.join(SNAPSHOT_AREAS)}). Add one first, or pass --area.")
+
+
+def print_segment_audit(network_wgs84, center):
     """Print full attributes for the segments actually closest to the resolved
     center - for a brand-new site you don't know the SRIs in advance, so audit
     by proximity rather than a pre-known SRI list."""
-    if clipped_wgs84.empty:
-        print("  WARNING: nothing in the clipped set to audit.")
+    if network_wgs84.empty:
+        print("  WARNING: nothing in the area's network to audit.")
         return
-    by_dist = clipped_wgs84.assign(_dist=clipped_wgs84.distance(center)).sort_values("_dist")
+    by_dist = network_wgs84.assign(_dist=network_wgs84.distance(center)).sort_values("_dist")
     cols = [c for c in ATTR_COLUMNS if c in by_dist.columns]
     for _, row in by_dist.head(4).iterrows():
         print(f"\n--- {row.get('SLD_NAME')} (SRI {row.get('SRI')}) ---")
@@ -52,12 +63,18 @@ def print_segment_audit(clipped_wgs84, center):
           "measurement before assuming a width.")
 
 
-def plot_network(clipped_ft, center_ft, title: str, out_path: Path):
+def plot_network(network_ft, center_ft, view_ft: float, title: str, out_path: Path):
     fig, ax = plt.subplots(figsize=(10, 10))
-    clipped_ft.plot(ax=ax, color="black", linewidth=2)
+    network_ft.plot(ax=ax, color="black", linewidth=2)
 
-    for _, row in clipped_ft.iterrows():
-        pt = row.geometry.interpolate(0.5, normalized=True)
+    # A CAMERA, not a clip: NJDOT stores a route as one row, so the network is whole routes and
+    # the window only decides what is looked at.
+    ax.set_xlim(center_ft.x - view_ft, center_ft.x + view_ft)
+    ax.set_ylim(center_ft.y - view_ft, center_ft.y + view_ft)
+    in_view = network_ft[network_ft.intersects(box(center_ft.x - view_ft, center_ft.y - view_ft,
+                                                    center_ft.x + view_ft, center_ft.y + view_ft))]
+    for _, row in in_view.iterrows():
+        pt = row.geometry.interpolate(row.geometry.project(center_ft))
         ax.annotate(
             row.get("SLD_NAME"), (pt.x, pt.y), fontsize=8, color="darkred",
             ha="center", bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.7),
@@ -82,7 +99,12 @@ def main():
     parser.add_argument("--street2")
     parser.add_argument("--anchor", help="Address/place string Nominatim can geocode, to anchor the OSM search bbox")
     parser.add_argument("--road-network", default=str(DEFAULT_ROAD_NETWORK_PATH))
-    parser.add_argument("--clip-radius-m", type=float, default=150)
+    parser.add_argument("--area", choices=list(SNAPSHOT_AREAS),
+                        help="the sites/osm_areas.yaml area to read the network over (default: the one "
+                             "containing the resolved intersection)")
+    parser.add_argument("--view-ft", type=float, default=600,
+                        help="half-width of the plot window around the intersection - a camera, "
+                             "not a clip of the data")
     parser.add_argument("--out-name", default="phase1_network_plot.png")
     args = parser.parse_args()
 
@@ -103,22 +125,19 @@ def main():
     print(f"  -> lon={center.x:.7f}, lat={center.y:.7f} (resolved via OSM shared-node match, not address geocoding)")
     print("  Save this as intersection.center_wgs84 in the site's config.yaml.")
 
-    bbox = buffer_point_wgs84(center, args.clip_radius_m * 1.3)
-    print("\nLoading road network (bbox-filtered read)...")
-    network = load_road_network(bbox=bbox, path=args.road_network)
-    print(f"  -> {len(network)} features in load bbox")
-
-    clipped = clip_to_radius(network, center, args.clip_radius_m)
-    print(f"  -> {len(clipped)} features within {args.clip_radius_m}m radius")
+    area = args.area or area_containing(center)
+    print(f"\nLoading road network over area {area} (bbox-filtered read)...")
+    network = load_road_network(bbox=SNAPSHOT_AREAS[area], path=args.road_network)
+    print(f"  -> {len(network)} features in the area")
 
     print(f"\n=== Attribute audit: segments nearest {street1} & {street2} ===")
-    print_segment_audit(clipped, center)
+    print_segment_audit(network, center)
 
-    clipped_ft = reproject_to_state_plane(clipped)
+    network_ft = reproject_to_state_plane(network)
     center_ft = gpd.GeoSeries([center], crs="EPSG:4326").to_crs(NJ_STATE_PLANE_FT).iloc[0]
 
-    title = f"{street1} & {street2}\n(clipped to {args.clip_radius_m:.0f}m radius, NAD83 NJ State Plane, feet)"
-    plot_network(clipped_ft, center_ft, title, out_dir / args.out_name)
+    title = f"{street1} & {street2}\n(network over {area}, NAD83 NJ State Plane, feet)"
+    plot_network(network_ft, center_ft, args.view_ft, title, out_dir / args.out_name)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ import geopandas as gpd
 from shapely.geometry import Point
 from shapely.ops import substring
 
-from src.sources.data_loader import load_parcels_near, load_road_network
-from src.sources.osm_context import osm_layers
+from src.sources.data_loader import load_parcels_in, load_road_network
+from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
 from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.municipality import municipal_limits_ft
 from src.render.frame import frame_scale, set_drawn_reach_ft
@@ -19,8 +19,6 @@ from src.geometry.model import (
     build_corner_fillets,
     build_pavement_polygon,
     corner_radii_from_kerbs,
-    buffer_point_wgs84,
-    clip_to_radius,
     label_quadrants,
     nearest_per_quadrant,
     NJ_STATE_PLANE_FT,
@@ -112,11 +110,13 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     configured_parcels = data_sources.get("parcels")
     parcels_path = ROOT_DIR / configured_parcels if configured_parcels else None
 
-    clip_radius_m = config["intersection"]["clip_radius_m"]
-    bbox = buffer_point_wgs84(center, clip_radius_m * 1.3)
-    network = load_road_network(bbox=bbox, path=road_network_path)
-    clipped = clip_to_radius(network, center, clip_radius_m)
-    clipped_ft = reproject_to_state_plane(clipped)
+    # THE ROAD NETWORK IS READ OVER THE AREA, NOT A CIRCLE. NJDOT stores a route as ONE row (route
+    # 518 is a single 108 km line), so a bbox read returns every route in the area whole and the
+    # leg's own SRI picks its row; how much of that row becomes a leg is leg_working_length_ft,
+    # trimmed outward from the junction below. A radius around the centre used to decide the same
+    # thing a second time, as a ceiling on how far a leg could reach.
+    area_bbox = SNAPSHOT_AREAS[osm_area]
+    network_ft = reproject_to_state_plane(load_road_network(bbox=area_bbox, path=road_network_path))
 
     working_len = config["intersection"]["leg_working_length_ft"]
     legs_cfg = config["legs"]
@@ -142,11 +142,13 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
 
     legs: dict[str, Leg] = {}
     for sri, leg_names in sri_to_leg_names.items():
-        rows = clipped_ft[clipped_ft["SRI"] == sri]
+        rows = network_ft[network_ft["SRI"] == sri]
         if rows.empty:
-            print(f"  WARNING: SRI {sri} not found in clipped network - skipping legs {leg_names}.")
+            print(f"  WARNING: SRI {sri} not found in the road network over {osm_area} - "
+                  f"skipping legs {leg_names}.")
             continue
-        line = rows.iloc[0].geometry
+        # The row of this route that runs through the junction, if the area holds several.
+        line = rows.geometry.loc[rows.geometry.distance(center_ft).idxmin()]
         split_len = max(leg_lengths[n] for n in leg_names)
         pieces = [p.simplify(3.0) for p in split_leg_centerlines(line, center_ft, split_len)]
         pieces = [_snap_to_center(p, center_ft) for p in pieces]
@@ -212,7 +214,9 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     # of the right shape rather than None, so the plan view, the export and phase2's table each
     # draw nothing instead of each growing its own None check.
     if parcels_path is not None:
-        parcels = load_parcels_near(center, radius_ft=300, path=parcels_path)
+        # Every parcel in the area, like every other layer. What the corners are is a question
+        # of which parcel sits at the junction, not of how far out parcels were read.
+        parcels = load_parcels_in(area_bbox, path=parcels_path)
         corner_parcels = nearest_per_quadrant(label_quadrants(parcels, center_ft))
     else:
         parcels = _no_parcels_layer()
