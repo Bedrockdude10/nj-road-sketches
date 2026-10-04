@@ -16,6 +16,18 @@ total render time):
       output/geometry_existing.json output/phase4_render_existing.png \\
       output/geometry_proposed.json output/phase4_render_proposed.png
 
+THREE MODES, one entry point (see parse_args):
+
+  <geometry.json> <out.png> [...]     the original: build ONE site's scene, point the camera at the
+                                      JSON's `frame`, render, repeat. Unchanged.
+  --build <world.json> --save <w.blend>
+                                      build the scene from one geometry JSON with NO camera, and save
+                                      it. The JSON need not carry a `frame` - a world has none.
+  --open <w.blend> --camera <cameras.json> --out-dir <dir>
+                                      open a saved world and render one PNG per camera spec,
+                                      `{"name", "center_m": [x, y], "radius_m"}` in the world's own
+                                      local-metre frame. A site render is a named camera in a world.
+
 This file is the entry point + top-level scene assembly only - the actual
 geometry-building code is split across sibling modules in this same
 directory (plain local imports work fine under Blender's bundled Python, no
@@ -26,11 +38,13 @@ venv needed):
   blender_props.py       street furniture: streetlights, signage, traffic
                           signals, trees - one builder function per prop type
 """
+import argparse
 import json
 import math
 import os
 import random
 import sys
+import time
 from pathlib import Path
 
 import bpy
@@ -40,10 +54,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # for the sibling blen
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # scripts/blender/blender_scene.py -> repo root
 
 from blender_crosswalks import (
-    add_crosswalk, add_dashed_centerline, add_double_yellow_centerline, add_paint_polyline,
-    add_stop_bar,
+    add_crosswalk, add_dashed_centerline, add_double_yellow_centerline, add_stop_bar,
 )
-from blender_geometry import (MeshBatch, build_mesh_from_data, extrude_polygon,
+from blender_geometry import (MeshBatch, build_merged_meshes, extrude_polygon,
                               line_ring, polyline_rings)
 from blender_materials import make_material, make_textured_material
 from blender_props import (
@@ -54,6 +67,7 @@ from blender_props import (
 random.seed(7)  # stable building color assignment across existing/proposed renders
 
 PAVEMENT_HEIGHT_M = 0.05
+SIDEWALK_HEIGHT_M = 0.03
 # crosswalks/centerlines/stop bars (add_crosswalk*/add_dashed_centerline/add_double_yellow_centerline/
 # add_stop_bar) sit at blender_crosswalks.py:EXISTING_MARKING_Z_BASE (0.06) with thickness
 # EXISTING_MARKING_THICKNESS_M (0.01) - this is their real top, i.e. EXISTING_MARKING_Z_BASE +
@@ -93,14 +107,52 @@ BUILDING_PALETTE = [
 ]
 
 
-def parse_args() -> list[tuple[Path, Path]]:
+class Job:
+    """What this process was asked to do. `mode` is "sites", "build" or "cameras"."""
+
+    def __init__(self, mode: str, **fields):
+        self.mode = mode
+        self.__dict__.update(fields)
+
+
+# THE TEXTURE TIER A WORLD IS BUILT AT, as the suffix of the theme keys that name it (`asphalt_far`
+# is the 2k set, `asphalt_near` the 4k one - src/render/theme.py). ONE tier for every surface in a
+# world, because the near/far split was by distance from a junction centre and a world has none; see
+# texture_keys below for the measured justification.
+TEXTURE_TIERS = {"2k": "far", "4k": "near"}
+DEFAULT_TEXTURE_RES = "2k"
+
+
+def parse_args() -> Job:
     argv = sys.argv
+    usage = ("Usage: blender --background --python blender_scene.py -- "
+             "<geometry.json> <output.png> [...]\n"
+             "   or: ... -- --build <world.json> --save <world.blend> [--texture-res 2k|4k]\n"
+             "   or: ... -- --open <world.blend> --camera <cameras.json> --out-dir <dir>")
     if "--" not in argv:
-        raise SystemExit("Usage: blender --background --python blender_scene.py -- <geometry.json> <output.png> [...]")
+        raise SystemExit(usage)
     args = argv[argv.index("--") + 1:]
-    if len(args) < 2 or len(args) % 2 != 0:
-        raise SystemExit("Need pairs of <geometry.json> <output.png>")
-    return [(Path(args[i]), Path(args[i + 1])) for i in range(0, len(args), 2)]
+    if args and not args[0].startswith("--"):
+        if len(args) < 2 or len(args) % 2 != 0:
+            raise SystemExit("Need pairs of <geometry.json> <output.png>")
+        return Job("sites", pairs=[(Path(args[i]), Path(args[i + 1])) for i in range(0, len(args), 2)])
+    parser = argparse.ArgumentParser(prog="blender_scene.py", usage=usage)
+    parser.add_argument("--build", type=Path)
+    parser.add_argument("--save", type=Path)
+    parser.add_argument("--open", type=Path, dest="open_")
+    parser.add_argument("--camera", type=Path)
+    parser.add_argument("--out-dir", type=Path)
+    parser.add_argument("--texture-res", choices=sorted(TEXTURE_TIERS), default=DEFAULT_TEXTURE_RES)
+    ns = parser.parse_args(args)
+    if ns.build and not ns.open_:
+        if not ns.save:
+            raise SystemExit("--build needs --save <world.blend>\n" + usage)
+        return Job("build", geometry=ns.build, blend=ns.save, texture_res=ns.texture_res)
+    if ns.open_ and not ns.build:
+        if not (ns.camera and ns.out_dir):
+            raise SystemExit("--open needs --camera <cameras.json> and --out-dir <dir>\n" + usage)
+        return Job("cameras", blend=ns.open_, cameras=ns.camera, out_dir=ns.out_dir)
+    raise SystemExit("Give exactly one of --build or --open\n" + usage)
 
 
 # The keys whose ABSENCE from a geometry file would produce a picture that is wrong rather than
@@ -121,12 +173,16 @@ def parse_args() -> list[tuple[Path, Path]]:
 # exporter writes every key unconditionally, so only a file committed BEFORE a key existed can
 # lack one, and this guard is what stops such a file being rendered rather than reported.
 REQUIRED_KEYS = ("frame", "kerbs", "paved_surfaces", "surveyed_crossings")
+# A WORLD HAS NO FRAME. A frame is "the ground one site's pictures are pointed at", and a world is
+# every site's ground at once - its cameras name their own centre and radius. Everything else in
+# REQUIRED_KEYS is about the street and applies to a world unchanged.
+WORLD_REQUIRED_KEYS = tuple(k for k in REQUIRED_KEYS if k != "frame")
 
 
-def load_geometry(path: Path) -> dict:
+def load_geometry(path: Path, required: tuple = REQUIRED_KEYS) -> dict:
     with open(path) as f:
         data = json.load(f)
-    missing = [k for k in REQUIRED_KEYS if k not in data]
+    missing = [k for k in required if k not in data]
     if missing:
         raise SystemExit(
             f"{path}: geometry export is stale - no {', '.join(missing)}. Rendering it would "
@@ -264,13 +320,120 @@ def _under_repo(path):
     return str(REPO_ROOT / path)
 
 
-def build_scene(data: dict):
+_phase_clock = [time.perf_counter()]
+
+
+def phase(name: str) -> None:
+    """Print how long the build phase that just FINISHED took. A world is built once and takes
+    minutes at borough scale, so where the time goes has to be on the log rather than guessed."""
+    now = time.perf_counter()
+    print(f"  [build] {name}: {now - _phase_clock[0]:.2f}s")
+    _phase_clock[0] = now
+
+
+def surface_rings(data: dict, key: str):
+    """(near, far) ring lists for `pavement` / `sidewalks`.
+
+    The exporter used to split each by distance from the junction centre (`pavement_near`,
+    `pavement_far`); a world has no junction centre, so it writes ONE list under the bare key. Read
+    that when present, else the pair - and a file with the single list returns it as `near` with
+    nothing in `far`, which is what lets the caller treat both shapes alike.
+    """
+    if key in data:
+        return list(data[key]), []
+    return list(data.get(f"{key}_near", [])), list(data.get(f"{key}_far", []))
+
+
+def world_extent(data: dict):
+    """(minx, miny, maxx, maxy) over every layer that has a position, in the file's metres."""
+    xs, ys = [], []
+
+    def take(points):
+        for p in points:
+            xs.append(p[0])
+            ys.append(p[1])
+
+    for key in ("pavement", "pavement_near", "pavement_far",
+                "sidewalks", "sidewalks_near", "sidewalks_far"):
+        for ring in data.get(key, []):
+            take(ring)
+    for b in data.get("buildings", []):
+        take(b["vertices_m"] if b["mesh"] else b["coords"])
+    for kerb in data.get("kerbs", []):
+        take(kerb.get("coords") or [])
+    for drive in data.get("paved_surfaces", data.get("driveways", [])):
+        take(drive.get("coords") or [])
+    for parcel in data.get("corner_parcels", []):
+        take(parcel["coords"])
+    if not xs:
+        return (-50.0, -50.0, 50.0, 50.0)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def max_building_height(data: dict) -> float:
+    """The tallest building's top, in metres - what a camera's near clip has to leave room for."""
+    tops = [max(v[2] for v in b["vertices_m"]) if b["mesh"] else b.get("height_m", 0.0)
+            for b in data.get("buildings", []) if (b["vertices_m"] if b["mesh"] else b["coords"])]
+    return max(tops, default=0.0)
+
+
+def _textures(theme: dict, stem: str, tier: str):
+    """The texture paths for `stem` at `tier` ("near" 4k / "far" 2k), else whichever tier exists.
+
+    A geometry file carries both tiers (src/render/theme.py), so the fallback only matters for one
+    written with a single tier - and then the render should use that rather than flat colour.
+    """
+    return theme.get(f"{stem}_{tier}") or theme.get(f"{stem}_far") or theme.get(f"{stem}_near")
+
+
+class Built:
+    """What build_scene made, for the camera to be pointed at.
+
+    `cx, cy, scene_radius, view` are only meaningful when the geometry carried a `frame`, or for a
+    legacy site file - a world has no single frame, and its cameras bring their own.
+    """
+
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
+
+
+def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXTURE_RES) -> Built:
+    """Build every object in `data`. `world=True` is the build-once mode: no frame is read or
+    required, the ground is sized off the geometry's own extent, and every textured surface uses ONE
+    texture tier (`texture_res`).
+
+    TEXTURES. The old scene textured pavement/sidewalks at 4k inside a "near zone" around the
+    junction and 2k outside it - a distance from ONE junction centre, which a world has none of.
+    Rather than invent a distance-from-camera rule (a per-camera material swap at render time), the
+    world uses one tier everywhere and the tier is 2k. Why that is safe is arithmetic and then a
+    measurement: a texture tiles every 2 m (extrude_polygon's uv_tile_m), so 2k is 1 mm per texel
+    and 4k is 0.5 mm, while one pixel of a 1920 px render covers ~9 cm of ground at a 105 m frame
+    radius (2 cm at the 4x render scale) - the extra texels are minified away by the mipmaps
+    either way. The memory saving is measured in the scripts/phase4_render_3d.py handback, not
+    asserted here. `--texture-res 4k` is kept for anyone who wants to see for themselves.
+    A file that already carries single `pavement` / `sidewalks` lists (the world exporter) gets the
+    same one-tier treatment whichever mode reads it, since it has no near/far to split on.
+    """
     theme = resolve_theme_paths(data.get("theme") or {})
-    asphalt_near = make_textured_material("AsphaltNear", theme.get("asphalt_near"), (0.07, 0.07, 0.08), 0.95)
-    asphalt_far = make_textured_material("AsphaltFar", theme.get("asphalt_far"), (0.07, 0.07, 0.08), 0.95)
-    concrete_near = make_textured_material("ConcreteNear", theme.get("concrete_near"), (0.72, 0.71, 0.67), 0.85)
-    concrete_far = make_textured_material("ConcreteFar", theme.get("concrete_far"), (0.72, 0.71, 0.67), 0.85)
-    apron_mat = make_textured_material("Apron", theme.get("apron_near"), (0.65, 0.6, 0.55), 0.8)
+    tier = TEXTURE_TIERS[texture_res]
+    uniform_pavement = world or "pavement" in data
+    uniform_sidewalks = world or "sidewalks" in data
+
+    def tex(name, stem, tier_, fallback, roughness):
+        return make_textured_material(name, _textures(theme, stem, tier_), fallback, roughness)
+
+    asphalt_rgb, concrete_rgb = (0.07, 0.07, 0.08), (0.72, 0.71, 0.67)
+    if uniform_pavement:
+        asphalt_near = asphalt_far = tex("Asphalt", "asphalt", tier, asphalt_rgb, 0.95)
+    else:
+        asphalt_near = tex("AsphaltNear", "asphalt", "near", asphalt_rgb, 0.95)
+        asphalt_far = tex("AsphaltFar", "asphalt", "far", asphalt_rgb, 0.95)
+    if uniform_sidewalks:
+        concrete_near = concrete_far = tex("Concrete", "concrete", tier, concrete_rgb, 0.85)
+    else:
+        concrete_near = tex("ConcreteNear", "concrete", "near", concrete_rgb, 0.85)
+        concrete_far = tex("ConcreteFar", "concrete", "far", concrete_rgb, 0.85)
+    apron_mat = tex("Apron", "apron", tier if world else "near", (0.65, 0.6, 0.55), 0.8)
     lot = make_material("Lot", (0.55, 0.6, 0.48), roughness=0.9)
     grass = make_material("Grass", (0.3, 0.48, 0.24), roughness=1.0)
     refuge_mat = make_material("Refuge", (0.22, 0.5, 0.26), roughness=0.8)
@@ -290,7 +453,9 @@ def build_scene(data: dict):
     signal_housing_mat = make_material("SignalHousing", SIGNAL_HOUSING_DARK, roughness=0.4)
     ped_signal_housing_mat = make_material("PedSignalHousing", PED_SIGNAL_HOUSING_DARK, roughness=0.4)
 
-    all_pavement = data.get("pavement_near", []) + data.get("pavement_far", [])
+    pavement_near_rings, pavement_far_rings = surface_rings(data, "pavement")
+    sidewalk_near_rings, sidewalk_far_rings = surface_rings(data, "sidewalks")
+    all_pavement = pavement_near_rings + pavement_far_rings
     pavement_x = [x for ring in all_pavement for x, y in ring]
     pavement_y = [y for ring in all_pavement for x, y in ring]
     # WHERE THE CAMERA POINTS IS RESOLVED IN src/render/frame.py AND CARRIED IN THE JSON, so this
@@ -318,57 +483,94 @@ def build_scene(data: dict):
     # kerb running on down the street rather than part of this junction. All four sites have a
     # few such vertices (1, 4, 6 and 4 of them); dropping them tightens every render and
     # centres all four, rather than special-casing the one site where it had become glaring.
-    leg_reach = max((math.hypot(*leg["far_m"]) for leg in data.get("legs", [])), default=0.0)
-    framed = [(x, y) for x, y in zip(pavement_x, pavement_y)
-              if not leg_reach or math.hypot(x, y) <= leg_reach * LEG_REACH_TOLERANCE]
-    framed_x = [x for x, _y in framed] or pavement_x
-    framed_y = [y for _x, y in framed] or pavement_y
-    cx, cy = (min(framed_x) + max(framed_x)) / 2, (min(framed_y) + max(framed_y)) / 2
-    pavement_radius = max(max(framed_x) - min(framed_x), max(framed_y) - min(framed_y)) / 2
-    scene_radius = pavement_radius * 1.2  # tight enough to actually read paint markings/signage detail
-    frame = data.get("frame")
-    if frame:
-        cx, cy = frame["center_m"]
-        scene_radius = frame["radius_m"]
+    framed_x = framed_y = None
+    cx = cy = scene_radius = 0.0
+    if not world:
+        leg_reach = max((math.hypot(*leg["far_m"]) for leg in data.get("legs", [])), default=0.0)
+        framed = [(x, y) for x, y in zip(pavement_x, pavement_y)
+                  if not leg_reach or math.hypot(x, y) <= leg_reach * LEG_REACH_TOLERANCE]
+        framed_x = [x for x, _y in framed] or pavement_x
+        framed_y = [y for _x, y in framed] or pavement_y
+        cx, cy = (min(framed_x) + max(framed_x)) / 2, (min(framed_y) + max(framed_y)) / 2
+        pavement_radius = max(max(framed_x) - min(framed_x), max(framed_y) - min(framed_y)) / 2
+        scene_radius = pavement_radius * 1.2  # tight enough to actually read paint markings/signage detail
+        frame = data.get("frame")
+        if frame:
+            cx, cy = frame["center_m"]
+            scene_radius = frame["radius_m"]
+
 
     # The GROUND still covers everything, framed or not: a plane that stopped at the framed
     # extent would leave the far end of an over-long kerb standing over blank space.
-    all_x = pavement_x + [x for b in data.get("buildings", []) for x, y, *_ in
-                           (b["vertices_m"] if b["mesh"] else b["coords"])]
-    all_y = pavement_y + [y for b in data.get("buildings", []) for x, y, *_ in
-                           (b["vertices_m"] if b["mesh"] else b["coords"])]
-    context_radius = max(max(all_x) - min(all_x), max(all_y) - min(all_y)) / 2
-    # AND AT LEAST FOUR TIMES THE FRAME, because the camera can be asked to pull back further than
-    # the context reaches (src/render/frame.py's ROAD_SKETCHES_FRAME_SCALE, for a picture whose subject
-    # is longer than one junction). On a wide frame the ground ran out inside the shot and the
-    # horizon showed the plane's own edge with sky under it - the buildings and pavement had all
-    # been drawn correctly on a groundsheet too small for the view.
-    ground_size = max(context_radius * 2.5, scene_radius * 4, 100)
-    bpy.ops.mesh.primitive_plane_add(size=ground_size, location=(cx, cy, -0.03))
+    def building_xy(b):
+        return [(v[0], v[1]) for v in (b["vertices_m"] if b["mesh"] else b["coords"])]
+
+    if world:
+        # A WORLD'S GROUND IS SIZED OFF ITS OWN EXTENT: every layer that has a position, because a
+        # world is whatever the exporter put in it and nothing here knows which layer is widest. The
+        # same 1.25x-of-the-larger-span rule as a site's (context_radius * 2.5 across a diameter), so a
+        # kerb running off the pavement's edge still has grass under it. A CAMERA near the edge needs
+        # more than that - ground_for_camera grows the plane to the camera's own 4x frame, in memory,
+        # at render time.
+        extent = world_extent(data)
+        wminx, wminy, wmaxx, wmaxy = extent
+        ground_w = max((wmaxx - wminx) * 1.25, 100.0)
+        ground_h = max((wmaxy - wminy) * 1.25, 100.0)
+        gcx, gcy = (wminx + wmaxx) / 2, (wminy + wmaxy) / 2
+        ground_size = max(ground_w, ground_h)
+        cx, cy = gcx, gcy
+    else:
+        all_x = pavement_x + [x for b in data.get("buildings", []) for x, _y in building_xy(b)]
+        all_y = pavement_y + [y for b in data.get("buildings", []) for _x, y in building_xy(b)]
+        context_radius = max(max(all_x) - min(all_x), max(all_y) - min(all_y)) / 2
+        # AND AT LEAST FOUR TIMES THE FRAME, because the camera can be asked to pull back further than
+        # the context reaches (src/render/frame.py's ROAD_SKETCHES_FRAME_SCALE, for a picture whose subject
+        # is longer than one junction). On a wide frame the ground ran out inside the shot and the
+        # horizon showed the plane's own edge with sky under it - the buildings and pavement had all
+        # been drawn correctly on a groundsheet too small for the view.
+        ground_size = max(context_radius * 2.5, scene_radius * 4, 100)
+        ground_w = ground_h = ground_size
+        gcx, gcy = cx, cy
+    bpy.ops.mesh.primitive_plane_add(size=1.0, location=(gcx, gcy, -0.03))
     ground = bpy.context.active_object
     ground.name = "Ground"
+    ground.scale = (ground_w, ground_h, 1.0)
     ground.data.materials.append(grass)
 
+    phase("materials + ground")
     for parcel in data.get("corner_parcels", []):
         extrude_polygon(f"parcel_{parcel['name']}", parcel["coords"], 0.0, lot)
 
+    phase("parcels")
+    # ONE OBJECT PER COLOUR, not per building: a borough has thousands, and each used to cost an
+    # edit-mode round trip that grows with the scene (blender_geometry.build_merged_meshes).
+    meshed = [[] for _ in building_mats]
+    extruded = [MeshBatch(f"buildings_extruded_{k}", m) for k, m in enumerate(building_mats)]
     for i, b in enumerate(data.get("buildings", [])):
-        mat = building_mats[i % len(building_mats)]
+        k = i % len(building_mats)
         if b["mesh"]:
-            build_mesh_from_data(f"building_{i}", b["vertices_m"], b["faces"], mat)
+            meshed[k].append((b["vertices_m"], b["faces"]))
         else:
-            extrude_polygon(f"building_{i}", b["coords"], b["height_m"], mat)
+            extruded[k].add_prism(b["coords"], b["height_m"])
+    for k, parts in enumerate(meshed):
+        build_merged_meshes(f"buildings_{k}", parts, building_mats[k])
+    for batch in extruded:
+        batch.build(uv_tile_m=2.0)
 
-    for i, ring in enumerate(data.get("pavement_near", [])):
-        extrude_polygon(f"pavement_near_{i}", ring, PAVEMENT_HEIGHT_M, asphalt_near)
-    for i, ring in enumerate(data.get("pavement_far", [])):
-        extrude_polygon(f"pavement_far_{i}", ring, PAVEMENT_HEIGHT_M, asphalt_far)
+    phase("buildings")
+    # ONE MESH PER MATERIAL for the slabs, not one object per ring: a world holds thousands of
+    # pieces and a scene's cost scales with its object count (blender_geometry.MeshBatch).
+    for name, rings, height, mat in (
+            ("pavement_near", pavement_near_rings, PAVEMENT_HEIGHT_M, asphalt_near),
+            ("pavement_far", pavement_far_rings, PAVEMENT_HEIGHT_M, asphalt_far),
+            ("sidewalk_near", sidewalk_near_rings, SIDEWALK_HEIGHT_M, concrete_near),
+            ("sidewalk_far", sidewalk_far_rings, SIDEWALK_HEIGHT_M, concrete_far)):
+        batch = MeshBatch(name, mat)
+        for ring in rings:
+            batch.add_prism(ring, height)
+        batch.build(uv_tile_m=2.0)
 
-    for i, ring in enumerate(data.get("sidewalks_near", [])):
-        extrude_polygon(f"sidewalk_near_{i}", ring, 0.03, concrete_near)
-    for i, ring in enumerate(data.get("sidewalks_far", [])):
-        extrude_polygon(f"sidewalk_far_{i}", ring, 0.03, concrete_far)
-
+    phase("pavement + sidewalks")
     # The paved ground beside the carriageway - driveways, parking aisles and parking lots - as
     # the POLYGON src/ built, the same one the plan view fills, so the two views cannot disagree
     # about where any of it is. All one asphalt, which is what they are; `kind` names each object
@@ -377,32 +579,42 @@ def build_scene(data: dict):
     # Extruded to the pavement's own height so it reads as connected paving where it meets the
     # road. A driveway running off past the modelled legs is drawn where it really is; that it
     # ends in grass is our road model stopping, not the driveway being wrong.
-    for i, drive in enumerate(data.get("paved_surfaces", data.get("driveways", []))):
+    # One mesh, not one object each: a world carries every driveway in the borough.
+    paved = MeshBatch("paved_surfaces", asphalt_far)
+    for drive in data.get("paved_surfaces", data.get("driveways", [])):
         coords = drive.get("coords") or []
         if len(coords) >= 3:
-            extrude_polygon(f"{drive.get('kind', 'driveway')}_{i}", coords,
-                            PAVEMENT_HEIGHT_M, asphalt_far)
+            paved.add_prism(coords, PAVEMENT_HEIGHT_M)
+    paved.build(uv_tile_m=2.0)
 
     # The traced kerbs, at the height their OSM kerb= tag calls for (src/render/export.py:
     # KERB_HEIGHT_M). There was no kerb in this scene before - the road slab simply met the
     # concrete band - so a 6 in stood-up kerb and a driveway's dropped kerb looked the same, and
     # the kerbside markings that now BREAK over a dropped kerb had nothing visible to break for.
     #
-    # add_paint_polyline, not extrude_polygon: a kerb is a band of constant width following a
-    # sampled line, which is exactly what that builder makes, and drawing the chord between the
-    # endpoints instead would cut every corner the tracing turns.
-    for i, kerb in enumerate(data.get("kerbs", [])):
+    # polyline_rings, not the chord between the endpoints: a kerb is a band of constant width
+    # following a sampled line, and the chord would cut every corner the tracing turns. One mesh per
+    # distinct HEIGHT (there are three: raised, lowered, flush) rather than one object per segment -
+    # a borough's kerbs are tens of thousands of segments.
+    phase("paved surfaces")
+    kerb_batches = {}
+    for kerb in data.get("kerbs", []):
         coords = kerb.get("coords") or []
         if len(coords) < 2:
             continue
-        add_paint_polyline(f"kerb_{kerb.get('kerb', 'unknown')}_{i}", coords, KERB_WIDTH_M,
-                           kerb_mat, height_m=kerb.get("height_m", 0.20), z_base=0.0)
+        height = kerb.get("height_m", 0.20)
+        batch = kerb_batches.setdefault(height, MeshBatch(f"kerbs_{height:g}m", kerb_mat))
+        for ring in polyline_rings(coords, KERB_WIDTH_M):
+            batch.add_prism(ring, height, z_base=0.0)
+    for batch in kerb_batches.values():
+        batch.build()
 
     # Paint-only / no-curb-change proposal treatments (src/geometry/treatments/:
     # add_lane_narrowing / add_corner_hatching / add_mountable_apron) - sit
     # above BOTH the pavement and the existing crosswalk/centerline markings
     # they can overlap (a stripe runs the whole leg, crossing the crosswalk),
     # with a small MARKING_CLEARANCE_M gap either way (see docstring above).
+    phase("kerbs")
     marking_z = EXISTING_MARKING_HEIGHT_M + MARKING_CLEARANCE_M
     # A lane-narrowing buffer is a solid edge line (the new lane's real edge)
     # plus diagonal hatching filling the buffer beyond it - a real gore/chevron
@@ -518,13 +730,15 @@ def build_scene(data: dict):
     # The style comes from the crossing's own tags upstream - zebra becomes bars, `lines` becomes
     # two transverse lines, and a crossing with nothing recorded contributes neither. Blender
     # derives nothing here, which is the rule on this side of the boundary.
-    for i, crossing in enumerate(data.get("surveyed_crossings", [])):
-        for j, ring in enumerate(crossing.get("bars", [])):
-            extrude_polygon(f"surveyed_crossing_{i}_bar_{j}", ring, MARKING_CLEARANCE_M / 2,
-                             marking_mat, z_base=marking_z)
-        for j, line in enumerate(crossing.get("lines", [])):
-            add_paint_polyline(f"surveyed_crossing_{i}_line_{j}", line,
-                                SURVEYED_CROSSING_LINE_WIDTH_M, marking_mat, z_base=marking_z)
+    phase("paint channels")
+    surveyed = MeshBatch("surveyed_crossings", marking_mat)
+    for crossing in data.get("surveyed_crossings", []):
+        for ring in crossing.get("bars", []):
+            surveyed.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z)
+        for line in crossing.get("lines", []):
+            for ring in polyline_rings(line, SURVEYED_CROSSING_LINE_WIDTH_M):
+                surveyed.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
+    surveyed.build()
 
     for island in data.get("refuge_islands", []):
         extrude_polygon(f"refuge_{island['name']}", island["coords"], island.get("height_m", 0.15), refuge_mat)
@@ -543,6 +757,9 @@ def build_scene(data: dict):
     # view (src/render/plan_view.py) and this render draw an identically-sized crosswalk.
     crosswalk_depth_m = data.get("crosswalk_depth_m", 1.829)  # 6 ft; see blender_crosswalks.py
     stop_bar_curb_clearance_m = data.get("stop_bar_curb_clearance_m", 0.5)
+    phase("surveyed crossings + islands")
+    centerline_yellow = MeshBatch("centerline_yellow", centerline_mat)
+    centerline_white = MeshBatch("centerline_white", marking_mat)
     for leg in data.get("legs", []):
         near = mathutils.Vector((*leg["near_m"], 0.0))
         far = mathutils.Vector((*leg["far_m"], 0.0))
@@ -603,13 +820,14 @@ def build_scene(data: dict):
             # WHITE mirrors treatments.CENTERLINE_IS_WHITE, which Blender cannot import - pinned
             # by tests/test_paint.py:test_blender_centerline_colours_match_the_styles.
             line_mat = marking_mat if centerline_style in CENTERLINE_STYLES_WHITE else centerline_mat
-            for i, line in enumerate(painted):
-                # The raw [x, y] pairs, as every other add_paint_polyline caller passes: it
-                # reaches add_paint_line, which builds its own 3D vectors with `(*p, 0.0)`.
-                # Handing it mathutils.Vector((x, y, 0)) instead made that `(x, y, 0, 0.0)` and
-                # Blender refused the addition - 13 scenes failed to render at all.
-                add_paint_polyline(f"centerline_{leg['name']}_{i}", line,
-                                    CENTERLINE_WIDTH_M, line_mat)
+            # BATCHED, one mesh per material across every leg: a centreline is a sampled polyline
+            # cut into dashes, so it is thousands of segments, and as an object each it was 14,112
+            # of the 18,807 objects in a synthetic 36-junction world. Same ring, same height and
+            # base as add_paint_polyline's defaults, so the picture does not move.
+            batch = centerline_white if line_mat is marking_mat else centerline_yellow
+            for line in painted:
+                for ring in polyline_rings(line, CENTERLINE_WIDTH_M):
+                    batch.add_prism(ring, PAINT_HEIGHT_M, z_base=EXISTING_MARKING_HEIGHT_M - PAINT_HEIGHT_M)
         elif centerline_style == "double_yellow":
             add_double_yellow_centerline(f"centerline_{leg['name']}", near, far, centerline_mat,
                                           start_m=centerline_start_m)
@@ -622,6 +840,9 @@ def build_scene(data: dict):
     # blender_props.py / README.md). Placement is decided upstream by
     # src/render/props.py; add_prop() just dispatches each exported prop dict to its
     # builder.
+    centerline_yellow.build()
+    centerline_white.build()
+    phase("legs (crosswalks, stop bars, centrelines)")
     streetlight_template = import_gltf_template(theme.get("streetlight_gltf"), "streetlight_template")
     for i, prop in enumerate(data.get("props", [])):
         add_prop(f"{prop['type']}_{i}", prop, streetlight_template, pole_mat,
@@ -634,7 +855,11 @@ def build_scene(data: dict):
         tree_template = build_tree_proxy(trunk_mat, foliage_mat)
         add_tree_instances("street_trees", tree_points, tree_template)
 
-    return cx, cy, scene_radius, ground_size, corridor_view(framed_x, framed_y, cx, cy)
+    phase("props + trees")
+    view = None if world else corridor_view(framed_x, framed_y, cx, cy)
+    return Built(cx=cx, cy=cy, scene_radius=scene_radius, ground_size=ground_size, view=view,
+                 ground_rect=(gcx - ground_w / 2, gcy - ground_h / 2, gcx + ground_w / 2, gcy + ground_h / 2),
+                 max_height_m=max_building_height(data), ground=ground)
 
 
 # A SUBJECT LONGER THAN THIS CANNOT BE FRAMED AS A SQUARE. The camera below looks from due
@@ -714,8 +939,64 @@ def corridor_view(xs, ys, cx, cy):
     return (px, py), along * CORRIDOR_END_MARGIN / lateral_coverage_multiple(), across
 
 
-def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_size: float,
-                           view=None):
+def clip_range(cam, eye_z: float, ground_rect, max_height_m: float):
+    """(clip_start, clip_end) for `cam`, from where it stands and what is in the world.
+
+    Both ends are DEPTHS ALONG THE VIEW AXIS, which is what a clip plane is - not distances from
+    the eye. The camera's four corner rays are intersected with the ground plane: the farthest hit is
+    the farthest anything in the picture can be (a building stands ABOVE the ground and so meets the
+    ray sooner), and the nearest hit, lowered by the tallest building's share of the camera's
+    height, is the nearest anything can be (a rooftop on the bottom ray is (1 - H/h) of the way to the
+    ground).
+
+    Why this and not the old `dist + height + ground_size`: that bound grows with the GROUND, and a
+    world's ground is a borough. The depth buffer's precision is set by far/near, and the comment in
+    add_camera records what a too-wide range does to a thin crosswalk line at 50-100 m. With a
+    frustum-derived range the answer does not depend on how big the world is, which is the property
+    a world needs: a camera in a 2 km world and one in a 200 m site that look at the same ground get
+    the same clip range.
+
+    The ground rectangle still caps the far end, because a world that ends inside the view has
+    nothing beyond its edge to draw. A ray that never reaches the ground (a camera pitched up) falls
+    back to that cap alone.
+    """
+    rot = cam.rotation_euler.to_matrix()
+    fwd = rot @ mathutils.Vector((0.0, 0.0, -1.0))
+    half_w = CAMERA_SENSOR_MM / 2
+    half_h = half_w * 3 / 4  # 4:3 - a letterboxed corridor sheet is a strict subset of this
+    depths = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            ray = rot @ mathutils.Vector((sx * half_w, sy * half_h, -CAMERA_LENS_MM))
+            if ray.z >= -1e-6:
+                depths = []
+                break
+            # the ray scaled to touch the ground, then its component along the view axis
+            depths.append((ray * (eye_z / -ray.z)).dot(fwd))
+        else:
+            continue
+        break
+    eye = cam.location
+    rect_far = max((mathutils.Vector((x, y, 0.0)) - eye).dot(fwd)
+                   for x in (ground_rect[0], ground_rect[2]) for y in (ground_rect[1], ground_rect[3]))
+    if not depths:
+        return CLIP_NEAR_FLOOR_M, max(rect_far, 10.0)
+    far = min(max(depths), rect_far) * CLIP_FAR_MARGIN
+    low = max(0.0, 1.0 - max_height_m / eye_z) if eye_z > 0 else 0.0
+    near = max(min(depths) * low * CLIP_NEAR_MARGIN, CLIP_NEAR_FLOOR_M)
+    return near, max(far, near * 2)
+
+
+# Safety factors on the frustum-derived range: a few percent so a rooftop or a tree crown at the very
+# edge of the picture is not shaved, and so a ray bound by rounding is not exactly on a plane.
+CLIP_FAR_MARGIN = 1.05
+CLIP_NEAR_MARGIN = 0.9
+CLIP_NEAR_FLOOR_M = 1.0
+
+
+def add_camera(cx: float, cy: float, scene_radius: float, ground_rect, max_height_m: float, view=None):
+    """The camera for one picture, at the same angle, lens and distance as ever - only the clip range
+    is derived (clip_range). Returns (camera object, its height, the radius it really framed)."""
     if view is not None:
         # SAME ANGLE, TURNED IN PLAN - see corridor_view. The two multipliers below are the ones
         # every other render uses; only the compass direction the camera stands in changes.
@@ -732,33 +1013,43 @@ def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_siz
     direction = mathutils.Vector((cx, cy, 0)) - cam.location
     cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
     cam.data.lens = CAMERA_LENS_MM
-    # Blender's default clip range (0.1 - 1000 m) is enormously wider than this
-    # scene ever needs, which starves the depth buffer of precision at the
-    # ~50-100 m distance this camera actually sits at - confirmed by an
-    # isolated test: thin, long ground markings (crosswalk lines) rendered as
-    # a torn/tessellated mess with the default clip range and perfectly solid
-    # once the range was tightened to the scene's real extent, with shadow
-    # settings held constant throughout (so this is a camera depth-buffer
-    # precision issue, not a shadow one, despite looking similar to the
-    # z-fighting/shadow-acne bugs documented elsewhere in this file/README).
-    # ground_size is already the true worst-case scene extent (see build_scene) -
-    # clip_end just needs to clear camera-to-farthest-ground-corner distance,
-    # so dist + height + ground_size is a generous, cheap-to-compute upper bound.
-    cam.data.clip_start = max(dist - scene_radius * 2, 1.0)
-    cam.data.clip_end = dist + height + ground_size
+    # DEPTH-BUFFER PRECISION, which is why the clip range is tight and derived rather than left at
+    # Blender's default (0.1 - 1000 m). That is enormously wider than a scene needs and starves the
+    # depth buffer at the ~50-100 m this camera stands at - confirmed by an isolated test: thin, long
+    # ground markings (crosswalk lines) rendered as a torn/tessellated mess with the default range and
+    # perfectly solid once it was tightened, with shadow settings held constant (so a camera
+    # depth-buffer problem, not a shadow one, despite looking like the z-fighting/shadow-acne bugs
+    # documented elsewhere in this file/README). It matters MORE in a world, where the ground a
+    # bound like `dist + height + ground_size` would reach is a borough wide - hence clip_range.
+    cam.data.clip_start, cam.data.clip_end = clip_range(cam, height, ground_rect, max_height_m)
+    return cam, height, scene_radius
 
+
+def add_sun_and_sky(cx: float, cy: float, scene_radius: float, height: float):
     bpy.ops.object.light_add(type="SUN", location=(cx + scene_radius * 0.3, cy - scene_radius * 0.3, height))
     sun = bpy.context.active_object
+    sun.name = "Sun"
     sun.data.energy = 2.2
     sun.data.angle = 0.2  # soften shadow edges slightly
     sun.rotation_euler = (0.85, 0.15, 0.75)
+    set_sky()
+    return sun
 
+
+def set_sky():
     world = bpy.context.scene.world
     world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     if bg:
         bg.inputs["Color"].default_value = (0.55, 0.68, 0.82, 1.0)
         bg.inputs["Strength"].default_value = 0.6
+
+
+def setup_camera_and_light(cx: float, cy: float, scene_radius: float, ground_rect, max_height_m: float,
+                           view=None):
+    cam, height, scene_radius = add_camera(cx, cy, scene_radius, ground_rect, max_height_m, view)
+    add_sun_and_sky(cx, cy, scene_radius, height)
+    return cam
 
 
 # The render's own resolution, which --dpi does NOT control: that knob is matplotlib's and
@@ -854,18 +1145,204 @@ def disable_undo():
     bpy.context.preferences.edit.use_global_undo = False
 
 
-def main():
-    jobs = parse_args()
-    disable_undo()
-    configure_render()  # render settings are scene-independent - set once
-    for geometry_path, output_path in jobs:
+def render_sites(pairs):
+    """The original mode: one JSON, one scene, one camera at its `frame`, one PNG - per pair."""
+    for geometry_path, output_path in pairs:
         data = load_geometry(geometry_path)
         clear_scene()
-        cx, cy, scene_radius, ground_size, view = build_scene(data)
-        setup_camera_and_light(cx, cy, scene_radius, ground_size, view)
-        set_sheet(view)
+        built = build_scene(data)
+        setup_camera_and_light(built.cx, built.cy, built.scene_radius, built.ground_rect,
+                               built.max_height_m, built.view)
+        set_sheet(built.view)
         render(output_path)
         print(f"RENDER_DONE: {output_path}")
+
+
+# The scene custom property a built world carries for camera mode to read, so a .blend is
+# self-describing and cameras.json needs nothing but a centre and a radius.
+WORLD_PROP = "nj_world"
+
+
+def pack_images():
+    """Embed every file-backed image in the .blend, so the saved world does not depend on
+    output/.textures staying where it was when the world was built. Packed JPEGs stay compressed,
+    so this costs the files' own size and nothing is decoded until a render uses it."""
+    packed = 0
+    for img in bpy.data.images:
+        if img.source == "FILE" and not img.packed_file:
+            try:
+                img.pack()
+                packed += 1
+            except RuntimeError as e:
+                print(f"  WARNING: could not pack {img.filepath!r} ({e}) - the .blend will look for it on disk")
+    return packed
+
+
+def build_world(job):
+    """--build: the whole scene from one geometry JSON, no camera, saved as a .blend."""
+    started = time.perf_counter()
+    data = load_geometry(job.geometry, WORLD_REQUIRED_KEYS)
+    clear_scene()
+    built = build_scene(data, world=True, texture_res=job.texture_res)
+    set_sky()  # the sky is the world's, and a camera render re-sets the same values
+    bpy.context.scene[WORLD_PROP] = {
+        "ground_rect": list(built.ground_rect),
+        "max_height_m": built.max_height_m,
+        "texture_res": job.texture_res,
+    }
+    packed = pack_images()
+    built_s = time.perf_counter() - started
+    job.blend.parent.mkdir(parents=True, exist_ok=True)
+    bpy.ops.wm.save_as_mainfile(filepath=str(job.blend), compress=True)
+    print(f"WORLD_SAVED: {job.blend} ({len(bpy.data.objects)} objects, {packed} images packed, "
+          f"built in {built_s:.1f}s, saved in {time.perf_counter() - started - built_s:.1f}s)")
+
+
+def load_cameras(path: Path) -> list[dict]:
+    """The camera specs, validated. A bad spec fails here, before a world is opened and a render
+    is spent - and a name is a filename, so nothing that could escape --out-dir is allowed."""
+    with open(path) as f:
+        specs = json.load(f)
+    if isinstance(specs, dict):
+        specs = specs.get("cameras", [specs])
+    seen = set()
+    for spec in specs:
+        name = spec.get("name")
+        if (not isinstance(name, str) or not name or name.startswith(".")
+                or not all(c.isalnum() or c in "_.-" for c in name)):
+            raise SystemExit(f"{path}: camera name {name!r} must be non-empty and use only "
+                             f"letters, digits, '_', '-' and '.'")
+        if name in seen:
+            raise SystemExit(f"{path}: duplicate camera name {name!r}")
+        seen.add(name)
+        center, radius = spec.get("center_m"), spec.get("radius_m")
+        if not (isinstance(center, (list, tuple)) and len(center) == 2
+                and all(isinstance(v, (int, float)) for v in center)):
+            raise SystemExit(f"{path}: camera {name!r} needs center_m: [x, y] in metres")
+        if not isinstance(radius, (int, float)) or radius <= 0:
+            raise SystemExit(f"{path}: camera {name!r} needs a positive radius_m")
+    return specs
+
+
+class PavementIndex:
+    """The pavement's top-face boundary, read back out of the saved world's own meshes.
+
+    Camera mode has no geometry JSON - only the .blend - yet corridor_view needs the pavement's
+    extent near the camera, to decide whether the subject is a corridor and turn the camera across it
+    (see corridor_view). So the ground truth is the mesh. Its edges are kept as segments and SAMPLED
+    inside the camera's disc at query time, because a world's pavement can be one long ring whose
+    vertices are all outside the disc while its edge runs straight through it.
+    """
+
+    def __init__(self):
+        self.segments = []   # (x1, y1, x2, y2)
+        top = PAVEMENT_HEIGHT_M * 0.5
+        for obj in bpy.data.objects:
+            if obj.type != "MESH" or not obj.name.startswith("pavement"):
+                continue
+            mesh = obj.data
+            n = len(mesh.vertices)
+            co = [0.0] * (3 * n)
+            mesh.vertices.foreach_get("co", co)
+            ev = [0] * (2 * len(mesh.edges))
+            mesh.edges.foreach_get("vertices", ev)
+            for i in range(0, len(ev), 2):
+                a, b = ev[i], ev[i + 1]
+                if co[3 * a + 2] > top and co[3 * b + 2] > top:
+                    self.segments.append((co[3 * a], co[3 * a + 1], co[3 * b], co[3 * b + 1]))
+
+    def within(self, cx: float, cy: float, reach: float):
+        """(xs, ys) of pavement-edge points within `reach` of (cx, cy)."""
+        xs, ys = [], []
+        step = max(reach / 40.0, 0.5)
+        for x1, y1, x2, y2 in self.segments:
+            if (max(x1, x2) < cx - reach or min(x1, x2) > cx + reach
+                    or max(y1, y2) < cy - reach or min(y1, y2) > cy + reach):
+                continue
+            n = max(1, int(math.hypot(x2 - x1, y2 - y1) / step))
+            for k in range(n + 1):
+                t = k / n
+                x, y = x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+                if math.hypot(x - cx, y - cy) <= reach:
+                    xs.append(x)
+                    ys.append(y)
+        return xs, ys
+
+
+# How far from a camera's centre, in its own radii, the pavement is read to decide whether the
+# subject is a corridor. A frame's radius is 1.2x its pavement's half-span (src/render/frame.py), so
+# every vertex a site's own frame framed lies inside 1.2*sqrt(2)/1.2 ~ 1.2 radii of its centre.
+CORRIDOR_PROBE_RADII = 1.2
+
+
+def ground_for_camera(ground, world_rect, cx: float, cy: float, scene_radius: float):
+    """Grow the ground plane, in memory, to cover the world AND this camera's 4x frame.
+
+    A site's ground was always at least four frame-radii across (build_scene), because a camera that
+    pulls back further than the context reaches shows the plane's own edge with sky beneath it. In a
+    world the plane covers the geometry; a camera near the world's edge needs the same four radii
+    beyond it. Returns the rectangle, which also bounds the clip range.
+    """
+    half = scene_radius * 2.0
+    minx, miny = min(world_rect[0], cx - half), min(world_rect[1], cy - half)
+    maxx, maxy = max(world_rect[2], cx + half), max(world_rect[3], cy + half)
+    ground.location = ((minx + maxx) / 2, (miny + maxy) / 2, ground.location.z)
+    ground.scale = (maxx - minx, maxy - miny, 1.0)
+    return (minx, miny, maxx, maxy)
+
+
+def render_cameras(job):
+    """--open: one PNG per camera spec, in a world that was built once."""
+    specs = load_cameras(job.cameras)
+    opened = time.perf_counter()
+    bpy.ops.wm.open_mainfile(filepath=str(job.blend))
+    meta = bpy.context.scene.get(WORLD_PROP)
+    if meta is None or "Ground" not in bpy.data.objects:
+        raise SystemExit(f"{job.blend} was not built by `--build` (no '{WORLD_PROP}' on its scene) - "
+                         f"cannot place cameras in it.")
+    world_rect = tuple(meta["ground_rect"])
+    max_height_m = float(meta["max_height_m"])
+    ground = bpy.data.objects["Ground"]
+    disable_undo()
+    configure_render()
+    pavement = PavementIndex()
+    print(f"WORLD_OPENED: {job.blend} ({len(bpy.data.objects)} objects, "
+          f"{time.perf_counter() - opened:.1f}s incl. pavement index of {len(pavement.segments)} edges)")
+    job.out_dir.mkdir(parents=True, exist_ok=True)
+    for spec in specs:
+        cx, cy = spec["center_m"]
+        radius = float(spec["radius_m"])
+        xs, ys = pavement.within(cx, cy, radius * CORRIDOR_PROBE_RADII)
+        view = corridor_view(xs, ys, cx, cy) if xs else None
+        framed = view[1] if view is not None else radius
+        ground_rect = ground_for_camera(ground, world_rect, cx, cy, max(radius, framed))
+        started = time.perf_counter()
+        cam, height, used_radius = add_camera(cx, cy, radius, ground_rect, max_height_m, view)
+        sun = add_sun_and_sky(cx, cy, used_radius, height)
+        set_sheet(view)
+        output_path = job.out_dir / f"{spec['name']}.png"
+        render(output_path)
+        print(f"RENDER_DONE: {output_path} ({time.perf_counter() - started:.1f}s, "
+              f"clip {cam.data.clip_start:.1f}-{cam.data.clip_end:.1f} m"
+              f"{', corridor view' if view is not None else ''})")
+        for obj in (cam, sun):
+            data_block = obj.data
+            kind = obj.type
+            bpy.data.objects.remove(obj, do_unlink=True)
+            (bpy.data.cameras if kind == "CAMERA" else bpy.data.lights).remove(data_block)
+
+
+def main():
+    job = parse_args()
+    if job.mode == "cameras":
+        render_cameras(job)
+        return
+    disable_undo()
+    configure_render()  # render settings are scene-independent - set once
+    if job.mode == "build":
+        build_world(job)
+    else:
+        render_sites(job.pairs)
 
 
 if __name__ == "__main__":

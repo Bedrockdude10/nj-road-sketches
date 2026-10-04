@@ -27,6 +27,9 @@ on the axes: measured at 2.44 s against 0.016 s for the same geometry, 156x. `Me
 that argument applied to Blender - one mesh per material instead of one per piece, which takes a
 wide render's object count from ~900 to about a dozen.
 """
+import contextlib
+import math
+
 import bpy
 
 
@@ -193,6 +196,48 @@ def build_mesh_from_data(name: str, vertices: list, faces: list, material):
     return obj
 
 
+# `bpy.ops.mesh.dissolve_limited`'s own default, which build_mesh_from_data has always run at.
+DISSOLVE_ANGLE_RAD = math.radians(5.0)
+
+
+def build_merged_meshes(name: str, parts, material):
+    """ONE object holding every (vertices, faces) in `parts`, coplanar faces merged - the batched
+    build_mesh_from_data, for a scene with thousands of buildings.
+
+    WHY NOT CALL build_mesh_from_data PER BUILDING. It is one `bpy.ops` round trip each - an edit-mode
+    entry and `dissolve_limited` - and an operator's cost grows with the number of objects already in
+    the scene (see blender_prims.py). Measured on a synthetic 36-site world (2,844 buildings): 185 s
+    of a 200 s build. A site's 79 buildings never showed it.
+
+    The same merge, through the same underlying bmesh operator, on one bmesh holding every building:
+    the angle limit and the NORMAL delimit are the operator's own defaults, so what dissolves is what
+    dissolved. Buildings share no vertices or edges, so nothing can merge ACROSS two of them. A face
+    bmesh refuses as a duplicate is dropped rather than raised - trimesh does not emit any, and a
+    missing sliver is a better failure than no world.
+    """
+    import bmesh  # here and not at module level - see blender_prims._new_bmesh
+
+    bm = bmesh.new()
+    for vertices, faces in parts:
+        bverts = [bm.verts.new(v) for v in vertices]
+        for face in faces:
+            with contextlib.suppress(ValueError):
+                bm.faces.new([bverts[i] for i in face])
+    if not bm.faces:
+        bm.free()
+        return None
+    bm.normal_update()  # a face built by hand has no normal yet, and the angle test reads them
+    bmesh.ops.dissolve_limit(bm, angle_limit=DISSOLVE_ANGLE_RAD, verts=bm.verts, edges=bm.edges,
+                             use_dissolve_boundaries=False, delimit={"NORMAL"})
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.data.materials.append(material)
+    bpy.context.collection.objects.link(obj)
+    return obj
+
+
 def add_stripe_rect(name, center, u, n, length: float, width: float, height: float, material,
                      z_base: float = 0.0):
     """A rectangle from a centre, an along-axis and an across-axis. Used by the crosswalk bars."""
@@ -217,8 +262,6 @@ def stripe_rect_ring(center, u, n, length: float, width: float):
 
 def line_ring(p1, p2, width_m: float):
     """The four corners of a stripe of `width_m` between two points, or None if they coincide."""
-    import math
-
     (x1, y1), (x2, y2) = p1[:2], p2[:2]
     dx, dy = x2 - x1, y2 - y1
     length = math.hypot(dx, dy)
