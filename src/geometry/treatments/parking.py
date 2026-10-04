@@ -233,11 +233,12 @@ class MarkedParking(Treatment):
             # restated in paint (see the comment on beyond_the_tracing below) and still applies
             # up to wherever this depth_ft was actually sized to reach, even though the zone
             # itself may run further in law.
-            capped = self.end_ft is not None and zone_end_ft > self.end_ft
+            capped_end = zone_end_ft
+            capped = self.end_ft is not None and capped_end > self.end_ft
             if self.end_ft is not None:
                 if zone_start_ft >= self.end_ft:
                     continue
-                zone_end_ft = min(zone_end_ft, self.end_ft)
+                capped_end = min(capped_end, self.end_ft)
             if leg_name in ctx.marked and (leg_name, side) in ctx.straight_through:
                 start_ft, beyond_ft = zone_start_ft, None
             elif leg_name in ctx.marked:
@@ -264,13 +265,13 @@ class MarkedParking(Treatment):
             # assumed outside the tracing (the kerb held at its first traced offset) and why the
             # stalls and buffers below deliberately do NOT ask for the same.
             ctx.add(DAYLIGHT_EDGE_LINE,
-                     inset_line_ft(leg, side, lane_edge_offset_ft, start_ft, zone_end_ft,
+                     inset_line_ft(leg, side, lane_edge_offset_ft, start_ft, capped_end,
                                     keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2,
                                     beyond_the_tracing=True),
                      leg_name, side, beyond_ft)
             ctx.rim(ctx.add(DAYLIGHT_FILL, _one(lane_narrowing_polygons_ft(
                 leg, daylight_fill_ft, start_left_ft=start_ft, start_right_ft=start_ft,
-                sides=(side,), end_ft=zone_end_ft, beyond_the_tracing=True)),
+                sides=(side,), end_ft=capped_end, beyond_the_tracing=True)),
                 leg_name, side, beyond_ft,
                 shares_a_kerb=(leg_name, side) in ctx.straight_through), DAYLIGHT_EDGE_LINE)
             # Nothing to end against and no taper available: close the square end. See
@@ -285,7 +286,7 @@ class MarkedParking(Treatment):
                 # cuts ctx.rim knows about is not one of - so without this the hatch just stops,
                 # no line, same failure LaneNarrowing.end_ft's own closing line exists to avoid.
                 ctx.add(ZONE_END_LINE, zone_end_line_ft(
-                    leg, side, zone_end_ft, leg.curb_to_curb_ft / 2 - daylight_fill_ft),
+                    leg, side, capped_end, leg.curb_to_curb_ft / 2 - daylight_fill_ft),
                     leg_name, side)
 
         for start_ft, end_ft in runs:

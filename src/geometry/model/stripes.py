@@ -393,10 +393,10 @@ def stall_lane_runs_ft(runs: list[tuple[float, float]], stall_length_ft: float,
     """
     lanes = []
     for lo, hi in runs:
-        lo, hi = lo + keep_inside_ft, hi - keep_inside_ft
-        n_stalls = whole_stalls_ft(hi - lo, stall_length_ft)
+        inset_lo, inset_hi = lo + keep_inside_ft, hi - keep_inside_ft
+        n_stalls = whole_stalls_ft(inset_hi - inset_lo, stall_length_ft)
         if n_stalls:
-            lanes.append((lo, lo + n_stalls * stall_length_ft))
+            lanes.append((inset_lo, inset_lo + n_stalls * stall_length_ft))
     return lanes
 
 

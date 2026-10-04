@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from shapely.geometry import LineString, MultiLineString
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import linemerge
 
 from src.geometry.context_roads import (MAX_HALF_WIDTH_FT, assign_kerbs_to_roads, kerb_points,
@@ -49,7 +50,7 @@ def register_line(line: LineString, kerbs: list[LineString]) -> LineString:
     return register_lines([line], kerbs)[0]
 
 
-def _parts(geom) -> list[LineString]:
+def _parts(geom: BaseGeometry | None) -> list[LineString]:
     if geom is None or geom.is_empty:
         return []
     if geom.geom_type == "MultiLineString":

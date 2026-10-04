@@ -82,7 +82,7 @@ HARNESS_FILES = ("export_all_scenarios.py", "jobs.py")
 
 def run(cmd: list[str], cwd: Path, env: dict | None = None) -> subprocess.CompletedProcess:
     full_env = {**os.environ, **(env or {})}
-    return subprocess.run(cmd, cwd=cwd, env=full_env, capture_output=True, text=True)
+    return subprocess.run(cmd, cwd=cwd, env=full_env, capture_output=True, text=True, check=False)
 
 
 def hermetic_env() -> dict:

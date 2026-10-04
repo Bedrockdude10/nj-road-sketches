@@ -537,23 +537,23 @@ def hatch_bands(corridor: "Corridor", facts, side: str, marked_spans,
     Excludes driveway/side-street mouths - a hatch is a paint decision, and nothing is painted
     over a place a vehicle actually crosses the kerb.
     """
-    from src.geometry.network import _complement_spans, _intersect_spans, _merged_spans
+    from src.geometry.network import complement_spans, intersect_spans, merged_spans
     from src.geometry.treatments.parking import PARKING_STALL_DEPTH_DEFAULT_FT
 
     depth_ft = PARKING_STALL_DEPTH_DEFAULT_FT if depth_ft is None else depth_ft
-    mouths = _merged_spans([(opening.start_ft, opening.end_ft)
+    mouths = merged_spans([(opening.start_ft, opening.end_ft)
                             for opening_side, opening in facts.openings if opening_side == side])
-    clear = _complement_spans(mouths, 0.0, corridor.length_ft)
-    unmarked = _complement_spans(marked_spans, 0.0, corridor.length_ft)
-    candidate = _intersect_spans(clear, unmarked)
+    clear = complement_spans(mouths, 0.0, corridor.length_ft)
+    unmarked = complement_spans(marked_spans, 0.0, corridor.length_ft)
+    candidate = intersect_spans(clear, unmarked)
 
     # no_parking zones can overlap each other (stacked statutory setbacks) so are merged before
-    # `_intersect_spans`, which assumes disjoint input; `parkable` is already the merged complement
+    # `intersect_spans`, which assumes disjoint input; `parkable` is already the merged complement
     # of `no_parking`, computed once in corridor_facts, so the two partition `candidate` exactly.
-    restricted = _merged_spans([(zone.start_ft, zone.end_ft)
+    restricted = merged_spans([(zone.start_ft, zone.end_ft)
                                 for zone in facts.by_side("no_parking", side)])
-    legal = _intersect_spans(candidate, restricted)
-    room = _intersect_spans(candidate, facts.by_side("parkable", side))
+    legal = intersect_spans(candidate, restricted)
+    room = intersect_spans(candidate, facts.by_side("parkable", side))
 
     on = Alignment(corridor.centerline)
 
@@ -568,7 +568,7 @@ def hatch_bands(corridor: "Corridor", facts, side: str, marked_spans,
     # approaching Greenwood - the rest is neither a stall nor, until now, a hatch. `marked_spans`
     # carries a stall, so `may_park=True` allocates the box first and this draws what is left.
     return (bands(legal, "legal", False) + bands(room, "room", False)
-            + bands(_intersect_spans(_merged_spans(marked_spans), clear), "room", True))
+            + bands(intersect_spans(merged_spans(marked_spans), clear), "room", True))
 
 
 def stall_room_spans(corridor: "Corridor", side: str, lane_edge_at, sample_ft: float = CORRIDOR_SAMPLE_FT):

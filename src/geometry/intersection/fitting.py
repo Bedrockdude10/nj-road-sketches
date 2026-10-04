@@ -151,8 +151,8 @@ def _traced_cross_section(leg, legs=None) -> tuple[np.ndarray, np.ndarray] | Non
     spans = [curb_station_span(leg, side) for side in ("left", "right")]
     if any(span is None for span in spans):
         return None
-    hi = min(min(span[1] for span in spans), TRACED_SECTION_END_FT)
-    lo = max(max(span[0] for span in spans), _section_start_ft(leg, legs, hi))
+    hi = min(*(span[1] for span in spans), TRACED_SECTION_END_FT)
+    lo = max(*(span[0] for span in spans), _section_start_ft(leg, legs, hi))
     if hi - lo < MIN_TRACED_SECTION_FT:
         return None
     stations = np.linspace(lo, hi, TRACED_SECTION_SAMPLES)
@@ -228,8 +228,8 @@ def _traced_centre_profile(leg, legs=None) -> tuple[np.ndarray, np.ndarray] | No
     spans = [curb_station_span(leg, side) for side in ("left", "right")]
     if any(span is None for span in spans):
         return None
-    hi = min(min(span[1] for span in spans), leg.centerline.length)
-    lo = max(max(span[0] for span in spans), _section_start_ft(leg, legs, hi))
+    hi = min(*(span[1] for span in spans), leg.centerline.length)
+    lo = max(*(span[0] for span in spans), _section_start_ft(leg, legs, hi))
     if hi - lo < MIN_TRACED_SECTION_FT:
         return None
     n = max(int(np.ceil((hi - lo) / CENTRE_SAMPLE_FT)) + 1, 2)

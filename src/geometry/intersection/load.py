@@ -157,9 +157,10 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
         for name, piece in _assign_leg_pieces(pieces, leg_names, legs_cfg, center_ft, sri).items():
             # Trimmed from the snapped junction end outward, so a shortened leg keeps the
             # station-0 origin every measurement in the project is taken from.
-            if piece.length > leg_lengths[name]:
-                piece = substring(piece, 0, leg_lengths[name])
-            legs[name] = Leg(name=name, centerline=piece,
+            centerline = piece
+            if centerline.length > leg_lengths[name]:
+                centerline = substring(centerline, 0, leg_lengths[name])
+            legs[name] = Leg(name=name, centerline=centerline,
                               curb_to_curb_ft=legs_cfg[name].get("curb_to_curb_ft"))
 
     kerb_lines = _kerb_lines_ft(osm, center_ft)

@@ -73,7 +73,7 @@ def _ruff(*args) -> list[dict]:
             "  .venv/bin/pip install -r requirements.txt"
         )
     result = subprocess.run([str(RUFF), "check", "--output-format=json", *args, *TARGETS],
-                             cwd=REPO_ROOT, capture_output=True, text=True)
+                             cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     # 0 = clean, 1 = findings. Anything else (2 = bad config/arguments) means the result says
     # nothing about the code, so it must not be read as an absence of findings.
     if result.returncode not in (0, 1):
@@ -146,7 +146,7 @@ def test_import_contracts_hold():
             "Install it with everything else:\n\n"
             "  .venv/bin/pip install -r requirements.txt"
         )
-    result = subprocess.run([str(LINT_IMPORTS)], cwd=REPO_ROOT, capture_output=True, text=True)
+    result = subprocess.run([str(LINT_IMPORTS)], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     if result.returncode == 0:
         return
     # Its own report is already the readable thing - contract by contract, with the offending
@@ -172,5 +172,5 @@ def test_typed_modules_pass_mypy():
             "Install it with everything else:\n\n"
             "  .venv/bin/pip install -r requirements.txt"
         )
-    result = subprocess.run([str(MYPY)], cwd=REPO_ROOT, capture_output=True, text=True)
+    result = subprocess.run([str(MYPY)], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     assert result.returncode == 0, "mypy (strict, modules in mypy.ini):\n" + result.stdout.strip()

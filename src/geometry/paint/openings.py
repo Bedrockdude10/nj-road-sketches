@@ -698,10 +698,11 @@ def kerb_opening_bands(state: "DesignState", junction_mouths: dict | None = None
                 targets = [(mouth, "driveway_mouths"),
                            (unary_union([mouth, *run_out]), "driveway_tapered")]
             for shape, target in targets:
+                trimmed = shape
                 if kerbside is not None and not kerbside.is_empty:
-                    shape = shape.intersection(kerbside)
-                if not shape.is_empty:
-                    shapes[target].append(shape)
+                    trimmed = trimmed.intersection(kerbside)
+                if not trimmed.is_empty:
+                    shapes[target].append(trimmed)
     return KerbOpenings(by_kerb={
         key: KerbSideOpenings(**{name: (unary_union(parts) if parts else None)
                                   for name, parts in shapes.items()})

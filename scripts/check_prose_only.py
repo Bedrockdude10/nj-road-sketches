@@ -59,20 +59,20 @@ def fork_point(ref: str) -> str:
     since the fork - which for a day-old branch off main is most of the report. The merge
     base is the question actually being asked: what did THIS work change.
     """
-    r = subprocess.run(["git", "merge-base", ref, "HEAD"], capture_output=True, text=True)
+    r = subprocess.run(["git", "merge-base", ref, "HEAD"], capture_output=True, text=True, check=False)
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else ref
 
 
 def same_commit(a: str, b: str) -> bool:
     """Whether two refs name the same commit, compared by resolved sha rather than by string."""
     def sha(ref):
-        r = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True)
+        r = subprocess.run(["git", "rev-parse", ref], capture_output=True, text=True, check=False)
         return r.stdout.strip() if r.returncode == 0 else ref
     return sha(a) == sha(b)
 
 
 def git_show(ref: str, path: str) -> str | None:
-    r = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+    r = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True, check=False)
     return r.stdout if r.returncode == 0 else None
 
 def main() -> int:

@@ -82,7 +82,7 @@ def render_all(blender_bin: str, jobs: list[tuple[Path, Path]]):
     each launch has ~1-1.5s of fixed startup overhead, not worth paying per-render."""
     args = [str(p) for pair in jobs for p in pair]
     cmd = [blender_bin, "--background", "--python", str(BLENDER_SCENE_SCRIPT), "--", *args]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     rendered = result.stdout.count("RENDER_DONE")
     if result.returncode != 0 or rendered != len(jobs):
         scenes = ", ".join(out.name for _, out in jobs)
@@ -106,7 +106,7 @@ def render_all(blender_bin: str, jobs: list[tuple[Path, Path]]):
 
 
 def _run_blender(cmd: list[str], token: str, expected: int, what: str) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     done = result.stdout.count(token)
     if result.returncode == 0 and done == expected:
         return

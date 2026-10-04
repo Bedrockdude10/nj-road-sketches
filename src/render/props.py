@@ -1048,15 +1048,15 @@ def _daylight_device_props(state: DesignState, offsets_ft: dict, so_far: list[di
         spans = merged_no_parking_spans_ft(
             no_parking_zones_ft(state, leg_name, side, offsets_ft, so_far))
         for start_ft, end_ft in spans:
-            start_ft = max(start_ft, clearance_ft)
-            span_ft = end_ft - start_ft
+            clamped_start = max(start_ft, clearance_ft)
+            span_ft = end_ft - clamped_start
             if span_ft < MIN_DAYLIGHT_DEVICE_SPAN_FT:
                 continue
             # Distributed across the span rather than stepped from its start, so the row
             # ends where the zone does, and a zone shorter than one spacing still gets one
             # device rather than none.
             count = max(int(span_ft // spacing_ft), 1)
-            for station in np.linspace(start_ft, end_ft, count + 1)[:-1] + (span_ft / count) / 2:
+            for station in np.linspace(clamped_start, end_ft, count + 1)[:-1] + (span_ft / count) / 2:
                 at = point_at(leg.centerline, float(station), offset_ft)
                 if stands_in_an_opening(openings, Point(at)):
                     continue

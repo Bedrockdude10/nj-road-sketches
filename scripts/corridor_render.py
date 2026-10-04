@@ -46,7 +46,7 @@ from src.geometry.corridor_paint import (CORRIDOR_SAMPLE_FT, JUNCTION_MOUTH,
                                          stall_room_spans, symbol_stations, travel_way_edges)
 from src.geometry.intersection import load_intersection_model
 from src.geometry.model import station_offset_many
-from src.geometry.network import (_complement_spans, _intersect_spans, _merged_spans,
+from src.geometry.network import (complement_spans, intersect_spans, merged_spans,
                                   corridor_facts, corridors_from_models)
 from src.geometry.treatments import (BROAD_ST_TWO_WAY_BIKEWAY, CorridorFacility,
                                      TARGET_LANE_WIDTH_FT, route_decision_for)
@@ -118,9 +118,9 @@ def stall_spans(corridor, facts, side: str, edge_at):
     twice, once here against the facility and once inline in `_calming_strip` against the nominal
     lane, which is two derivations of one count and the reason the sheet could not print both.
     """
-    mouths = _merged_spans([(o.start_ft, o.end_ft)
+    mouths = merged_spans([(o.start_ft, o.end_ft)
                             for opening_side, o in facts.openings if opening_side == side])
-    clear = _complement_spans(mouths, 0.0, corridor.length_ft)
+    clear = complement_spans(mouths, 0.0, corridor.length_ft)
     room = stall_room_spans(corridor, side, edge_at)
     return _intersect(_intersect(facts.by_side("parkable", side), clear), room)
 
@@ -774,9 +774,9 @@ def _render_corridor(corridor, models, args) -> int:
     # zones (a hydrant inside a corner clearance, say) would otherwise double-count their overlap.
     for compass in ("north", "south"):
         side = facility_side(corridor, compass)
-        merged = _merged_spans([(zone.start_ft, zone.end_ft)
+        merged = merged_spans([(zone.start_ft, zone.end_ft)
                                 for zone in facts.by_side("no_parking", side)])
-        on_corridor = _intersect_spans(merged, ((0.0, corridor.length_ft),))
+        on_corridor = intersect_spans(merged, ((0.0, corridor.length_ft),))
         closed_ft = sum(hi - lo for lo, hi in on_corridor)
         print(f"  legally no parking on the {compass} kerb regardless of design: "
               f"{closed_ft:,.0f} of {corridor.length_ft:,.0f} ft "

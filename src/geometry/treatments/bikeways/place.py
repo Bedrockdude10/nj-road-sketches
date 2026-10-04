@@ -540,13 +540,14 @@ class AddBikeLane(Treatment):
             for zone_start_ft, zone_end_ft in merged_no_parking_spans_ft(
                     no_parking_zones_ft(ctx.state, leg_name, side,
                                         ctx.crosswalk_offsets, ctx.props)):
-                zone_start_ft = max(zone_start_ft, start_ft)
+                clipped_start = max(zone_start_ft, start_ft)
+                clipped_end = zone_end_ft
                 if self.to_ft is not None:
-                    zone_end_ft = min(zone_end_ft, self.to_ft)
-                if zone_end_ft - zone_start_ft < MIN_LINE_LENGTH_FT:
+                    clipped_end = min(clipped_end, self.to_ft)
+                if clipped_end - clipped_start < MIN_LINE_LENGTH_FT:
                     continue
                 zone = offset_band_polygon(leg, side, inner_off, outer_off,
-                                           zone_start_ft, zone_end_ft)
+                                           clipped_start, clipped_end)
                 ctx.rim(ctx.add(DAYLIGHT_FILL, zone, leg_name, side), DAYLIGHT_EDGE_LINE)
             for run_start_ft, run_end_ft in parking_runs(ctx.state, leg_name, side,
                                                           ctx.crosswalk_offsets, ctx.props):

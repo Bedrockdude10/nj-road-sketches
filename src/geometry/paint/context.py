@@ -470,15 +470,16 @@ class PaintContext:
                     # A zone can be cut by a crossing AND by a driveway at the same corner, and
                     # where the two cuts converge their rims run together. The sweep is one stroke
                     # however many things cut it.
+                    to_sweep = part
                     if painted:
-                        part = part.difference(
+                        to_sweep = to_sweep.difference(
                             unary_union(painted).buffer(COLLINEAR_PAINT_TOLERANCE_FT))
-                    for got in getattr(part, "geoms", [part]):
-                        got = _held_inside_the_kerb(self.state.legs.get(piece.leg), piece.side, got)
-                        if got.geom_type == "LineString" and got.length >= MIN_RIM_LENGTH_FT:
-                            self.pieces.append(PaintPiece(kind, got, piece.leg, piece.side,
+                    for got in getattr(to_sweep, "geoms", [to_sweep]):
+                        trimmed = _held_inside_the_kerb(self.state.legs.get(piece.leg), piece.side, got)
+                        if trimmed.geom_type == "LineString" and trimmed.length >= MIN_RIM_LENGTH_FT:
+                            self.pieces.append(PaintPiece(kind, trimmed, piece.leg, piece.side,
                                                           rim=cause))
-                            painted.append(got)
+                            painted.append(trimmed)
 
     def anchors(self, leg_name: str, side: str, inner_offset_ft: float = 0.0):
         """This leg-side's measuring stations, with the shared crossing geometry filled in.

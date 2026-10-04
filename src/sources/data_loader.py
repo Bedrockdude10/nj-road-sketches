@@ -261,7 +261,7 @@ def geocode_intersection(street1: str, street2: str, anchor_query: str, search_r
     return Point((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
 
 
-def _resolve_indexed_path(path: Path | str) -> Path:
+def resolve_indexed_path(path: Path | str) -> Path:
     """Return an indexed sibling of `path` (same stem, .fgb/.gpkg) if one exists and
     is at least as new as `path`, else `path` unchanged.
 
@@ -381,7 +381,7 @@ def require_source_data(path: Path | str, what: str) -> Path:
     )
 
 
-def _unpack_single_part(geometry):
+def unpack_single_part(geometry):
     """Collapse single-part Multi* geometries back to their simple counterpart.
 
     Indexed formats store one geometry type per layer, so a mixed LineString/MultiLineString
@@ -404,11 +404,11 @@ def load_road_network(
     built (see _resolve_indexed_path / scripts/convert_road_network.py) - same data,
     dramatically faster bbox reads.
     """
-    resolved = require_source_data(_resolve_indexed_path(resolve_data_path(path)), "the roadway network")
+    resolved = require_source_data(resolve_indexed_path(resolve_data_path(path)), "the roadway network")
     _require_within_fixture(resolved, bbox, "roads")
     network = gpd.read_file(resolved, bbox=bbox)
     if not network.empty:
-        network = network.set_geometry(network.geometry.map(_unpack_single_part))
+        network = network.set_geometry(network.geometry.map(unpack_single_part))
     # Validated at the boundary, once - see src/sources/schemas.py. A renamed SRI column is
     # otherwise read downstream as "this leg matched no road", which is drawn, not raised.
     return validate_layer(network, RoadNetworkSchema, resolved, expect_crs=WGS84)

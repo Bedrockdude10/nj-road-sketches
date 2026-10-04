@@ -52,7 +52,7 @@ def _traced(leg: "Leg", side: Side, s: np.ndarray) -> np.ndarray:
     """Signed offsets of this side's traced kerb, NaN outside its traced span."""
     span = curb_station_span(leg, side) if side in leg.traced_sides else None
     off = None if span is None else tapered_curb_offsets(leg, side, s, outside=np.nan)
-    if off is None:
+    if span is None or off is None:
         return np.full(len(s), np.nan)
     return np.where((s >= span[0]) & (s <= span[1]), side.sign * off, np.nan)
 

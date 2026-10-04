@@ -265,14 +265,15 @@ def _kept_apart(bars) -> list[Polygon]:
     """
     kept: list[Polygon] = []
     for bar in bars:
+        trimmed = bar
         for earlier in kept:
-            if bar.intersects(earlier):
-                bar = bar.difference(earlier)
+            if trimmed.intersects(earlier):
+                trimmed = trimmed.difference(earlier)
         # A difference can split a bar in two round a bend; the larger piece is the bar.
-        if bar.geom_type == "MultiPolygon":
-            bar = max(bar.geoms, key=lambda piece: piece.area)
-        if not bar.is_empty and bar.area > 1e-6:
-            kept.append(bar)
+        if trimmed.geom_type == "MultiPolygon":
+            trimmed = max(trimmed.geoms, key=lambda piece: piece.area)
+        if not trimmed.is_empty and trimmed.area > 1e-6:
+            kept.append(trimmed)
     return kept
 
 

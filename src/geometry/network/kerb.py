@@ -92,7 +92,7 @@ class KerbRun:
         return self.source == KERB_FROM_TRACING
 
 
-def _merged_spans(spans) -> tuple[tuple[float, float], ...]:
+def merged_spans(spans) -> tuple[tuple[float, float], ...]:
     """Overlapping or touching (lo, hi) pairs collapsed into disjoint ones, in order."""
     out: list[list[float]] = []
     for lo, hi in sorted(spans):
@@ -105,19 +105,19 @@ def _merged_spans(spans) -> tuple[tuple[float, float], ...]:
     return tuple((lo, hi) for lo, hi in out)
 
 
-def _intersect_spans(a, b) -> tuple[tuple[float, float], ...]:
+def intersect_spans(a, b) -> tuple[tuple[float, float], ...]:
     """The stretches both span lists cover. Sorted, so a figure derived from it is reproducible.
 
-    Assumes each input is already disjoint (which _merged_spans guarantees), so the result is
+    Assumes each input is already disjoint (which merged_spans guarantees), so the result is
     disjoint too and its total length can be summed without double-counting.
     """
     return tuple(sorted((lo, hi) for lo, hi in
                         ((max(x[0], y[0]), min(x[1], y[1])) for x in a for y in b) if hi > lo))
 
 
-def _complement_spans(spans, lo: float, hi: float) -> tuple[tuple[float, float], ...]:
+def complement_spans(spans, lo: float, hi: float) -> tuple[tuple[float, float], ...]:
     out, cursor = [], lo
-    for start, end in _merged_spans(spans):
+    for start, end in merged_spans(spans):
         if start > cursor:
             out.append((cursor, min(start, hi)))
         cursor = max(cursor, end)

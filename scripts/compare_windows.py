@@ -41,7 +41,7 @@ from src.render.crosswalks import (CENTERLINE_STRIPE_WIDTH_FT, centerline_paint_
                                    centerline_start_ft)
 from src.render.props import build_props
 from src.render.scene import SceneGeometry
-from scripts.render_slice import (_center_ft, design_for, load_network,
+from scripts.render_slice import (center_ft, design_for, load_network,
                                    slice_around)
 
 #: How far inside the small window the comparison starts. One leg's worth of the corner
@@ -231,7 +231,7 @@ def main() -> None:
     args = parser.parse_args()
 
     network = load_network(args.area)
-    centre = _center_ft(args.around)
+    centre = center_ft(args.around)
     small_r, large_r = args.radius_ft, args.radius_ft * args.factor
     print(f"{args.scenario}: {small_r:.0f} ft window vs {large_r:.0f} ft, "
           f"compared inside {small_r - args.margin_ft:.0f} ft of centre\n")

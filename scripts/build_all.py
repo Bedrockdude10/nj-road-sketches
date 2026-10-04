@@ -81,18 +81,18 @@ def scenarios_for(site: str, module=None) -> list[str]:
     return named + sorted(extra)
 
 
-def draw_geometry_plot(model, state, out_path: Path) -> list:
+def draw_geometry_plot(model, state, out_path: Path, dpi: int = PLOT_DPI) -> list:
     """The phase 2 single-panel plan view, byte-for-byte the same figure that script makes."""
     fig, ax = plt.subplots(figsize=(11, 11))
     violations = plot_design_state(ax, model, state, "Existing Conditions").violations
     ax.legend(handles=legend_handles(), loc="upper left", fontsize=8)
     fig.suptitle(f"{model.config['intersection']['name']} - Phase 2 geometry", fontsize=13)
-    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return violations
 
 
-def draw_before_after(model, existing_state, state, scenario_name: str, out_path: Path) -> list:
+def draw_before_after(model, existing_state, state, scenario_name: str, out_path: Path, dpi: int = PLOT_DPI) -> list:
     """The phase 3 before/after pair, with the same filenames the phase scripts write.
 
     Deliberately not a new set of artifacts: the review workflow is looking at
@@ -112,7 +112,7 @@ def draw_before_after(model, existing_state, state, scenario_name: str, out_path
     fig.legend(handles=legend_handles(), loc="lower center", ncol=4, fontsize=8, bbox_to_anchor=(0.5, -0.02))
     fig.suptitle(f"{model.config['intersection']['name']} - Before / After "
                  f"(NAD83 NJ State Plane, feet)", fontsize=13)
-    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
+    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return violations
 
@@ -166,8 +166,6 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
     a shared list, and every site's Blender work is dispatched together at the end instead
     of serialising behind that site's plotting.
     """
-    global PLOT_DPI
-    PLOT_DPI = dpi
     # `refresh_osm` is deliberately NOT honoured here - refresh_osm_serially() has already
     # done it in the parent. See that function for why the fetching must not happen in the
     # workers.
@@ -220,11 +218,11 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
     for label, name, state in states:
         with contextlib.redirect_stdout(quiet):
             if label == "existing":
-                violations = draw_geometry_plot(model, state, out_dir / "phase2_geometry_plot.png")
+                violations = draw_geometry_plot(model, state, out_dir / "phase2_geometry_plot.png", dpi=dpi)
             else:
                 suffix = "" if label == "proposed" else f"_{label}"
                 violations = draw_before_after(model, existing, state, name,
-                                                out_dir / f"phase3_before_after{suffix}.png")
+                                                out_dir / f"phase3_before_after{suffix}.png", dpi=dpi)
         for violation in violations:
             if violation.fatal:
                 failures.append(f"{site}/{label}: {violation}")

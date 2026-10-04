@@ -199,7 +199,7 @@ SCENARIOS = {
     # used, and that parking competes with the facility for the same width - stacked, the section
     # lands 14.6 ft wide and leaves a 10.3 ft travel lane, which travel_lane_too_narrow refuses.
     # The route decision IS the proposal here; what the kerbs do under it is the decision's own.
-    "two_way_bikeway": lambda state, model, features: _route_decisions(state, model, features),
+    "two_way_bikeway": _route_decisions,
 }
 
 
@@ -242,7 +242,7 @@ def draw_3d(features: gpd.GeoDataFrame, area: str, name: str, out_dir: Path,
     return png
 
 
-def _center_ft(lonlat: str) -> Point:
+def center_ft(lonlat: str) -> Point:
     lon, lat = (float(v) for v in lonlat.split(","))
     return gpd.GeoSeries([Point(lon, lat)], crs=WGS84_EPSG).to_crs(NJ_STATE_PLANE_FT).iloc[0]
 
@@ -268,7 +268,7 @@ def main() -> None:
     if args.street:
         features, stem = slice_for_street(network, args.street), args.street.lower().replace(" ", "_")
     elif args.around:
-        features = slice_around(network, _center_ft(args.around), args.radius_ft)
+        features = slice_around(network, center_ft(args.around), args.radius_ft)
         stem = f"{args.around.replace(',', '_')}_{args.radius_ft:.0f}ft"
     else:
         features, stem = network, args.area

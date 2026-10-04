@@ -168,7 +168,7 @@ class SceneContext:
     test_a_check_reading_a_field_the_caller_left_out_gets_a_default.
     """
     model: object = None
-    state: "DesignState" = field(default_factory=lambda: _empty_state())
+    state: "DesignState" = field(default_factory=_empty_state)
     pavement: object = None
     props: tuple = ()
     paint: tuple = ()

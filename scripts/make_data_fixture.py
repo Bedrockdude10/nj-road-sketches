@@ -48,8 +48,8 @@ import pyogrio
 
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.site import list_sites, load_site_config
-from src.sources.data_loader import (DATA_DIR, FIXTURE_MANIFEST_NAME, _resolve_indexed_path,
-                                     _unpack_single_part, wgs84_box_in_state_plane)
+from src.sources.data_loader import (DATA_DIR, FIXTURE_MANIFEST_NAME, resolve_indexed_path,
+                                     unpack_single_part, wgs84_box_in_state_plane)
 from src.sources.osm_context import SNAPSHOT_AREAS
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -152,8 +152,8 @@ def verify_identical(source_path: Path, boxes: list, written: Path, columns: lis
         if want.crs is not None and got.crs is not None and want.crs != got.crs:
             print(f"  MISMATCH: CRS {want.crs.name} vs {got.crs.name}")
             return False
-        a = want.geometry.map(_unpack_single_part).to_wkb()
-        b = got.geometry.map(_unpack_single_part).to_wkb()
+        a = want.geometry.map(unpack_single_part).to_wkb()
+        b = got.geometry.map(unpack_single_part).to_wkb()
         if not (a == b).all():
             print("  MISMATCH: geometry WKB differs.")
             return False
@@ -200,7 +200,7 @@ def layer_sources(sites: list[str]) -> dict[str, list[Path]]:
 
 def clip_roads(out: Path, boxes: list, source: Path) -> tuple[Path, Path, int]:
     """The roadway network, as FlatGeobuf - the format the loaders already prefer."""
-    source = _resolve_indexed_path(source)
+    source = resolve_indexed_path(source)
     target = out / (source.stem + ".fgb")
     roads = read_boxes(source, boxes)
     roads.to_file(target, driver="FlatGeobuf")

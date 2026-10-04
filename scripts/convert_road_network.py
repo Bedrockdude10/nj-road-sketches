@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import geopandas as gpd
 
-from src.sources.data_loader import DEFAULT_ROAD_NETWORK_PATH, _unpack_single_part
+from src.sources.data_loader import DEFAULT_ROAD_NETWORK_PATH, unpack_single_part
 
 DRIVERS = {"fgb": "FlatGeobuf", "gpkg": "GPKG"}
 
@@ -48,7 +48,7 @@ def verify_identical(source: Path, converted: Path) -> bool:
     if sort_col:
         a = a.sort_values(sort_col).reset_index(drop=True)
         b = b.sort_values(sort_col).reset_index(drop=True)
-    b = b.set_geometry(b.geometry.map(_unpack_single_part))
+    b = b.set_geometry(b.geometry.map(unpack_single_part))
 
     attrs = [c for c in a.columns if c != a.geometry.name]
     if not a[attrs].equals(b[attrs]):

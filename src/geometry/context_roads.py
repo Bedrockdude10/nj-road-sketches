@@ -108,7 +108,7 @@ def osm_maxspeed_mph(raw) -> int | None:
     if text.lower().endswith("mph"):
         text, factor = text[:-3].strip(), 1.0
     else:
-        text, factor = text, KMH_TO_MPH
+        factor = KMH_TO_MPH
     try:
         return round(float(text) * factor)
     except ValueError:
