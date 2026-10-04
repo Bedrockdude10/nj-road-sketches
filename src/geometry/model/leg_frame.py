@@ -337,19 +337,21 @@ def curb_offsets_at_stations(leg: "Leg", side: str, stations: np.ndarray) -> np.
 
 
 def tapered_curb_offsets(leg: "Leg", side: str, stations: np.ndarray,
-                          max_taper: float = MAX_KERB_FOLLOW_TAPER) -> np.ndarray | None:
+                          max_taper: float = MAX_KERB_FOLLOW_TAPER,
+                          outside: float | None = None) -> np.ndarray | None:
     """UNSIGNED offsets of a side's kerb with its steep kinks flattened, at the given stations.
 
     What a marking that FOLLOWS the kerb should follow. curb_offsets_at_stations answers where the
     kerb is, which is the right question for "is there room" and the wrong one for "where does the
     paint go": paint that tracked the tracing exactly inherited a 1:2 corner flare and read as
     snaking. See MAX_KERB_FOLLOW_TAPER for why the limit is a rate.
-    """
+
+    `outside` is returned past the traced span instead of holding the end value."""
     curb = getattr(leg, f"{side}_curb", None)
     if curb is None or curb.is_empty:
         return None
     grid, eroded = _tapered_curb_frame(leg.centerline, curb, max_taper)
-    return np.interp(stations, grid, eroded)
+    return np.interp(stations, grid, eroded) if outside is None else np.interp(stations, grid, eroded, left=outside, right=outside)
 
 
 def curb_station_span(leg: "Leg", side: str,
@@ -518,7 +520,7 @@ def narrowest_half_width_ft(leg: "Leg", side: str, from_ft: float = 0.0,
     """
     profile = half_width_profile(leg, side, from_ft, to_ft)
     if profile is None:
-        return _nominal_half_ft(leg)
+        return nominal_half_ft(leg)
     return float(profile[1].min())
 
 
@@ -553,7 +555,7 @@ def half_width_profile(leg: "Leg", side: str, from_ft: float = 0.0, to_ft: float
     return stations, np.abs(offsets)
 
 
-def _nominal_half_ft(alignment) -> float:
+def nominal_half_ft(alignment, default: float | None = 0.0) -> float | None:
     """The DECLARED half-width, consulted ONLY where nothing is traced to measure instead.
 
     Reached by getattr because it is the one thing an Alignment deliberately does not carry. A
@@ -569,7 +571,7 @@ def _nominal_half_ft(alignment) -> float:
     nothing should depend on stays wired into every code path that touches the frame.
     """
     nominal = getattr(alignment, "curb_to_curb_ft", None)
-    return nominal / 2 if nominal is not None else 0.0
+    return nominal / 2 if nominal is not None else default
 
 
 def paint_stations(leg: "Leg", side: str, start_ft: float,

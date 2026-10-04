@@ -7,12 +7,13 @@ the QUESTION each part answers:
 
     crs           what datum is this in, and how do I clip a radius in it
     leg_frame     where is this, in station-along-the-leg and offset-from-it
+    kerb_chain    which evidence places a kerb or the centre, station by station
     traced_kerbs  what can be made of a surveyor's traced kerb, and when to refuse it
     corners       the fillet at each corner, and the pavement ring they close
     stripes       the shape of the paint: strips, tapers, stalls, post rows, hatching
     context       the street's surroundings - an estimated crossing, the sidewalk band
 
-The layering is crs | leg_frame <- traced_kerbs <- corners, and leg_frame <- stripes, context.
+The layering is crs | leg_frame, kerb_chain <- traced_kerbs <- corners, and leg_frame, kerb_chain <- stripes, context.
 There are no cycles, which is worth stating because the old module had no way to show that.
 
 EVERY PUBLIC NAME IS RE-EXPORTED HERE. `from src.geometry.model import X` is done in 30 modules
@@ -48,6 +49,15 @@ from src.geometry.model.crs import (
                                     reproject_to_state_plane,
                                     split_leg_centerlines,
 )
+from src.geometry.model.kerb_chain import (
+                                    CentreSource,
+                                    KerbSource,
+                                    Profile,
+                                    bridged,
+                                    centre_chain,
+                                    kerb_chain,
+                                    smooth_seams,
+)
 from src.geometry.model.leg_frame import (
                                     MAX_KERB_FOLLOW_TAPER,
                                     NORTH_SOUTH_LEG_TOLERANCE,
@@ -71,6 +81,7 @@ from src.geometry.model.leg_frame import (
                                     line_from_offsets,
                                     half_width_profile,
                                     narrowest_half_width_ft,
+                                    nominal_half_ft,
                                     offset_band_polygon,
                                     paint_stations,
                                     place_in_measured_frame,
@@ -167,7 +178,10 @@ __all__ = [
                                     "THROUGH_STREET_ANGLE_DEG",
                                     "WGS84",
                                     "Alignment",
+                                    "CentreSource",
+                                    "KerbSource",
                                     "Leg",
+                                    "Profile",
                                     "angled_stall_depth_ft",
                                     "angled_stall_line_depth_ft",
                                     "angled_stall_mouth_ft",
@@ -177,9 +191,11 @@ __all__ = [
                                     "assign_kerbs_to_corners",
                                     "band_from_offsets",
                                     "bollard_points_ft",
+                                    "bridged",
                                     "buffer_point_wgs84",
                                     "build_corner_fillets",
                                     "build_pavement_polygon",
+                                    "centre_chain",
                                     "clip_paint_clear_of",
                                     "corner_apron_annulus",
                                     "corner_overlay_polygon",
@@ -203,6 +219,7 @@ __all__ = [
                                     "inset_point_at_station",
                                     "is_through_street",
                                     "junction_mouth_ft",
+                                    "kerb_chain",
                                     "kerb_inset_offsets",
                                     "kerb_parallel_line_ft",
                                     "kerb_radius_is_usable",
@@ -219,6 +236,7 @@ __all__ = [
                                     "line_from_offsets",
                                     "narrowest_half_width_ft",
                                     "nearest_per_quadrant",
+                                    "nominal_half_ft",
                                     "offset_band_polygon",
                                     "paint_stations",
                                     "parking_lane_edge_line_ft",
@@ -232,6 +250,7 @@ __all__ = [
                                     "reproject_to_state_plane",
                                     "side_facing",
                                     "sidewalk_span_ft",
+                                    "smooth_seams",
                                     "smooth_traced_arc",
                                     "split_leg_centerlines",
                                     "stall_lane_runs_ft",

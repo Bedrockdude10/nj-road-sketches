@@ -49,7 +49,7 @@ class PaintPiece:
     # keeps half a spacing off an OPENING's fillet, whose chord runs at the hatch angle and so
     # reads as a stroke, but runs straight into a CROSSING's diagonal.
     rim: "RimCause | None" = None
-    datum: dict = field(default_factory=dict)
+    datum: dict[str, float] = field(default_factory=dict)
 
     @property
     def is_fill(self) -> bool:
