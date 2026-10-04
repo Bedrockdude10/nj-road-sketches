@@ -314,7 +314,7 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     # blender_scene.REQUIRED_KEYS, copied rather than imported: that module runs in Blender's
     # interpreter and .importlinter forbids reaching into it from here.
     assert {"frame", "kerbs", "paved_surfaces", "surveyed_crossings"} <= set(doc)
-    assert doc["pavement_near"], "a slice with no asphalt renders paint floating in space"
+    assert doc["pavement"], "a slice with no asphalt renders paint floating in space"
     # THE LAYERS THAT WERE SILENTLY EMPTY. A slice of this junction exported 0 paved surfaces and
     # 0 sidewalk pieces against the configured site's 33 and 25, because `area_context` carried
     # three of the ten OSM layers the fetchers know about and nothing said so - the export
@@ -324,7 +324,7 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     assert len(doc["paved_surfaces"]) >= 20, (
         f"only {len(doc['paved_surfaces'])} paved surfaces - the document is not carrying OSM's "
         f"driveways, parking and surrounding roads through to the scene")
-    assert doc["sidewalks_near"] or doc["sidewalks_far"], (
+    assert doc["sidewalks"], (
         "no footway: a crop has no corner ring, so build_sidewalk_pieces must be given the "
         "pavement to widen or the 3D scene has nothing to walk on")
     assert doc["bike_lane_surface_polygons"], "the facility should survive the translation"
@@ -334,7 +334,7 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     # in state-plane feet still renders - 400,000 m from the origin, off the edge of the camera -
     # so the frame radius is the only thing that catches it.
     radius_m = doc["frame"]["radius_m"]
-    rings = (doc["pavement_near"] + doc["bike_lane_surface_polygons"]
+    rings = (doc["pavement"] + doc["bike_lane_surface_polygons"]
              + doc["bike_lane_edge_lines"] + [k["coords"] for k in doc["kerbs"]])
     worst = max(math.hypot(x, y) for ring in rings for x, y in ring)
     assert worst <= radius_m * 1.5, (
