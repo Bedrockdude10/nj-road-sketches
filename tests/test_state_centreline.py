@@ -5,6 +5,7 @@ from shapely.geometry import LineString
 
 from src.geometry.intersection.state_centreline import register_line, registered_state_centrelines, attach_state_centrelines
 from src.geometry.model.leg_frame import Leg
+from tests.conftest import needs_source_data
 
 
 # Kerbs for synthetic tests
@@ -115,7 +116,7 @@ class TestAttachStateCentrelines:
         assert result == {}
 
 
-@pytest.mark.needs_source_data
+@needs_source_data
 def test_S10_load_intersection_model_sets_state_centrelines():
     """S10: load_intersection_model(site='broad_st_greenwood') sets state_centreline on real legs."""
     from src.geometry.intersection.load import load_intersection_model

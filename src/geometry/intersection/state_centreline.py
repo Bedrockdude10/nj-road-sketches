@@ -5,7 +5,7 @@ Register NJDOT centrelines to traced kerbs by calibrating lateral offsets.
 from functools import lru_cache
 
 import numpy as np
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, MultiLineString, Point
 from shapely.ops import linemerge, unary_union
 
 from src.geometry.model import NJ_STATE_PLANE_FT
@@ -17,15 +17,16 @@ STATE_CALIBRATION_STEP_FT = 10.0     # sample spacing along each NJDOT line
 STATE_KERB_SEARCH_FT = 40.0          # how far each side to look for a traced kerb
 
 
-def register_line(line: LineString, kerbs: list[LineString]) -> LineString:
-    """Register a line to traced kerbs by calibrating lateral offsets.
+def _corrections(line: LineString, kerbs: list[LineString]):
+    """(points, normals, d, cal, corr) for `line` against `kerbs`, or None when nothing calibrates.
 
-    Returns the same line object if no kerbs available or no calibration possible.
-    Otherwise returns a new LineString with lateral offsets computed from kerb positions.
-    Samples points at regular intervals, computes corrections, and returns all sampled points.
+    d: stations every STATE_CALIBRATION_STEP_FT plus the end. cal: stations where a traced kerb was
+    found within STATE_KERB_SEARCH_FT on BOTH sides. corr: the signed shift to the kerb midpoint
+    (+ = left of the line's own direction), interpolated between calibrated stations and held
+    at the end values beyond them.
     """
     if not kerbs:
-        return line
+        return None
 
     # Step 1: sample points along the line
     d = np.append(np.arange(0.0, line.length, STATE_CALIBRATION_STEP_FT), line.length)
@@ -72,17 +73,27 @@ def register_line(line: LineString, kerbs: list[LineString]) -> LineString:
     # Step 4: Check if calibration is possible
     cal = np.isfinite(dl) & np.isfinite(dr)
     if not cal.any():
-        return line
+        return None
 
     # Step 5: Interpolate corrections
     # corr_cal is signed: + means kerb midpoint is LEFT of the line
     corr_cal = (dl[cal] - dr[cal]) / 2.0
     corr = np.interp(d, d[cal], corr_cal)
+    return p_i, n_i, d, cal, corr
 
-    # Step 6: Apply corrections to all sampled points
-    corrected_pts = p_i + corr[:, np.newaxis] * n_i
-    # Return a LineString with all sampled points
-    return LineString(corrected_pts)
+
+def register_line(line: LineString, kerbs: list[LineString]) -> LineString:
+    """Register a line to traced kerbs by calibrating lateral offsets.
+
+    Returns the same line object if no kerbs available or no calibration possible.
+    Otherwise returns a new LineString with lateral offsets computed from kerb positions.
+    Samples points at regular intervals, computes corrections, and returns all sampled points.
+    """
+    found = _corrections(line, kerbs)
+    if found is None:
+        return line
+    p_i, n_i, _d, _cal, corr = found
+    return LineString(p_i + corr[:, np.newaxis] * n_i)
 
 
 @lru_cache(maxsize=1)
@@ -111,34 +122,17 @@ def registered_state_centrelines(area: str) -> dict[str, LineString]:
     out = {}
 
     for _, row in net.iterrows():
+        sri = row.get("SRI")
         geom = row.geometry
-
-        # Handle MultiLineString
+        if not sri or geom is None or geom.is_empty:
+            continue
         if geom.geom_type == "MultiLineString":
             geom = linemerge(geom)
-
-        # If still multi after linemerge, register each part and keep longest
-        if isinstance(geom, type(linemerge([]))):  # Check if it's a MultiLineString-like
-            geoms = list(geom.geoms) if hasattr(geom, 'geoms') else [geom]
-            registered = [register_line(g, kerbs) for g in geoms if g.geom_type == "LineString"]
-            if registered:
-                geom = max(registered, key=lambda x: x.length)
-            else:
-                continue
-        else:
-            geom = register_line(geom, kerbs)
-
-        sri = row.get("SRI")
-        if sri and geom is not None:
-            out[sri] = geom
-
-    # Print output
-    for sri, line in out.items():
-        name = sri  # Could get name from row if available
-        # Count calibrated points (heuristic: points where correction was non-zero)
-        n_cal = len(line.coords) - 2  # Rough approximation
-        median = 0.0  # Rough approximation
-        print(f"{sri} {name}: {n_cal} calibrated, median {median:+.1f} ft")
+        parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
+        registered = [register_line(g, kerbs) for g in parts if g.geom_type == "LineString"]
+        if not registered:
+            continue
+        out[sri] = registered[0] if len(registered) == 1 else MultiLineString(registered)
 
     return out
 
@@ -185,6 +179,20 @@ def attach_state_centrelines(legs: dict, area: str) -> None:
 
 
 if __name__ == "__main__":
-    registered_state_centrelines.cache_clear()
-    result = registered_state_centrelines("hopewell_borough")
-    registered_state_centrelines.cache_clear()
+    # Per-SRI calibration report: how many stations found a traced kerb on both sides, and how
+    # far the NJDOT line moves to reach their midpoint (+ = left of the line's own direction).
+    area = "hopewell_borough"
+    net = load_road_network(bbox=SNAPSHOT_AREAS[area]).to_crs(NJ_STATE_PLANE_FT)
+    kerbs = [line for line, _tags, _id in kerb_lines_with_tags_ft(osm_layers(area))]
+    for _, row in net.iterrows():
+        geom = row.geometry
+        parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
+        for part in parts:
+            found = _corrections(part, kerbs)
+            if found is None:
+                print(f"{row['SRI']}: 0 calibrated (line used as-is)")
+                continue
+            _p, _n, d, cal, corr = found
+            c = corr[cal]
+            print(f"{row['SRI']}: {int(cal.sum())}/{len(d)} calibrated, median {np.median(c):+.1f} ft, "
+                  f"range {c.min():+.1f}..{c.max():+.1f} ft")
