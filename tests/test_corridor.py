@@ -1302,17 +1302,28 @@ def test_a_route_decision_stops_at_the_town_line():
 GREENWOOD_WGS84 = (-74.7619598, 40.389179)
 
 
-def _junction_stating_no_town(center_wgs84=GREENWOOD_WGS84):
-    """A model shaped like the one a WINDOW builds: streets, a centre, and an empty
+def _junction_stating_no_town(osm=True):
+    """A model shaped like the one a WINDOW builds: streets, their own OSM layers, and an empty
     `intersection` block. That is network/slice_design.py's own config, verbatim - a crop of the
-    borough document knows which streets it holds and has never been told which town it is in."""
+    borough document knows which streets it holds and has never been told which town it is in.
+
+    The legs are real centrelines in state-plane feet, because the town is asked of each LEG by its
+    midpoint (treatments/corridor.py:_town_of_leg) and a stand-in leg without a line has none.
+    `osm=False` is a model with no layers at all, which cannot say.
+    """
     from types import SimpleNamespace
 
-    from shapely.geometry import Point
+    from shapely.geometry import LineString, Point
 
+    from src.render.coords import wgs84_to_state_plane
+    from src.sources.osm_context import osm_layers
+
+    x, y = wgs84_to_state_plane.transform(*GREENWOOD_WGS84)
     return SimpleNamespace(
-        legs={"broad_st_east": object(), "broad_st_west": object()},
-        center_wgs84=None if center_wgs84 is None else Point(*center_wgs84),
+        legs={"broad_st_east": SimpleNamespace(centerline=LineString([(x, y), (x + 130.0, y + 20.0)])),
+              "broad_st_west": SimpleNamespace(centerline=LineString([(x, y), (x - 130.0, y - 20.0)]))},
+        center_wgs84=Point(*GREENWOOD_WGS84),
+        osm=osm_layers("hopewell_borough") if osm else {},
         config={"intersection": {},
                 "legs": {"broad_st_east": {"street_name": "East Broad Street"},
                          "broad_st_west": {"street_name": "West Broad Street"}}})
@@ -1358,27 +1369,22 @@ def test_a_junction_in_no_known_town_is_refused_rather_than_treated():
     """
     from src.geometry.treatments.corridor import BROAD_ST_TWO_WAY_BIKEWAY
 
-    nowhere = _junction_stating_no_town(center_wgs84=None)
-    with pytest.raises(ValueError, match="no town"):
+    nowhere = _junction_stating_no_town(osm=False)
+    with pytest.raises(ValueError, match="can name"):
         BROAD_ST_TWO_WAY_BIKEWAY.legs_on(nowhere)
 
 
 def test_which_town_a_junction_is_in_does_not_depend_on_what_loaded_before_it(monkeypatch):
-    """The boundary fetch asks at ITS OWN radius, not at whatever reach the last load declared.
+    """The town a junction is in is asked of the model's OWN layers, never of process state.
 
-    `context_radius_m` widens every fetch to cover the longest leg the model being built will
-    draw, and `municipal_boundary_ft` takes that declaration with no centre of its own - correct
-    inside the load that made it, and stale for anyone who asks later. wbroad_lanning declares
-    2,307.5 ft, and after it the same boundary fetch at the window centre below opens a 703.3 m
-    window, falls outside every snapshot area, and raises SiteOutsideSnapshotError. The town a
-    junction is in is not a function of what ran before it in the process.
+    It used to be asked of a fetch whose reach was whatever the last load had declared, so after
+    wbroad_lanning's 2,307.5 ft leg the same question at the same point opened a window outside
+    every snapshot area and raised. There is no fetch and no declared reach left to be stale; what
+    still could leak is the frame scale a previous build left in the environment, so ask under a
+    wide one and expect the same town.
     """
-    from src.render import frame
     from src.geometry.treatments.corridor import municipality_of
+    from src.render.frame import FRAME_SCALE_ENV
 
-    # The state a wbroad_lanning load leaves behind: its own centre has claimed the declaration
-    # (kerb_sources and paved both pass a centre during every load), and the reach is its
-    # 2,307.5 ft southwest leg.
-    monkeypatch.setattr(frame, "_drawn_reach_ft", 2307.5)
-    monkeypatch.setattr(frame, "_drawn_reach_center", (-74.7674488, 40.3861181))
+    monkeypatch.setenv(FRAME_SCALE_ENV, "3.0")
     assert municipality_of(_junction_stating_no_town()) == "Hopewell Borough"

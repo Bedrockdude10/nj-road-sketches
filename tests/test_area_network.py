@@ -21,7 +21,7 @@ from src.geometry.treatments.corridor import CorridorFacility
 from src.geometry.network.area import (MIN_CORRIDOR_FT, NOT_PUBLIC_ACCESS, Corridor,
                                        _named_carriageways, _pieces_of, _projected_nodes,
                                        _snapshot_center, _way_line, area_corridors)
-from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm
+from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm, osm_layers
 from tests.conftest import needs_source_data
 
 AREA = "hopewell_borough"
@@ -37,7 +37,7 @@ def borough() -> list[Corridor]:
 
 @pytest.fixture(scope="module")
 def boundary() -> Polygon:
-    return municipal_boundary_ft(Point(*_snapshot_center(SNAPSHOT_AREAS[AREA])))[1]
+    return municipal_boundary_ft(osm_layers(AREA), Point(*_snapshot_center(SNAPSHOT_AREAS[AREA])))[1]
 
 
 def test_the_document_holds_every_named_street_in_the_boundary(borough: list[Corridor],
@@ -284,7 +284,7 @@ def test_a_render_is_a_slice_of_the_document(tmp_path) -> None:
     assert {"street", "kerb", "bikeway", "bollard"} <= kinds, (
         f"a slice at the corridor's central junction should carry the facility; got {kinds}")
 
-    out = draw_2d(around, "test", tmp_path)
+    out = draw_2d(around, AREA, "test", tmp_path)
     assert out.exists() and out.stat().st_size > 10_000
 
 
@@ -306,17 +306,15 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     export_network(AREA, tmp_path)
     around = slice_around(load_network(AREA, tmp_path),
                           _center_ft("-74.7619598,40.389179"), 320.0)
-    model, state, pavement, context = design_for(around)
+    model, state, pavement = design_for(around, AREA)
     out = tmp_path / "slice_3d.json"
-    export_scenario(model, state, "test", out, pavement=pavement,
-                    buildings=context["buildings"], crossings=context["crossings"],
-                    traffic_control=[], street_furniture=[])
+    export_scenario(model, state, "test", out, pavement=pavement)
     doc = json.loads(out.read_text())
 
     # blender_scene.REQUIRED_KEYS, copied rather than imported: that module runs in Blender's
     # interpreter and .importlinter forbids reaching into it from here.
     assert {"frame", "kerbs", "paved_surfaces", "surveyed_crossings"} <= set(doc)
-    assert doc["pavement_near"], "a slice with no asphalt renders paint floating in space"
+    assert doc["pavement"], "a slice with no asphalt renders paint floating in space"
     # THE LAYERS THAT WERE SILENTLY EMPTY. A slice of this junction exported 0 paved surfaces and
     # 0 sidewalk pieces against the configured site's 33 and 25, because `area_context` carried
     # three of the ten OSM layers the fetchers know about and nothing said so - the export
@@ -326,7 +324,7 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     assert len(doc["paved_surfaces"]) >= 20, (
         f"only {len(doc['paved_surfaces'])} paved surfaces - the document is not carrying OSM's "
         f"driveways, parking and surrounding roads through to the scene")
-    assert doc["sidewalks_near"] or doc["sidewalks_far"], (
+    assert doc["sidewalks"], (
         "no footway: a crop has no corner ring, so build_sidewalk_pieces must be given the "
         "pavement to widen or the 3D scene has nothing to walk on")
     assert doc["bike_lane_surface_polygons"], "the facility should survive the translation"
@@ -336,7 +334,7 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     # in state-plane feet still renders - 400,000 m from the origin, off the edge of the camera -
     # so the frame radius is the only thing that catches it.
     radius_m = doc["frame"]["radius_m"]
-    rings = (doc["pavement_near"] + doc["bike_lane_surface_polygons"]
+    rings = (doc["pavement"] + doc["bike_lane_surface_polygons"]
              + doc["bike_lane_edge_lines"] + [k["coords"] for k in doc["kerbs"]])
     worst = max(math.hypot(x, y) for ring in rings for x, y in ring)
     assert worst <= radius_m * 1.5, (
@@ -356,7 +354,8 @@ def test_a_slice_reads_what_osm_says_about_each_leg() -> None:
     from scripts.render_slice import _center_ft, design_for, load_network, slice_around
 
     around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
-    _model, state, _pavement, context = design_for(around, "existing")
+    model, state, _pavement = design_for(around, AREA, "existing")
+    context = model.osm
 
     tagged = {t["tags"]["name"] for t in context["roads"]
               if t["tags"].get("overtaking") == "no" and t["tags"].get("name")}
@@ -381,14 +380,13 @@ def test_a_window_knows_its_junction_is_signalized_without_a_config() -> None:
     from src.render.scene import SceneGeometry
 
     around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
-    model, state, pavement, context = design_for(around, "existing")
+    model, state, pavement = design_for(around, AREA, "existing")
     assert "signals" not in model.config, "a window has no site config; that is the premise"
     assert any(n["tags"].get("highway") == "traffic_signals"
-               for n in context["traffic_control"]), "OSM should map the signal here"
+               for n in model.osm["traffic_control"]), "OSM should map the signal here"
 
-    # No stop_lines= and no traffic_control=, which is the defaulted call every renderer makes.
-    scene = SceneGeometry.resolve(model, state, context["crossings"], pavement=pavement,
-                                  kerb_ways=context["kerb_ways"])
+    # Every layer comes off `model.osm`, which is the call every renderer makes.
+    scene = SceneGeometry.resolve(model, state, pavement=pavement)
     junction = {"broad_street", "broad_street_1", "greenwood_avenue", "greenwood_avenue_1"}
     assert junction <= set(scene.stop_bar_offsets), (
         f"the four traced bars at this junction should be drawn where they are painted; got "
@@ -402,22 +400,33 @@ def test_the_signal_gate_takes_config_as_an_override_and_osm_as_the_source() -> 
     writes no block, so an absent key is silence and OSM answers it. Either OSM statement is
     enough on its own - lavallette_reese's junction is signalized with none of its crossings
     tagged, and 4 of this project's 8 loadable junctions carry the crossing tag.
+
+    The model's own layers answer the node half (`model.osm["traffic_control"]`), asked of the
+    model's own legs: a signal standing at another junction signalizes nothing here.
     """
+    from types import SimpleNamespace
+
+    from src.render.coords import wgs84_to_state_plane
     from src.render.scene import junction_is_signalized
 
-    class FakeModel:
-        def __init__(self, config):
-            self.config = config
+    lon, lat = -74.7619598, 40.389179
+    x, y = wgs84_to_state_plane.transform(lon, lat)
+    legs = {"leg": SimpleNamespace(centerline=LineString([(x, y), (x + 100.0, y)]))}
 
-    node = [{"tags": {"highway": "traffic_signals"}}]
+    def fake(config, nodes=()):
+        return SimpleNamespace(config=config, legs=legs, osm={"traffic_control": list(nodes)})
+
+    at_junction = [{"lon": lon, "lat": lat, "tags": {"highway": "traffic_signals"}}]
+    elsewhere = [{"lon": lon + 0.01, "lat": lat, "tags": {"highway": "traffic_signals"}}]
     signalled_crossing = [{"crossing": "traffic_signals"}, {"crossing": "marked"}]
 
-    assert junction_is_signalized(FakeModel({}), traffic_control=node)
-    assert junction_is_signalized(FakeModel({}), signalled_crossing)
-    assert not junction_is_signalized(FakeModel({}), [{"crossing": "marked"}], traffic_control=[])
-    assert junction_is_signalized(FakeModel({"signals": {"pole_type": "mast arm"}}), [])
-    assert not junction_is_signalized(FakeModel({"signals": None}), signalled_crossing,
-                                       traffic_control=node), (
+    assert junction_is_signalized(fake({}, at_junction))
+    assert junction_is_signalized(fake({}), signalled_crossing)
+    assert not junction_is_signalized(fake({}), [{"crossing": "marked"}])
+    assert not junction_is_signalized(fake({}, elsewhere)), (
+        "a signal at the next junction down the street is not this junction's")
+    assert junction_is_signalized(fake({"signals": {"pole_type": "mast arm"}}), [])
+    assert not junction_is_signalized(fake({"signals": None}, at_junction), signalled_crossing), (
         "a config that states the junction is unsignalized outranks the tag, the same way an "
         "observed centerline_style outranks overtaking=no")
 
@@ -439,18 +448,17 @@ def test_a_slice_lays_its_footway_against_the_traced_kerb() -> None:
     from src.render.scene import SceneGeometry
 
     around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
-    model, state, pavement, context = design_for(around, "existing")
-    scene = SceneGeometry.resolve(model, state, context["crossings"], pavement=pavement,
-                                  kerb_ways=context["kerb_ways"])
-    assert len(scene.drawn_kerbs) == len([k for k in context["kerb_ways"]
-                                          if k.get("coords_wgs84")]), (
-        "the scene should draw the document's own kerb ways, not a second set fetched at a "
+    model, state, pavement = design_for(around, AREA, "existing")
+    kerb_ways = model.osm["kerbs"]
+    scene = SceneGeometry.resolve(model, state, pavement=pavement)
+    assert len(scene.drawn_kerbs) == len([k for k in kerb_ways if k.get("coords_wgs84")]), (
+        "the scene should draw the document's own kerb ways, not a second set read at a "
         "radius around the window's centre")
 
     band = unary_union(build_sidewalk_pieces(state, 6, pavement=pavement,
                                              edges=list(scene.drawn_kerbs)))
     kerbs = unary_union([LineString(to_state_plane(k["coords_wgs84"]))
-                         for k in context["kerb_ways"] if k.get("coords_wgs84")])
+                         for k in kerb_ways if k.get("coords_wgs84")])
     assert band.difference(kerbs.buffer(8.0)).area < 1.0, (
         f"{band.difference(kerbs.buffer(8.0)).area:,.0f} sq ft of footway sits more than 8 ft "
         f"from any traced kerb - it is following the roadway outline, not the kerb")
@@ -468,10 +476,9 @@ def test_a_slice_clips_rather_than_dropping_what_overhangs_it() -> None:
     assert tight.total_bounds[2] - tight.total_bounds[0] <= 301.0
 
 
-#: A window big enough that the kerb circle bites. `drawn_kerb_radius_ft` is 393.7 ft at 1x, so
-#: anything at or under a 300 ft half-width is inside it whatever the filter does - which is why
-#: the 300 ft cases above prove nothing about it. A 500 ft half-width puts 20 of the document's
-#: 67 kerb ways outside that circle and inside the picture.
+#: A window big enough that any circle about its centre would bite. A 500 ft half-width puts 20 of
+#: the document's 67 kerb ways beyond the 393.7 ft radius the drawing used to be cut to, and inside
+#: the picture - which is why the 300 ft cases above prove nothing about it.
 WIDE_WINDOW_FT = 500.0
 
 
@@ -484,7 +491,7 @@ def _window(radius_ft: float = WIDE_WINDOW_FT):
 
 def _supplied_kerb_ways(context: dict) -> list[dict]:
     """The document's kerb WAYS - the node-form records carry no line and are not drawable."""
-    return [k for k in context["kerb_ways"] if k.get("coords_wgs84")]
+    return [k for k in context["kerbs"] if k.get("coords_wgs84")]
 
 
 def test_a_window_draws_every_kerb_it_handed_over() -> None:
@@ -492,66 +499,58 @@ def test_a_window_draws_every_kerb_it_handed_over() -> None:
     centre then throws away the corners of the very sheet the drawing covers.
 
     Measured on a 1,000 ft window: the document hands over 67 kerb ways and the 393.7 ft circle
-    keeps 47, so 20 of them - one 72 ft long, 521 ft out - are cut out of a picture that reaches
+    kept 47, so 20 of them - one 72 ft long, 521 ft out - were cut out of a picture that reaches
     707 ft to its corner. `--street` slices have no bound on window size at all.
     """
-    from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
+    from src.geometry.intersection import kerb_lines_with_tags_ft
     from src.geometry.network.slice_design import slice_design
 
     features, context = _window()
     with contextlib.redirect_stdout(io.StringIO()):
         model, _state = slice_design(features, osm=context)
-    drawn = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                    radius_ft=drawn_kerb_radius_ft(),
-                                    kerbs=context["kerb_ways"])
+    drawn = kerb_lines_with_tags_ft(model.osm)
     assert len(drawn) == len(_supplied_kerb_ways(context)), (
         f"the window handed over {len(_supplied_kerb_ways(context))} kerb ways and "
-        f"{len(drawn)} were kept - a radius about the centre is re-clipping a layer the "
-        f"document already clipped to the window")
+        f"{len(drawn)} were kept - something is re-clipping a layer the document already clipped "
+        f"to the window")
 
 
-def test_a_window_draws_the_same_kerbs_whatever_ran_before_it() -> None:
+def test_a_window_draws_the_same_kerbs_whatever_ran_before_it(monkeypatch) -> None:
     """The drawn set is a fact about the WINDOW, not about the process.
 
-    `_drawn_reach_ft` is set by `load_intersection_model` and by nothing else, so a slice never
-    resets it: after a corridor site has been loaded, `drawn_kerb_radius_ft` answers with that
-    site's 2,307 ft reach and the same slice command draws a different set of kerbs. History
-    dependence is worse than window dependence - the command is not reproducible.
+    It used to hang on a drawn reach that `load_intersection_model` declared and nothing reset, so
+    the same slice command drew a different set of kerbs after a corridor site had been loaded in
+    the same process. The reach is gone; what could still leak in is the frame scale a previous
+    build left in the environment, so ask under two of them and expect the same ways.
     """
-    from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
+    from src.geometry.intersection import kerb_lines_with_tags_ft
     from src.geometry.network.slice_design import slice_design
-    from src.render import frame as frame_module
+    from src.render.frame import FRAME_SCALE_ENV
 
     features, context = _window()
     with contextlib.redirect_stdout(io.StringIO()):
         model, _state = slice_design(features, osm=context)
 
-    def drawn_now() -> int:
-        return len(kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                           radius_ft=drawn_kerb_radius_ft(),
-                                           kerbs=context["kerb_ways"]))
+    def drawn_now() -> list:
+        return sorted(way_id for _line, _tags, way_id in kerb_lines_with_tags_ft(model.osm))
 
-    previous = frame_module._drawn_reach_ft
-    try:
-        frame_module.set_drawn_reach_ft(0.0)
-        fresh = drawn_now()
-        frame_module.set_drawn_reach_ft(2307.5)     # wbroad_lanning's southwest leg
-        inherited = drawn_now()
-    finally:
-        frame_module.set_drawn_reach_ft(previous)
-    assert fresh == inherited, (
-        f"the same window draws {fresh} kerb ways in a fresh process and {inherited} after a "
-        f"corridor site has been loaded in the same one")
+    monkeypatch.setenv(FRAME_SCALE_ENV, "1.0")
+    fresh = drawn_now()
+    monkeypatch.setenv(FRAME_SCALE_ENV, "3.0")
+    assert fresh == drawn_now(), (
+        "the same window draws different kerb ways under a different frame scale")
 
 
 def test_kerb_openings_take_the_window_s_own_kerbs_rather_than_fetching() -> None:
-    """The supply door src/render/export.py:export_scenario strikes, for the last layer without one.
+    """`kerb_openings_from_model` reads `model.osm["kerbs"]` and nothing else.
 
-    `kerb_openings_from_model` fetched at OPENING_COLLECTION_RADIUS_FT about the model centre,
-    so a crop re-pulled the kerbs it was already holding - and because that routes through
-    `snapshot_for_site`, a window near the edge of the downloaded area raised
-    SiteOutsideSnapshotError from a drawing that needed no network at all.
+    It used to fetch at a radius about the model centre, so a crop re-pulled the kerbs it was
+    already holding - and a window near the edge of the downloaded area raised
+    SiteOutsideSnapshotError from a drawing that needed no network at all. Proved by emptying the
+    layer on a copy of the model: the openings it found must go with it.
     """
+    import copy
+
     from src.geometry import kerbs as kerbs_module
     from src.geometry.network.slice_design import slice_design
 
@@ -559,20 +558,14 @@ def test_kerb_openings_take_the_window_s_own_kerbs_rather_than_fetching() -> Non
     with contextlib.redirect_stdout(io.StringIO()):
         model, _state = slice_design(features, osm=context)
 
-    import src.geometry.intersection.kerb_sources as kerb_sources
-
-    fetched: list[float] = []
-    real = kerb_sources.fetch_kerbs
-    kerb_sources.fetch_kerbs = lambda center, radius_m: (fetched.append(radius_m)
-                                                         or real(center, radius_m=radius_m))
-    try:
+    def dropped(m) -> int:
         with contextlib.redirect_stdout(io.StringIO()):
-            openings = kerbs_module.kerb_openings_from_model(model,
-                                                             kerbs=context["kerb_ways"])
-    finally:
-        kerb_sources.fetch_kerbs = real
-    assert not fetched, (
-        f"a window that handed over its kerbs still fetched at {fetched} m about its centre")
-    assert any(o.source is kerbs_module.OpeningSource.DROPPED_KERB
-               for openings_here in openings.values() for o in openings_here), (
-        "no dropped kerb was read off the supplied layer, so this proves nothing about it")
+            openings = kerbs_module.kerb_openings_from_model(m)
+        return sum(o.source is kerbs_module.OpeningSource.DROPPED_KERB
+                   for here in openings.values() for o in here)
+
+    assert dropped(model) > 0, (
+        "no dropped kerb was read off the window's layer, so this proves nothing about it")
+    bare = copy.copy(model)
+    bare.osm = {**model.osm, "kerbs": []}
+    assert dropped(bare) == 0, "openings were found with no kerb layer: they came from somewhere else"

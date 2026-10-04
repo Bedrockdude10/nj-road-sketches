@@ -6,8 +6,8 @@ across every junction on the street.
 
 BRIDGING IS THE HARD PART. Two modelled junctions on one street leave a gap between them that no
 leg covers, and the two legs facing each other across it were cut from the same NJDOT alignment.
-So the corridor follows that alignment through the gap and EASES onto it - `_eased_alignment` -
-because the alignment and the fitted leg disagree by a few feet and a hard switch at the seam puts
+So the corridor follows that alignment through the gap at the lateral offset both ends were measured
+at - `_carried_alignment` - because the alignment and the fitted leg disagree by a few feet and a hard switch at the seam puts
 a kink in every marking drawn over it.
 """
 from dataclasses import dataclass
@@ -90,7 +90,7 @@ class Corridor:
     #: sends a surveyor to re-trace something already correct, and understates the road's coverage.
     cross_street_ft: tuple[float, ...] = ()
     #: (station, lateral gap in ft) at each seam between a modelled junction and NJDOT's
-    #: alignment. Reported rather than smoothed away silently - see _eased_alignment.
+    #: alignment. Reported rather than smoothed away silently - see _carried_alignment.
     seams: tuple[tuple[float, float], ...] = ()
     #: What OSM says this carriageway is worth kerb to kerb, used ONLY where nothing is traced.
     #: A street fact rather than an argument to the surface builder, because a corridor with no
@@ -369,13 +369,16 @@ def _sri_alignment(models: dict[str, "IntersectionModel"], sri: str):
     so the corridor between two junctions is a substring of a line that already exists.
     """
     from src.geometry.intersection.junction import ROOT_DIR
-    from src.geometry.model import buffer_point_wgs84, reproject_to_state_plane
+    from src.geometry.model import reproject_to_state_plane
     from src.sources.data_loader import load_road_network
+    from src.sources.osm_context import SNAPSHOT_AREAS
 
     first = next(iter(models.values()))
     path = ROOT_DIR / first.config["data_sources"]["road_network"]
-    boxes = [buffer_point_wgs84(model.center_wgs84, _ALIGNMENT_BBOX_MARGIN_M)
-             for model in models.values()]
+    # READ OVER THE AREA, as load.py does for the legs. NJDOT stores a route as ONE row, so a bbox
+    # read returns every route in the area whole and `sri` picks the row; no circle about a
+    # member's centre decides which routes are seen.
+    boxes = [SNAPSHOT_AREAS[area] for area in sorted({m.osm_area for m in models.values()})]
     bbox = (min(b[0] for b in boxes), min(b[1] for b in boxes),
             max(b[2] for b in boxes), max(b[3] for b in boxes))
     rows = load_road_network(bbox=bbox, path=path)
@@ -383,16 +386,6 @@ def _sri_alignment(models: dict[str, "IntersectionModel"], sri: str):
     if rows.empty:
         return None
     return reproject_to_state_plane(rows).iloc[0].geometry
-
-
-# How far around the member junctions the road-network read is bounded. Only a bbox FILTER - an
-# NJDOT feature comes back whole, so this decides which routes are seen, not how much of one.
-_ALIGNMENT_BBOX_MARGIN_M = 400
-
-
-def _ease(t: np.ndarray) -> np.ndarray:
-    """1 at t=0 falling to 0 at t=1, flat at both ends. Hermite, as in fitting.py:_blend_onto."""
-    return 2 * t ** 3 - 3 * t ** 2 + 1
 
 
 def _alignment_stations(align: LineString, lo: float, hi: float) -> np.ndarray:
@@ -422,24 +415,33 @@ def _alignment_stations(align: LineString, lo: float, hi: float) -> np.ndarray:
     return np.asarray(kept)
 
 
-def _eased_alignment(align: LineString, lo: float, hi: float, off_lo: float, off_hi: float,
-                     blend_ft: float) -> np.ndarray:
-    """A stretch of NJDOT alignment, moved sideways at its ends to meet what it joins.
+def _carried_alignment(align: LineString, lo: float, hi: float, off_lo: float,
+                       off_hi: float) -> np.ndarray:
+    """A stretch of NJDOT alignment, laid at the lateral offset its two ends were MEASURED at.
 
     THE ONE PLACE THIS MODULE MOVES SURVEYED GEOMETRY, and it moves NJDOT's alignment rather than
     anybody's tracing. An SRI line is a linear-referencing reference, not a carriageway centre, and
-    the modelled junctions' fitted centres sit 4.6-10.9 ft off it here. Butt-jointed, the road
+    the modelled junctions' fitted centres sit 4.6-11.2 ft off it here. Butt-jointed, the road
     would jog sideways at every leg end.
 
-    The correction is the MEASURED seam gap, eased to zero over blend_ft. Same mechanism as
-    fitting.py:_join_through_legs; the gaps are reported on Corridor.seams rather than absorbed.
+    THE OFFSET IS CARRIED, NOT EASED AWAY. It used to be eased to zero over THROUGH_JOIN_BLEND_FT,
+    which assumes the alignment is the street's centre a blend-length from the seam - and on Broad
+    St it is not: the fitted centre is 11.2 ft off it at both seams of the 3,000 ft between Louellen
+    and Greenwood. The road then ran 11.2 ft off the carriageway, the right kerb sat 6.8 ft from it
+    and fell under KERB_PLAUSIBLE_HALF_WIDTH_FT's 8 ft floor, and 420 ft of traced kerb was "not
+    beside the road" there - on the narrow sheet, where the junction pieces are short and the
+    bridge is long, and on the wide one wherever it still bridges. The measured coverage moved
+    with the sheet because the REFERENCE it was measured against did.
+
+    So between two measured seams the offset is interpolated linearly, and out past the last one it
+    is held: both are the offset the street was measured at, which is the best estimate of where
+    its centre is. `off_lo` and `off_hi` are the signed offsets at `lo` and `hi`; the gaps are also
+    reported on Corridor.seams rather than absorbed.
     """
-    stations = _alignment_stations(align, lo, hi)
-    blend = min(blend_ft, (hi - lo) / 2)
-    if blend <= 0:
+    if hi - lo <= 0.0:
         return np.asarray(align.coords, dtype=float)[:0]
-    delta = (off_lo * _ease(np.clip((stations - lo) / blend, 0.0, 1.0))
-             + off_hi * _ease(np.clip((hi - stations) / blend, 0.0, 1.0)))
+    stations = _alignment_stations(align, lo, hi)
+    delta = off_lo + (off_hi - off_lo) * (stations - lo) / (hi - lo)
     return np.asarray(place_in_measured_frame(align, stations, delta), dtype=float)
 
 
@@ -527,8 +529,6 @@ def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
     the reach is measured against NJDOT's alignment first (see _traced_end_ft) and the road is
     built once, at its final length, rather than built long and trimmed.
     """
-    from src.geometry.intersection import THROUGH_JOIN_BLEND_FT
-
     pieces, sris = [], []
     for key, first, second in chain:
         site = key[0]
@@ -543,7 +543,7 @@ def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
 
     first = np.asarray(pieces[0]["centerline"].coords[:2], dtype=float)
     head, head_gap = _extension(models, kerb_ways, first[0], first[0] - first[1], sris[0][0],
-                                THROUGH_JOIN_BLEND_FT, models[pieces[0]["site"]].center_ft)
+                                models[pieces[0]["site"]].center_ft)
     if len(head):
         coords.extend(tuple(point) for point in head[::-1][:-1])
 
@@ -566,9 +566,9 @@ def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
         (station_a, offset_a), (station_b, offset_b) = _seam(align, here), _seam(align, there)
         forward = station_a < station_b
         lo, hi = sorted((station_a, station_b))
-        bridge = _eased_alignment(align, lo, hi,
-                                  offset_a if forward else offset_b,
-                                  offset_b if forward else offset_a, THROUGH_JOIN_BLEND_FT)
+        bridge = _carried_alignment(align, lo, hi,
+                                    offset_a if forward else offset_b,
+                                    offset_b if forward else offset_a)
         if not forward:
             bridge = bridge[::-1]
         seam_marks.append((len(coords) - 1, abs(offset_a)))
@@ -577,7 +577,7 @@ def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
 
     last = np.asarray(pieces[-1]["centerline"].coords[-2:], dtype=float)
     tail, tail_gap = _extension(models, kerb_ways, last[1], last[1] - last[0], sris[-1][1],
-                                THROUGH_JOIN_BLEND_FT, models[pieces[-1]["site"]].center_ft)
+                                models[pieces[-1]["site"]].center_ft)
     if len(tail):
         seam_marks.append((len(coords) - 1, tail_gap))
         coords.extend(tuple(point) for point in tail[1:])
@@ -634,7 +634,7 @@ def _build_corridor(models: dict[str, "IntersectionModel"], chain: list[tuple],
 
 
 def _extension(models: dict[str, "IntersectionModel"], kerb_ways, seam_point, away, sri: str,
-               blend_ft: float, node_point) -> tuple[np.ndarray, float]:
+               node_point) -> tuple[np.ndarray, float]:
     """NJDOT's alignment carried AWAY from the end of a chain, as far as the tracing continues.
 
     `away` is the direction the road is leaving in, and it is needed because which way that is
@@ -663,10 +663,9 @@ def _extension(models: dict[str, "IntersectionModel"], kerb_ways, seam_point, aw
         # A STUB IS STILL AN EXTENSION. This used to refuse one shorter than the blend, which made
         # whether a corridor reached its last traced kerb depend on where the SEAM fell, and the
         # seam is a frame-cut leg end: on a 1x sheet the road stopped 15-19 ft short of kerb the
-        # 2.5x sheet reached. _eased_alignment already shrinks the blend to half the stub.
+        # 2.5x sheet reached.
         return np.empty((0, 2)), abs(offset_ft)
-    points = _eased_alignment(align, lo, hi, offset_ft if forward else 0.0,
-                              0.0 if forward else offset_ft, blend_ft)
+    points = _carried_alignment(align, lo, hi, offset_ft, offset_ft)
     if len(points) < 2:
         return np.empty((0, 2)), abs(offset_ft)
     seam = np.asarray(seam_point, dtype=float)
