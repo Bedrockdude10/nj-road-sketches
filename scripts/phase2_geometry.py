@@ -21,19 +21,17 @@ from src.provenance import (ESTIMATED, FIELD_MEASURED, LABEL, OSM_DERIVED,
 from src.render.plan_view import legend_handles, plot_design_state, sidewalk_lines_ft
 from src.site import add_site_arg, site_output_dir
 from src.render.props import data_gaps, hydrant_position_conflicts
-from src.sources.osm_context import fetch_sidewalks, fetch_street_furniture, fetch_traffic_control
 from src.geometry.treatments import DesignState
 
-SIDEWALK_CONTEXT_RADIUS_M = 130  # matches src/render/plan_view.py, so both share one Overpass cache entry
 MIN_CURB_TO_SIDEWALK_FT = 3.0  # half a narrow (6 ft) sidewalk built hard against the curb - the
                                 # least space that can physically exist between a curb line and a
                                 # sidewalk CENTERLINE. Any configured width leaving less than this
                                 # per side is impossible, not merely optimistic.
 
 
-def print_leg_summary(model: IntersectionModel, sidewalks: list[dict]):
+def print_leg_summary(model: IntersectionModel):
     print("\n=== Leg widths used for geometry ===")
-    walks = sidewalk_lines_ft(sidewalks)
+    walks = sidewalk_lines_ft(model.osm["sidewalks"])
     impossible = []
     for name, leg in model.legs.items():
         cfg = model.config["legs"][name]
@@ -68,11 +66,10 @@ def print_leg_summary(model: IntersectionModel, sidewalks: list[dict]):
           f"[{'ESTIMATE' if not model.config['treatments'].get('existing_corner_radius_source', '').startswith('Confirmed') else 'CONFIRMED'}]")
 
 
-def plot(model: IntersectionModel, out_dir: Path, sidewalks: list[dict]):
+def plot(model: IntersectionModel, out_dir: Path):
     fig, ax = plt.subplots(figsize=(11, 11))
     baseline = DesignState.from_model(model)
-    plot_design_state(ax, model, baseline, f"{model.config['intersection']['name']} - Phase 2 geometry",
-                       sidewalks=sidewalks)
+    plot_design_state(ax, model, baseline, f"{model.config['intersection']['name']} - Phase 2 geometry")
     ax.legend(handles=legend_handles(), loc="upper left", fontsize=8)
     ax.set_ylabel("Feet (EPSG:3424)")
 
@@ -84,13 +81,7 @@ def plot(model: IntersectionModel, out_dir: Path, sidewalks: list[dict]):
 def main():
     args = add_site_arg(argparse.ArgumentParser()).parse_args()
     model = load_intersection_model(site=args.site)
-    try:
-        sidewalks = fetch_sidewalks(model.center_wgs84, radius_m=SIDEWALK_CONTEXT_RADIUS_M)
-    except RuntimeError as e:
-        print(f"  WARNING: could not fetch OSM sidewalks ({e}).\n"
-              f"  Widths will NOT be cross-checked against them this run.")
-        sidewalks = []
-    print_leg_summary(model, sidewalks)
+    print_leg_summary(model)
 
     print("\n=== Nearest parcel per quadrant (corner / ROW reference) ===")
     if model.corner_parcels.empty:
@@ -103,15 +94,10 @@ def main():
         status = "OK" if "error" not in pieces else f"FAILED: {pieces['error']}"
         print(f"  {a} <-> {b}: {status}")
 
-    plot(model, site_output_dir(args.site), sidewalks)
+    plot(model, site_output_dir(args.site))
 
     print("\n=== OSM data gaps (what is being derived rather than sourced) ===")
-    try:
-        gaps = data_gaps(fetch_traffic_control(model.center_wgs84, radius_m=60),
-                          fetch_street_furniture(model.center_wgs84, radius_m=130),
-                          signalized=bool(model.config.get("signals")))
-    except RuntimeError as e:
-        gaps = [f"could not check - Overpass unreachable ({e})"]
+    gaps = data_gaps(model)
     for gap in gaps or ["none - all traffic control, lighting and ADA data is sourced from OSM"]:
         print(f"  - {gap}")
 
@@ -120,11 +106,7 @@ def main():
         pavement = build_pavement_polygon(DesignState.from_model(model).corner_fillets)
     except ValueError:
         pavement = None
-    try:
-        conflicts = hydrant_position_conflicts(
-            fetch_street_furniture(model.center_wgs84, radius_m=SIDEWALK_CONTEXT_RADIUS_M), pavement)
-    except RuntimeError as e:
-        conflicts = [f"could not check - Overpass unreachable ({e})"]
+    conflicts = hydrant_position_conflicts(model.osm["street_furniture"], pavement)
     for note in conflicts or ["none"]:
         print(f"  - {note}")
 

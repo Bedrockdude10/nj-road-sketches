@@ -26,9 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.jobs import job_limit
 from src.render.frame import FRAME_SCALE_ENV
-from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
+from src.render.export import export_scenario
 from src.geometry.intersection import load_intersection_model
-from src.sources.osm_context import fetch_buildings, fetch_crossings
 from src.site import add_scenario_arg, add_site_arg, load_site_scenarios, scenario_label, site_output_dir, run_scenario
 from src.render.theme import build_default_theme
 from src.geometry.treatments import DesignState, existing_conditions
@@ -127,13 +126,8 @@ def main():
     build_scenario = getattr(load_site_scenarios(args.site), args.scenario)
     scenario = run_scenario(build_scenario, baseline, model)
 
-    print("Fetching OSM building context...")
-    buildings = fetch_buildings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
-    print(f"  -> {len(buildings)} buildings")
-
-    print("Fetching OSM-mapped pedestrian crossings...")
-    crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
-    print(f"  -> {len(crossings)} crossings")
+    print(f"OSM world {model.osm_area}: {len(model.osm['buildings'])} buildings, "
+          f"{len(model.osm['crossings'])} crossings")
 
     print("Fetching render theme (Poly Haven textures/models, cached under output/.textures/)...")
     theme = build_default_theme()
@@ -144,11 +138,9 @@ def main():
     # same state while every marking here was a proposal; a site that declares what is on the
     # ground makes them different, and this render is the one that claims to be the street.
     existing_json = export_scenario(model, existing_conditions(model), "Existing Conditions",
-                                     out_dir / "geometry_existing.json",
-                                     buildings=buildings, crossings=crossings, theme=theme)
+                                     out_dir / "geometry_existing.json", theme=theme)
     proposed_json = export_scenario(model, scenario, f"Proposed Treatments ({args.scenario})",
-                                     out_dir / f"geometry_{label}.json",
-                                     buildings=buildings, crossings=crossings, theme=theme)
+                                     out_dir / f"geometry_{label}.json", theme=theme)
 
     render_all(blender_bin, [
         (existing_json, out_dir / "phase4_render_existing.png"),

@@ -11,9 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
+from src.render.export import export_scenario
 from src.geometry.intersection import load_intersection_model
-from src.sources.osm_context import fetch_buildings, fetch_crossings
 from src.site import (add_scenario_arg, add_site_arg, load_site_scenarios, run_scenario,
                        scenario_label, site_output_dir)
 from src.render.theme import build_default_theme
@@ -34,17 +33,13 @@ def main():
     # "proposal" quietly loses its kerbside paint - the exact failure run_scenario exists to
     # prevent (src/site.py). This was the last call site still bypassing it.
     scenario = run_scenario(build_scenario, baseline, model)
-    buildings = fetch_buildings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
-    crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
     theme = build_default_theme()
 
     # existing_conditions(model), not the builder's baseline - see phase4_render_3d.py.
     existing_path = export_scenario(model, existing_conditions(model), "Existing Conditions",
-                                     out_dir / "geometry_existing.json",
-                                     buildings=buildings, crossings=crossings, theme=theme)
+                                     out_dir / "geometry_existing.json", theme=theme)
     proposed_path = export_scenario(model, scenario, f"Proposed Treatments ({args.scenario})",
-                                     out_dir / f"geometry_{label}.json",
-                                     buildings=buildings, crossings=crossings, theme=theme)
+                                     out_dir / f"geometry_{label}.json", theme=theme)
 
     print(f"Exported existing conditions -> {existing_path}")
     print(f"Exported {args.scenario} -> {proposed_path}")

@@ -13,15 +13,13 @@ of each.
 """
 from dataclasses import dataclass, field
 
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Polygon
 
 from src.geometry.model import build_pavement_polygon
-from src.geometry.coverage import CONTROL_NEAR_NODE_FT
-from src.render.coords import wgs84_to_state_plane
+from src.render.props import controls_at_junction, stands_at_mouth
 from src.render.crosswalks import (_match_crossings_to_legs, CROSSWALK_DEPTH_FT, crosswalk_bands_ft, crosswalk_reaches_ft,
                                    resolve_crosswalk_offsets, resolve_crosswalk_skews,
                                    resolve_stop_bar_offsets, stop_bar_bands_ft)
-from src.sources.osm_context import fetch_stop_lines
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,
@@ -30,12 +28,7 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
     from src.geometry.paint import PaintPiece
     from src.geometry.treatments.state import DesignState
 
-# A bar governing this junction sits 33-67 ft out; this is generous. ONE constant, because a
-# stop bar resolved at a different radius is a differently-placed stop bar.
-STOP_LINE_RADIUS_M = 130
-
-
-def junction_is_signalized(model, leg_crossing_tags=(), traffic_control=None) -> bool:
+def junction_is_signalized(model, leg_crossing_tags=()) -> bool:
     """Is this junction signalized? A site's own observation where it made one, else OSM's.
 
     THE PRECEDENCE IS `centerline_style`'s (src/geometry/treatments/state.py:from_model): config
@@ -52,20 +45,20 @@ def junction_is_signalized(model, leg_crossing_tags=(), traffic_control=None) ->
     signalized ones and none of the unsignalized ones.
 
     `leg_crossing_tags` is the tags of the crossings matched TO THIS MODEL'S OWN LEGS, which is
-    what keeps the question about this junction: the crossings layer is fetched at 130 m and the
+    what keeps the question about this junction: the crossings layer is the whole world's and the
     unfiltered tag picks up a neighbour's signal two junctions away (columbia_princeton sees 2,
-    wbroad_lanning 1). `traffic_control` is the node layer the renderers already hold; the same
-    130 m would false-positive columbia_princeton off a node 127 m away, so it is passed in at
-    the radius its owner chose rather than re-fetched here at a third one.
+    wbroad_lanning 1). The node half is asked the same way, of `controls_at_junction`, so a
+    `highway=traffic_signals` node at the next junction down the street signalizes nothing here
+    (columbia_princeton has one 127 m away).
     """
     if "signals" in getattr(model, "config", {}):
         return bool(model.config["signals"])
     return (any(tags.get("crossing") == "traffic_signals" for tags in leg_crossing_tags)
             or any(node["tags"].get("highway") == "traffic_signals"
-                   for node in traffic_control or ()))
+                   for node in controls_at_junction(model, model.osm["traffic_control"])))
 
 
-def _legs_that_may_derive_a_bar(model, matched: dict, traffic_control=None) -> frozenset | None:
+def _legs_that_may_derive_a_bar(model, matched: dict) -> frozenset | None:
     """The legs a bar may be INVENTED for, or None where every leg may.
 
     ONE BOOLEAN CANNOT ANSWER THIS FOR A WINDOW. A site is one junction, so "is this junction
@@ -85,7 +78,7 @@ def _legs_that_may_derive_a_bar(model, matched: dict, traffic_control=None) -> f
     """
     if "signals" in getattr(model, "config", {}):
         return None if model.config["signals"] else frozenset()
-    nodes = [node for node in traffic_control or ()
+    nodes = [node for node in model.osm["traffic_control"]
              if node["tags"].get("highway") == "traffic_signals"]
     out = set()
     for leg_name, leg in model.legs.items():
@@ -93,11 +86,7 @@ def _legs_that_may_derive_a_bar(model, matched: dict, traffic_control=None) -> f
         if entry is not None and entry[4].get("crossing") == "traffic_signals":
             out.add(leg_name)
             continue
-        mouth = leg.centerline.interpolate(0.0)
-        # lon/lat, as every control node in this project's layers carries them - the node
-        # fetchers emit {"lon", "lat", "tags"}, not the {"coords_wgs84"} a WAY carries.
-        if any(mouth.distance(Point(*wgs84_to_state_plane.transform(node["lon"], node["lat"])))
-               <= CONTROL_NEAR_NODE_FT for node in nodes):
+        if any(stands_at_mouth(leg, node) for node in nodes):
             out.add(leg_name)
     return frozenset(out)
 
@@ -127,24 +116,22 @@ class SceneGeometry:
     crosswalk_bands: dict            # leg -> the painted footprint
     stop_bar_offsets: dict           # leg -> station, signalized junctions only
     stop_bar_bands: dict             # leg -> the painted footprint
-    # EVERY SURVEYED CROSSING IN THE FRAME, drawn from its own traced way - including the ones at
-    # junctions this site does not model, which the per-leg fields above cannot reach at all (six
-    # of the ten in Broad & Greenwood's 2.5x frame). Resolved here rather than per renderer so the
-    # coverage check audits the crossings the export actually drew.
+    # EVERY SURVEYED CROSSING, drawn from its own traced way - including the ones at junctions
+    # this site does not model, which the per-leg fields above cannot reach at all (six of the ten
+    # in Broad & Greenwood's 2.5x frame). Resolved here rather than per renderer so the coverage
+    # check audits the crossings the export actually drew.
     surveyed_crossings: tuple = ()
     # The traced kerbs the crossings above are trimmed against, kept so a consumer that wants to
-    # draw them does not fetch a second, possibly different set.
+    # draw them does not resolve a second, possibly different set.
     drawn_kerbs: tuple = ()
     # {leg: the style OSM records for its matched crossing}. Resolved here because the matcher
     # runs here already - asking it again in a renderer is a second answer to one question.
     surveyed_crossing_styles: dict = field(default_factory=dict)
 
     @classmethod
-    def resolve(cls, model: "IntersectionModel", state: "DesignState", crossings: list[dict],
-                 stop_lines: list[dict] | None = None, pavement=None,
-                 kerb_ways: list[dict] | None = None,
-                 traffic_control: list[dict] | None = None) -> "SceneGeometry":
-        """Resolve one scenario's marking geometry. `crossings` is the fetched OSM layer.
+    def resolve(cls, model: "IntersectionModel", state: "DesignState",
+                 pavement=None) -> "SceneGeometry":
+        """Resolve one scenario's marking geometry, from the OSM layers `model.osm` carries.
 
         The order below is a real dependency chain, which is the other reason this belongs in
         one place: the reaches need the pavement and the marked set, the bands need the
@@ -168,6 +155,7 @@ class SceneGeometry:
         # same junction as a site drew four solid bands.
         from src.geometry.surveyed import drawable_markings  # local: geometry<->render cycle
 
+        crossings = model.osm["crossings"]
         matched = _match_crossings_to_legs(state.legs, crossings)
         marked = frozenset(model.config["intersection"].get("existing_marked_crosswalks", [])) | {
             leg for leg, (_a, _st, _sk, _l, tags) in matched.items() if drawable_markings(tags)}
@@ -181,29 +169,23 @@ class SceneGeometry:
 
         # A TRACED STOP BAR IS A PAINTED STOP BAR, signalized or not - so THE LAYER IS NOT GATED
         # AT ALL. Only the DERIVATION, hanging a bar off a crosswalk offset for an approach
-        # nobody traced, is a claim a junction has to earn; that gate moved into the resolver,
-        # and this fetch was left behind holding the other half of it. Gated, a caller that
-        # supplies no layer gets no bars whatever OSM traced, which is how the four surveyed bars
-        # at Broad x Greenwood stayed off every drawing of it that was not a site. Not a round
-        # trip either way: this is a view of the same cached snapshot the crossings above came
-        # from (src/sources/osm_context.py:_layer).
-        if stop_lines is None:
-            stop_lines = fetch_stop_lines(model.center_wgs84, radius_m=STOP_LINE_RADIUS_M)
+        # nobody traced, is a claim a junction has to earn; that gate moved into the resolver.
+        # Which bar belongs to which approach is the resolver's own question, asked of each leg
+        # (STOP_LINE_MAX_ALONG_FT, STOP_LINE_MAX_OFFSET_FT), so it takes the world's whole layer.
         stop_bar_offsets = resolve_stop_bar_offsets(
-            state, offsets, stop_lines,
-            derive_for_legs=_legs_that_may_derive_a_bar(model, matched, traffic_control))
-        from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
+            state, offsets, model.osm["stop_lines"],
+            derive_for_legs=_legs_that_may_derive_a_bar(model, matched))
+        from src.geometry.intersection import kerb_lines_with_tags_ft
         from src.geometry.surveyed import surveyed_crossings_in_frame
 
         drawn_kerbs = tuple(line for line, _tags, _way_id in kerb_lines_with_tags_ft(
-            model.center_wgs84, model.center_ft, radius_ft=drawn_kerb_radius_ft(),
-            kerbs=kerb_ways))
+            osm=model.osm))
         return cls(
             model=model, state=state, pavement=pavement, marked_crosswalks=marked,
             crosswalk_offsets=offsets, crosswalk_skews=skews, crosswalk_reaches=reaches,
             crosswalk_bands=bands, stop_bar_offsets=stop_bar_offsets,
             stop_bar_bands=stop_bar_bands_ft(state, stop_bar_offsets, skews),
-            # `crossings` is the same fetched layer the per-leg offsets above came from, so the two
+            # `crossings` is the same layer the per-leg offsets above came from, so the two
             # cannot disagree about which crossings exist - only about which of them belong to a leg.
             surveyed_crossings=tuple(surveyed_crossings_in_frame(model, crossings)),
             drawn_kerbs=drawn_kerbs,
@@ -364,9 +346,7 @@ class SceneGeometry:
 
         return check_scene(self.context(props, paint))
 
-    def report_coverage(self, props: list[dict], paint: list,
-                        frame_radius_ft: float | None = None,
-                        osm: dict | None = None) -> list:
+    def report_coverage(self, props: list[dict], paint: list, frame) -> list:
         """Print, and return, the surveyed features inside the frame that the drawing does not draw.
 
         A NOTE RATHER THAN A FAILURE, deliberately. Kerb ramps and traffic control are PROPS
@@ -374,18 +354,19 @@ class SceneGeometry:
         raising on that would fail a render for a reason no scenario can fix, and a check that
         cannot go green is one people learn to ignore. See src/geometry/coverage.py.
 
-        `frame_radius_ft` is the extent the CALLER drew, which is the only honest thing to judge
-        coverage against. Derived from the model it is the leg reach plus a margin, and for a
-        crop of the network that overshoots the window - 437 ft against a 300 ft half-width - so
-        the report demanded features the drawing was never given.
+        `frame` is the `Frame` the CALLER drew - a VIEW, a square - and the only honest thing to
+        judge coverage against: this is an audit of the picture, not of the world, which holds
+        features the picture never reaches. Derived from the model it is the leg reach plus a
+        margin, and for a crop of the network that overshoots the window - 437 ft against a 300 ft
+        half-width - so the report demanded features the drawing was never given.
 
-        `osm` is the same layers the caller built the drawing from - see coverage_gaps. Unsupplied,
-        each layer fetches its own copy, same as before.
+        The features audited are the model's own layers (`model.osm`), the ones the drawing was
+        built from.
         """
         from src.geometry.coverage import coverage_gaps, describe_coverage
 
         gaps = coverage_gaps(self.model, [*paint, *self.crosswalk_bands.values(), *props,
-                                          *self.surveyed_crossing_paint()], frame_radius_ft, osm)
+                                          *self.surveyed_crossing_paint()], frame, self.model.osm)
         if gaps:
             print(describe_coverage(gaps))
         return gaps

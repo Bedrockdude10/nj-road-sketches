@@ -49,14 +49,13 @@ from scripts.jobs import MAX_BUILD_JOBS
 from src.checks import SceneInvariantError
 from src.geometry.intersection import load_intersection_model
 from src.geometry.treatments import DesignState, existing_conditions
-from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
-from src.render.frame import FRAME_SCALE_ENV, frame_covering_radius_m
+from src.render.export import export_scenario
+from src.render.frame import FRAME_SCALE_ENV
 from src.render.plan_view import draw_change_panel, legend_handles, plot_design_state
 from src.render.theme import build_default_theme
 from src.site import (list_sites, load_site_scenarios, run_scenario, scenario_label,
                       site_output_dir)
-from src.sources.osm_context import (REFRESH_ENV, SNAPSHOT_AREAS, cache_summary, fetch_borough_osm,
-                                     fetch_buildings, fetch_crossings)
+from src.sources.osm_context import REFRESH_ENV, SNAPSHOT_AREAS, cache_summary, fetch_borough_osm
 
 # Plot resolution. 150 matches what the phase scripts write; matplotlib rasterization is
 # the single biggest cost in a 2D-only build, so --dpi 90 roughly halves it when you are
@@ -82,10 +81,10 @@ def scenarios_for(site: str, module=None) -> list[str]:
     return named + sorted(extra)
 
 
-def draw_geometry_plot(model, state, out_path: Path, crossings) -> list:
+def draw_geometry_plot(model, state, out_path: Path) -> list:
     """The phase 2 single-panel plan view, byte-for-byte the same figure that script makes."""
     fig, ax = plt.subplots(figsize=(11, 11))
-    violations = plot_design_state(ax, model, state, "Existing Conditions", crossings=crossings).violations
+    violations = plot_design_state(ax, model, state, "Existing Conditions").violations
     ax.legend(handles=legend_handles(), loc="upper left", fontsize=8)
     fig.suptitle(f"{model.config['intersection']['name']} - Phase 2 geometry", fontsize=13)
     fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
@@ -93,7 +92,7 @@ def draw_geometry_plot(model, state, out_path: Path, crossings) -> list:
     return violations
 
 
-def draw_before_after(model, existing_state, state, scenario_name: str, out_path: Path, crossings) -> list:
+def draw_before_after(model, existing_state, state, scenario_name: str, out_path: Path) -> list:
     """The phase 3 before/after pair, with the same filenames the phase scripts write.
 
     Deliberately not a new set of artifacts: the review workflow is looking at
@@ -106,10 +105,8 @@ def draw_before_after(model, existing_state, state, scenario_name: str, out_path
     ground has to be in it or the proposal is credited with parking it did not add.
     """
     fig, axes = plt.subplots(1, 2, figsize=(18, 10))
-    existing = plot_design_state(axes[0], model, existing_state, "Existing Conditions",
-                                  crossings=crossings)
-    proposed = plot_design_state(axes[1], model, state, f"Proposed Treatments ({scenario_name})",
-                                  crossings=crossings)
+    existing = plot_design_state(axes[0], model, existing_state, "Existing Conditions")
+    proposed = plot_design_state(axes[1], model, state, f"Proposed Treatments ({scenario_name})")
     violations = proposed.violations
     draw_change_panel(fig, existing.metrics, proposed.metrics)
     fig.legend(handles=legend_handles(), loc="lower center", ncol=4, fontsize=8, bbox_to_anchor=(0.5, -0.02))
@@ -197,11 +194,6 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
             # is still RUN on from_model below: a proposal builds on the untreated street,
             # because a treatment is added and never removed.
             existing = existing_conditions(model)
-            # Through the frame too - see the buildings fetch below. A surveyed crossing this
-            # misses is drawn as bare asphalt, which is the one error a reader cannot spot.
-            crossings = fetch_crossings(
-                model.center_wgs84,
-                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
     except Exception as e:
         return [f"{site}: could not build the junction model - {type(e).__name__}: {e}"], []
 
@@ -224,24 +216,15 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
     # earlier run next to fresh sheets, and a reader measured an unchanged number three times.
     with contextlib.redirect_stdout(quiet):
         theme = build_default_theme()
-        # THROUGH frame_covering_radius_m, exactly as export_scenario does when nothing is
-        # passed in. Fetching here at the flat base radius made this a SECOND answer to "how
-        # far do the buildings go", and the quieter one won: wbroad_lanning's corridor frame
-        # reaches 781 m from the junction node and this handed it 130 m, so two thirds of
-        # its own picture came out as bare field while export.py's own fetch would have
-        # covered it.
-        buildings = fetch_buildings(model.center_wgs84,
-                                    radius_m=frame_covering_radius_m(model,
-                                                                     BUILDING_CONTEXT_RADIUS_M))
 
     for label, name, state in states:
         with contextlib.redirect_stdout(quiet):
             if label == "existing":
-                violations = draw_geometry_plot(model, state, out_dir / "phase2_geometry_plot.png", crossings)
+                violations = draw_geometry_plot(model, state, out_dir / "phase2_geometry_plot.png")
             else:
                 suffix = "" if label == "proposed" else f"_{label}"
                 violations = draw_before_after(model, existing, state, name,
-                                                out_dir / f"phase3_before_after{suffix}.png", crossings)
+                                                out_dir / f"phase3_before_after{suffix}.png")
         for violation in violations:
             if violation.fatal:
                 failures.append(f"{site}/{label}: {violation}")
@@ -250,7 +233,7 @@ def build_site(site: str, render_3d: bool = False, dpi: int = 150,
         try:
             with contextlib.redirect_stdout(quiet):
                 geometry = export_scenario(model, state, name, out_dir / f"geometry_{label}.json",
-                                            buildings=buildings, crossings=crossings, theme=theme)
+                                            theme=theme)
             if render_3d:
                 blender_jobs.append((geometry, render))
         except SceneInvariantError as e:
@@ -291,8 +274,8 @@ def main():
     args = parser.parse_args()
 
     # Before anything is built, not beside the Blender call below: the frame scale reaches the
-    # PLAN VIEW and the exported geometry too, and it widens what context is fetched at all
-    # (src/render/frame.py:context_radius_m). Setting it late would have produced a 1x geometry
+    # PLAN VIEW and the exported geometry too, and it lengthens the legs the model is built with
+    # (src/geometry/intersection/load.py). Setting it late would have produced a 1x geometry
     # file and a 2.5x camera. Inherited by the worker processes, which is why it is an env var
     # in the first place. Without this flag, `build_all` silently reset a wide artifact to 1x -
     # the standard rebuild command could not reproduce the pictures in output/.

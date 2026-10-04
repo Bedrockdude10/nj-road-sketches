@@ -54,7 +54,7 @@ DEFAULT_MARGIN_FT = 80.0
 NOISE_FRACTION = 0.005
 
 
-def _drawn_layers(features, scenario: str) -> tuple[dict, list[dict], dict]:
+def _drawn_layers(features, area: str, scenario: str) -> tuple[dict, list[dict], dict]:
     """(layer -> one geometry, props, leg -> scalars) for one window, in state-plane feet.
 
     Resolved through the same SceneGeometry and build_props the two renderers call, so this
@@ -63,15 +63,9 @@ def _drawn_layers(features, scenario: str) -> tuple[dict, list[dict], dict]:
     because a stripe half a width out of place is the defect being looked for, and comparing
     bare axes cannot see it.
     """
-    model, state, pavement, context = design_for(features, scenario)
-    scene = SceneGeometry.resolve(model, state, context["crossings"],
-                                   stop_lines=context["stop_lines"], pavement=pavement,
-                                   kerb_ways=context["kerb_ways"])
-    props = build_props(model, state, scene.crosswalk_offsets, model.center_ft,
-                         traffic_control=context["traffic_control"],
-                         street_furniture=context["street_furniture"],
-                         crossings=context["crossings"], kerb_ways=context["kerb_ways"],
-                         pavement=pavement)
+    model, state, pavement = design_for(features, area, scenario)
+    scene = SceneGeometry.resolve(model, state, pavement=pavement)
+    props = build_props(model, state, scene.crosswalk_offsets, pavement=pavement)
     paint, props = scene.build_paint_and_posts(props)
 
     by_layer: dict[str, list] = {}
@@ -242,8 +236,8 @@ def main() -> None:
     print(f"{args.scenario}: {small_r:.0f} ft window vs {large_r:.0f} ft, "
           f"compared inside {small_r - args.margin_ft:.0f} ft of centre\n")
 
-    small = _drawn_layers(slice_around(network, centre, small_r), args.scenario)
-    large = _drawn_layers(slice_around(network, centre, large_r), args.scenario)
+    small = _drawn_layers(slice_around(network, centre, small_r), args.area, args.scenario)
+    large = _drawn_layers(slice_around(network, centre, large_r), args.area, args.scenario)
     keep = small_r - args.margin_ft
     core = box(centre.x - keep, centre.y - keep, centre.x + keep, centre.y + keep)
 

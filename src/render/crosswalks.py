@@ -287,9 +287,9 @@ def _match_key(legs: dict):
 
 
 def _match_crossings_to_legs(legs: dict, crossings: list[dict]) -> dict:
-    # `crossings` by identity: it is the list src/sources/osm_context.py's layer cache returns,
-    # so it is the same object for the same (centre, radius) until the snapshot is re-pulled -
-    # and hashing every crossing dict to key on the contents would cost more than the match.
+    # `crossings` by identity: it is the list src/sources/osm_context.py:osm_layers memoizes, so
+    # it is the same object for the same area until the snapshot is re-pulled - and hashing every
+    # crossing dict to key on the contents would cost more than the match.
     key = _match_key(legs)
     cached = _CROSSING_MATCHES.get(key)
     if cached is not None and cached[0] is crossings:
@@ -315,7 +315,7 @@ def _matched_crossings(legs: dict, crossings: list[dict]) -> dict:
     closest to (perpendicular distance), as long as its midpoint projects onto
     that leg between the intersection and its far end, it isn't absurdly far
     off to the side (i.e. it's actually this leg's crossing, not some other
-    nearby crossing that happened to fall within the fetch radius), and it runs
+    crossing elsewhere in the world), and it runs
     ACROSS that leg rather than alongside it.
 
     Two constraints stop one crossing being credited to the wrong leg:

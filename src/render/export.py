@@ -20,27 +20,20 @@ from src.render.crosswalks import (CROSSWALK_DEPTH_M, STOP_BAR_CURB_CLEARANCE_M,
                                    stop_bar_band_geometry_ft, stop_bar_ends_ft,
                                    stop_bar_width_ft)
 from src.geometry.model import hatch_lines_ft
-from src.geometry.intersection import (IntersectionModel, drawn_kerb_radius_ft,
-                                       kerb_lines_with_tags_ft)
+from src.geometry.intersection import IntersectionModel, kerb_lines_with_tags_ft
 from src.geometry.kerbs import KerbType
 from src.geometry.markings import CHANNELS, KINDS, Role, kinds_in
 from src.geometry.paint import RimCause, in_channel
-from src.render.frame import frame_covering_radius_m, junction_frame
+from src.render.frame import junction_frame
 from src.render.mesh_utils import build_decimated_building_mesh
 from src.render.scene import SceneGeometry
 from src.sources.assessor import (BuildingHeight, assessor_path, describe_building_heights,
                                    height_of, parcels_near_buildings, storeys_by_pin)
-from src.sources.osm_context import (fetch_buildings, fetch_crossings, fetch_kerbs,
-                                     fetch_street_furniture, fetch_traffic_control)
 from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
 from src.geometry.treatments import (DesignState, RaiseCrossing, RefugeIsland,
                                       build_sidewalk_pieces)
 
-BUILDING_CONTEXT_RADIUS_M = 130
-KERB_RADIUS_M = 120
-TRAFFIC_CONTROL_RADIUS_M = 60  # control nodes govern THIS junction; a wider net just pulls in neighbours
 SIDEWALK_WIDTH_FT = 6
-NEAR_ZONE_BUFFER_FT = 10  # how far past the farthest crosswalk the "near" (4k texture) pavement zone extends
 HATCH_ANGLE_DEG = 45.0  # for a corner treatment, which belongs to no single leg's heading
 # How tall each kind of kerb is built, measured from z=0 like the pavement slab - so the REVEAL
 # above the road is this minus the pavement's own 0.05 m. A raised kerb gets a 0.15 m reveal, the
@@ -116,23 +109,12 @@ def _leg_heading_deg(leg) -> float:
     return math.degrees(math.atan2(y1 - y0, x1 - x0))
 
 
-def _split_near_far(polygons: list[Polygon], center_ft: Point, near_radius_ft: float):
-    """
-    Split a list of polygons (the pavement, the sidewalk pieces, ...) into a
-    near-camera zone and everything else, by intersecting each with a circle
-    around the intersection - used to texture what viewers will actually
-    scrutinize (pavement/sidewalk right at the crosswalks) at a higher
-    resolution than the rest. Any piece can become a MultiPolygon on either
-    side of the split; always returns flat lists of simple Polygons.
-    """
-    circle = center_ft.buffer(near_radius_ft)
-    near_polys, far_polys = [], []
+def _simple_polygons(polygons) -> list[Polygon]:
+    """A flat list of simple Polygons: any piece may be a MultiPolygon, and none is empty."""
+    out = []
     for poly in polygons:
-        near = poly.intersection(circle)
-        far = poly.difference(circle)
-        near_polys += list(near.geoms) if near.geom_type == "MultiPolygon" else [near] if not near.is_empty else []
-        far_polys += list(far.geoms) if far.geom_type == "MultiPolygon" else [far] if not far.is_empty else []
-    return near_polys, far_polys
+        out += list(poly.geoms) if poly.geom_type == "MultiPolygon" else [poly]
+    return [poly for poly in out if not poly.is_empty]
 
 
 def paint_channels_local_m(paint, center_ft, leg_heading_deg=None) -> dict[str, list]:
@@ -212,39 +194,20 @@ def paint_channels_local_m(paint, center_ft, leg_heading_deg=None) -> dict[str, 
 
 
 def export_scenario(model: IntersectionModel, state: DesignState, name: str, out_path: Path,
-                     buildings: list[dict] | None = None, crossings: list[dict] | None = None,
-                     theme: dict | None = None, traffic_control: list[dict] | None = None,
-                     street_furniture: list[dict] | None = None, pavement=None,
-                     kerb_ways: list[dict] | None = None, frame=None,
-                     stop_lines: list[dict] | None = None) -> Path:
-    """Every OSM layer may be SUPPLIED rather than fetched, and a caller that supplies one wins.
+                     theme: dict | None = None, pavement=None, frame=None) -> Path:
+    """The whole world `model.osm` describes, serialised for Blender - not a window onto it.
 
-    A junction knows its centre and a radius, so it fetches; a crop of the borough document has
-    neither - the largest radius fitting the snapshot bbox is smaller than the borough - and
-    hands over what the document already holds. `pavement` is the same bargain for the roadway:
-    it overrides the ring built from the corner fillets, which a crop has none of.
+    EVERY OSM LAYER IS READ IN FULL from `model.osm`, and nothing here is cut to the picture: the
+    `frame` is where the camera points (written out as `frame`), never what exists. A building a
+    kilometre off is in the file because it is in the world, and Blender decides what to build
+    for it. `pavement` overrides the ring built from the corner fillets, for a drawing that has
+    no fillets (a crop of the borough document).
     """
     center_ft = model.center_ft
     if theme is None:
         from src.render.theme import build_default_theme
         theme = build_default_theme()
-    # Scaled with the frame, like the kerbs, roads and cross streets, and measured to the CORNER
-    # of the square sheet rather than to the edge - a building or a crossing fills the picture, so
-    # the ground it has to cover is the whole of Frame.bounds_ft(). At 3x the corners of Broad &
-    # Greenwood's sheet are 242.3 m out against the 188.9 m an edge measurement asked for. At 1x
-    # every site floors on BUILDING_CONTEXT_RADIUS_M, so no unscaled render moves.
-    context_m = frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M)
-    if buildings is None:
-        buildings = fetch_buildings(model.center_wgs84, radius_m=context_m)
-    if crossings is None:
-        crossings = fetch_crossings(model.center_wgs84, radius_m=context_m)
-    if traffic_control is None:
-        traffic_control = fetch_traffic_control(model.center_wgs84, radius_m=TRAFFIC_CONTROL_RADIUS_M)
-    if street_furniture is None:
-        # The same context_m as the buildings and crossings above: street furniture fills the
-        # picture too, and a bench that exists in one view and not the other is the seam this
-        # project keeps finding bugs in.
-        street_furniture = fetch_street_furniture(model.center_wgs84, radius_m=context_m)
+    buildings = model.osm["buildings"]
 
     # Every marking position this scenario implies, resolved once (src/render/scene.py) and
     # shared with the plan view and the invariants. Crosswalks outrank every other marking,
@@ -253,13 +216,12 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # implies. Stop bars are resolved only at a signalized junction, the same gate
     # src/render/props.py's _traffic_signal_props/_no_turn_on_red_props use.
     supplied_pavement = pavement
-    scene = SceneGeometry.resolve(model, state, crossings, stop_lines=stop_lines,
-                                   pavement=pavement, kerb_ways=kerb_ways)
+    scene = SceneGeometry.resolve(model, state, pavement=pavement)
     pavement = scene.pavement
     if pavement is None:
         # export_scenario has always required a closed ring (build_pavement_polygon raised
-        # here before the scene resolved it), and everything below - the near/far texture
-        # split, the building filter, the sidewalk band - is measured against it.
+        # here before the scene resolved it), and everything below - the building filter, the
+        # sidewalk band - is measured against it.
         raise ValueError("Can't export this scenario - the pavement ring did not close. "
                          "See src/geometry/model/corners.py:build_pavement_polygon.")
     crosswalk_offsets = scene.crosswalk_offsets
@@ -269,8 +231,8 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     marked_crosswalks = scene.marked_crosswalks
     # Only where the caller supplied the roadway: a junction's band is built off its own corner
     # ring, and the traced kerbs are a wider set than that ring - passing them there would lay
-    # footway along every leg to the fetch radius. A crop has no ring, so the kerb OSM traced is
-    # the kerb, and `scene.drawn_kerbs` is that set resolved once for the whole scene.
+    # footway along every kerb in the world. A crop has no ring, so the kerb OSM traced is the
+    # kerb, and `scene.drawn_kerbs` is that set resolved once for the whole scene.
     sidewalk_pieces = build_sidewalk_pieces(state, sidewalk_width_ft=SIDEWALK_WIDTH_FT,
                                              pavement=supplied_pavement,
                                              edges=list(scene.drawn_kerbs) if supplied_pavement
@@ -281,31 +243,19 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # than render buildings sitting in the middle of the road.
     buildings = [b for b in buildings if not building_footprint_ft(b["coords_wgs84"]).intersects(pavement)]
 
-    # Resolved once and read twice - written into the JSON for the camera, and used to decide
-    # which traced kerbs are in the picture at all. Two calls would be two chances to disagree.
+    # Written into the JSON for the camera and handed to the coverage audit, which judges what
+    # is inside the picture. It decides nothing about what is exported.
     frame = frame if frame is not None else junction_frame(model)
     # THE TRACED KERBS, resolved once for the same reason - written out as `kerbs` below. The
     # surveyed-crossing trim against these kerbs lives in SceneGeometry.surveyed_crossing_markings,
     # beside where the crossing's STYLE is resolved, so the two cannot use different kerbs.
-    drawn_kerbs_with_tags = list(kerb_lines_with_tags_ft(model.center_wgs84, center_ft,
-                                                         radius_ft=drawn_kerb_radius_ft(),
-                                                         kerbs=kerb_ways))
-
-    near_radius_ft = max((v[0] for v in crosswalk_offsets.values()), default=30) + NEAR_ZONE_BUFFER_FT
-    pavement_near, pavement_far = _split_near_far([pavement], center_ft, near_radius_ft)
-    sidewalks_near, sidewalks_far = _split_near_far(sidewalk_pieces, center_ft, near_radius_ft)
+    drawn_kerbs_with_tags = list(kerb_lines_with_tags_ft(osm=model.osm))
 
     # Street trees come only from real OSM natural=tree nodes - never spaced along a sidewalk,
     # which would be inventing a tree nothing recorded.
-    tree_points_ft = osm_tree_points_ft(control_nodes_ft(street_furniture))
+    tree_points_ft = osm_tree_points_ft(control_nodes_ft(model.osm["street_furniture"]))
 
-    # Resolved ONCE, not inline at the call below: the coverage report audits this same drawing
-    # and used to fetch its own copy, so the props and the audit of the props could be built from
-    # two different pulls. One list, both readers.
-    kerb_ways = (kerb_ways if kerb_ways is not None
-                 else fetch_kerbs(model.center_wgs84, radius_m=KERB_RADIUS_M))
-    props = build_props(model, state, crosswalk_offsets, center_ft, traffic_control, street_furniture,
-                         crossings, kerb_ways, pavement=pavement)
+    props = build_props(model, state, crosswalk_offsets, pavement=pavement)
     paint, props = scene.build_paint_and_posts(props)
     # Invariants, not warnings: a pad in the carriageway is a false claim about an
     # accessibility feature, and a curb drawn across the intersection is a false claim
@@ -314,9 +264,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     scene.assert_valid(props, paint, scenario=name)
     # What the surveyor recorded inside this frame that the drawing does not contain.
     # Printed rather than raised - see SceneGeometry.report_coverage.
-    scene.report_coverage(props, paint, frame.radius_ft,
-                           osm={"crossings": crossings, "traffic_control": traffic_control,
-                                "kerb_ways": kerb_ways})
+    scene.report_coverage(props, paint, frame)
     paint_channels = paint_channels_local_m(
         paint, center_ft, lambda name: _leg_heading_deg(state.legs[name]))
 
@@ -384,10 +332,12 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         # this render and the plan view frame the same ground. Blender must not compute an extent
         # of its own from the pavement below.
         "frame": frame.as_local_m(center_ft),
-        "pavement_near": [ring_to_local_m(p.exterior.coords, center_ft) for p in pavement_near],
-        "pavement_far": [ring_to_local_m(p.exterior.coords, center_ft) for p in pavement_far],
-        "sidewalks_near": [ring_to_local_m(p.exterior.coords, center_ft) for p in sidewalks_near],
-        "sidewalks_far": [ring_to_local_m(p.exterior.coords, center_ft) for p in sidewalks_far],
+        # ALL OF THE PAVEMENT AND ALL OF THE SIDEWALK, one list each. A world has no centre to be
+        # near, so the texture resolution of a piece is the renderer's call, not a split made here.
+        "pavement": [ring_to_local_m(p.exterior.coords, center_ft)
+                     for p in _simple_polygons([pavement])],
+        "sidewalks": [ring_to_local_m(p.exterior.coords, center_ft)
+                      for p in _simple_polygons(sidewalk_pieces)],
         "tree_points": [pt_to_local_m(x, y, center_ft) for x, y in tree_points_ft],
         # Every marking channel, in the order src/geometry/markings.py declares them. Splatted
         # rather than listed key by key: a channel Blender reads and this file forgot to write
@@ -522,10 +472,10 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         # boundary, so a dropped kerb and a 6 in stood-up kerb do not render identically and the
         # raised/lowered tagging on all 95 mapped ways reaches something.
         #
-        # The SAME set the plan view draws: kerb_lines_with_tags_ft at the FRAME radius, not the
-        # near set (within 80 ft), which is the corner-radius fit's test rather than a renderer's
-        # - at Broad & Greenwood both kerbs are traced the length of the corridor, so the near set
-        # keeps only the four returns.
+        # The SAME set the plan view draws: every traced kerb in the world, not the near set
+        # (within 80 ft of the junction), which is the corner-radius fit's test rather than a
+        # renderer's - at Broad & Greenwood both kerbs are traced the length of the corridor, so
+        # the near set keeps only the four returns.
         "kerbs": [
             {"coords": ring_to_local_m(line.coords, center_ft),
              "kerb": str(KerbType.from_tags(tags)),

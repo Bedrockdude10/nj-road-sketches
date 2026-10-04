@@ -76,15 +76,15 @@ def _parts(geom):
 
 
 #: {layer: (document kind, the geometry type it is carried as)} - every OSM layer a renderer can
-#: be handed, keyed by the name its FETCHER uses, because that is the name the consumer knows it
-#: by. The document writes `osm_<layer>` for everything added after the first three; see
-#: scripts/export_network.py:_context_rows.
+#: be handed, keyed by the name `osm_layers` (src/sources/osm_context.py) gives it, because that is
+#: the name every consumer reads it by on `model.osm`. The document writes `osm_<layer>` for
+#: everything added after the first three; see scripts/export_network.py:_context_rows.
 SLICE_LAYERS: dict[str, tuple[str, str]] = {
     "buildings": ("building", "Polygon"),
     "parking_lots": ("osm_parking_lots", "Polygon"),
     "crossings": ("crossing_way", "LineString"),
     "sidewalks": ("osm_sidewalks", "LineString"),
-    "kerb_ways": ("kerb_way", "LineString"),
+    "kerbs": ("kerb_way", "LineString"),
     "driveways": ("osm_driveways", "LineString"),
     "parking_aisles": ("osm_parking_aisles", "LineString"),
     "stop_lines": ("osm_stop_lines", "LineString"),
@@ -93,12 +93,10 @@ SLICE_LAYERS: dict[str, tuple[str, str]] = {
 
 
 def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
-    """The document's own OSM context, in the shape the OSM fetchers return it.
+    """The document's own OSM context, in the shape `osm_layers` returns it.
 
-    Same keys, same dicts, so nothing downstream can tell a slice from a junction - and the
-    renderers never fetch. That matters twice over: `fetch_buildings` and friends take a centre
-    and a radius, and the largest radius fitting the declared snapshot bbox is smaller than the
-    borough, so a slice near its edge would silently lose its surroundings.
+    Same keys, same dicts, so nothing downstream can tell a slice from a junction: this is the
+    `osm` a slice's model carries, and the renderers read nothing else.
 
     The tags are OSM's own, carried verbatim through the document, so everything derived FROM
     them - a building's height, a crossing's markings - is derived here by the same functions a
@@ -134,20 +132,25 @@ def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
     nodes = [(tags_of(row), part, row) for row in of_kind("osm_node")
              for part in _parts(row.geometry) if part.geom_type == "Point"]
     context = {name: layer(name) for name in SLICE_LAYERS}
-    # height_m None where nobody recorded one, which is what fetch_buildings means by it -
+    # height_m None where nobody recorded one, which is what osm_layers means by it -
     # "nobody said" is a different answer from the default, and export.py looks elsewhere.
     for item in context["buildings"]:
         found = height_from_tags(item["tags"])
         item["height_m"], item["height_source"] = found if found else (None, None)
-    # Kerb NODES, appended to the kerb ways exactly as `fetch_kerbs` returns them in one list:
+    # Kerb NODES, appended to the kerb ways exactly as `osm_layers` returns them in one list:
     # OSM tags a dropped kerb on the node where the footway crosses, and the two are one layer.
-    context["kerb_ways"] += [{"coords_wgs84": None, "lon": p.x, "lat": p.y, "tags": t,
-                              "id": next(iter(ids(row, "way_ids")), None)}
-                             for t, p, row in nodes if is_kerb(t)]
-    context["traffic_control"] = [{"lon": p.x, "lat": p.y, "tags": t}
-                                  for t, p, _row in nodes if is_traffic_control(t)]
-    context["street_furniture"] = [{"lon": p.x, "lat": p.y, "tags": t}
-                                   for t, p, _row in nodes if is_street_furniture(t)]
+    context["kerbs"] += [{"coords_wgs84": None, "lon": p.x, "lat": p.y, "tags": t,
+                          "id": next(iter(ids(row, "way_ids")), None)}
+                         for t, p, row in nodes if is_kerb(t)]
+    context["traffic_control"] = [{"lon": p.x, "lat": p.y, "tags": t,
+                                   "id": next(iter(ids(row, "way_ids")), None)}
+                                  for t, p, row in nodes if is_traffic_control(t)]
+    context["street_furniture"] = [{"lon": p.x, "lat": p.y, "tags": t,
+                                    "id": next(iter(ids(row, "way_ids")), None)}
+                                   for t, p, row in nodes if is_street_furniture(t)]
+    # The document names a feature's municipality and does not carry the ring, so there is none to
+    # offer - which is what an empty layer says.
+    context["municipalities"] = []
     return context
 
 
@@ -163,21 +166,6 @@ def window_frame(features: gpd.GeoDataFrame) -> Frame:
     minx, miny, maxx, maxy = features.total_bounds
     return Frame(Point((minx + maxx) / 2, (miny + maxy) / 2),
                  max(maxx - minx, maxy - miny) / 2)
-
-
-def context_layers(context: dict[str, list[dict]]) -> dict[str, list[dict]]:
-    """The layers BOTH views take, so neither can be handed a set the other was not.
-
-    Two layers are deliberately not here, and neither is a view drawing something the other
-    cannot. `buildings` the 2D sheet does not draw. `sidewalks` is the surveyed OSM CENTRELINE,
-    which is a 2D annotation - the 3D footway is a BAND derived from the pavement both views
-    share (`build_sidewalk_pieces`), so the walkable surface is in both and only the blue
-    reference line is in one. Everything else goes to both, which is what keeps a hydrant from
-    existing in one view and not the other.
-    """
-    return {key: context[key]
-            for key in ("crossings", "traffic_control", "street_furniture", "kerb_ways",
-                        "stop_lines")}
 
 
 def _route_decisions(state, model, features: gpd.GeoDataFrame):
@@ -214,25 +202,26 @@ SCENARIOS = {
 }
 
 
-def design_for(features: gpd.GeoDataFrame, scenario: str = "two_way_bikeway"):
-    """(model, state, pavement, context) for a slice, drawn in one scenario.
+def design_for(features: gpd.GeoDataFrame, area: str, scenario: str = "two_way_bikeway"):
+    """(model, state, pavement) for a slice of `area`'s document, drawn in one scenario.
+
+    The model's `osm` is the document's own layers (`slice_context`) and nothing else, which is
+    what both views read: neither can be handed a set the other was not, so a hydrant cannot
+    exist in one view and not the other.
 
     The baseline is `existing_conditions`, the same state every site pipeline labels "Existing
     Conditions", so "existing" here means what it means everywhere else in this repo.
     """
-    context = slice_context(features)
-    model, _ = slice_design(features, osm=context)
+    model, _ = slice_design(features, osm=slice_context(features), osm_area=area)
     state = SCENARIOS[scenario](existing_conditions(model), model, features)
-    return model, state, slice_pavement(features, state.corner_fillets), context
+    return model, state, slice_pavement(features, state.corner_fillets)
 
 
-def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
+def draw_2d(features: gpd.GeoDataFrame, area: str, name: str, out_dir: Path,
              scenario: str = "two_way_bikeway", dpi: int = 200) -> Path:
-    model, state, pavement, context = design_for(features, scenario)
+    model, state, pavement = design_for(features, area, scenario)
     fig, ax = plt.subplots(figsize=(11, 11))
-    plot_design_state(ax, model, state, name, pavement=pavement,
-                      frame=window_frame(features), sidewalks=context["sidewalks"],
-                      **context_layers(context))
+    plot_design_state(ax, model, state, name, pavement=pavement, frame=window_frame(features))
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"{name}.png"
     fig.savefig(out, dpi=dpi, bbox_inches="tight", facecolor="white")
@@ -240,16 +229,14 @@ def draw_2d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
     return out
 
 
-def draw_3d(features: gpd.GeoDataFrame, name: str, out_dir: Path,
+def draw_3d(features: gpd.GeoDataFrame, area: str, name: str, out_dir: Path,
              scenario: str = "two_way_bikeway") -> Path:
     from scripts.phase4_render_3d import find_blender, render_all
 
-    model, state, pavement, context = design_for(features, scenario)
+    model, state, pavement = design_for(features, area, scenario)
     out_dir.mkdir(parents=True, exist_ok=True)
     geometry, png = out_dir / f"{name}_3d.json", out_dir / f"{name}_3d.png"
-    export_scenario(model, state, name, geometry, pavement=pavement,
-                    frame=window_frame(features),
-                    buildings=context["buildings"], **context_layers(context))
+    export_scenario(model, state, name, geometry, pavement=pavement, frame=window_frame(features))
     render_all(find_blender(), [(geometry, png)])
     return png
 
@@ -290,9 +277,9 @@ def main() -> None:
     stem = args.name or stem
     counts = ", ".join(f"{n} {k}" for k, n in features["kind"].value_counts().items())
     print(f"{stem}: {len(features)} feature(s) - {counts}")
-    print(f"wrote {draw_2d(features, stem, args.out_dir, args.scenario, args.dpi)}")
+    print(f"wrote {draw_2d(features, args.area, stem, args.out_dir, args.scenario, args.dpi)}")
     if args.three_d:
-        print(f"wrote {draw_3d(features, stem, args.out_dir, args.scenario)}")
+        print(f"wrote {draw_3d(features, args.area, stem, args.out_dir, args.scenario)}")
 
 
 if __name__ == "__main__":

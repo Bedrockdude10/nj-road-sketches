@@ -11,8 +11,7 @@ from shapely.ops import substring, unary_union
 
 from src.metrics import Comparison, SceneMetrics, marked_stall_runs
 from src.geometry.model import hatch_lines_ft, inset_point_at_station, trimmed_curb_lines
-from src.geometry.intersection import (IntersectionModel, drawn_kerb_radius_ft,
-                                       kerb_lines_with_tags_ft)
+from src.geometry.intersection import IntersectionModel, kerb_lines_with_tags_ft
 from src.geometry.kerbs import KerbType
 from src.geometry.treatments import (CENTERLINE_IS_WHITE, DesignState, RaiseCrossing,
                                      RefugeIsland)
@@ -41,11 +40,9 @@ from src.render.coords import FT_TO_M, wgs84_to_state_plane
 from src.render.crosswalks import (CENTERLINE_STRIPE_WIDTH_FT,
                                    TRANSVERSE_LINE_WIDTH_FT, centerline_paint_ft,
                                    centerline_start_ft)
-from src.render.frame import frame_covering_radius_m, junction_frame
+from src.render.frame import junction_frame
 from src.render.labels import LabelPlacer, ft_per_point
 from src.render.scene import SceneGeometry
-from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_sidewalks,
-                                     fetch_street_furniture, fetch_traffic_control)
 
 # DOES NOT MATCH THE 3D, and the comment here claimed it did: it named a TACTILE_PAD_RED that
 # blender_props.py has not had since the pads went yellow (TACTILE_PAD_YELLOW, because at this
@@ -54,10 +51,6 @@ from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_sidewal
 # rather than changed in passing - it moves every plan view and is a decision, not a typo - but
 # recorded as the disagreement it is rather than as the agreement it was written up as.
 TACTILE_PAD_COLOR = "#8c1f14"
-
-TRAFFIC_CONTROL_RADIUS_M = 60  # matches src/render/export.py
-BUILDING_CONTEXT_RADIUS_M = 130  # matches src/render/export.py - the FLOOR under the frame's own reach
-                                  # within, so a leg's crosswalk_offset here matches what the 3D export computes
 
 
 def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
@@ -537,9 +530,7 @@ PAINT_FILL_EDGE = {"gold": "goldenrod", "peru": "saddlebrown", "orangered": "ora
 
 
 def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offsets: dict,
-                 traffic_control: list[dict] | None, street_furniture: list[dict] | None,
-                 crossings: list[dict] | None, labels: LabelPlacer, dimension_labels: bool,
-                 pavement=None, kerb_ways: list[dict] | None = None):
+                 labels: LabelPlacer, dimension_labels: bool, pavement=None):
     """Draw the street furniture the 3D render will build - signals above all.
 
     This calls the SAME src/render/props.py:build_props the export does, so the plan view shows
@@ -557,16 +548,12 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     that tag - ProtectDaylightZone's posts - exist only as props, so skipping every bollard shows
     none in plan while the render of the same scenario shows thirteen.
     """
-    # Every traced kerb inside the frame, which is the same set the 3D export writes - see
-    # src/geometry/intersection/kerb_sources.py:kerb_lines_with_tags_ft on why the drawing test is not the
-    # corner-fit's near set, and src/render/export.py for the matching call.
-    kerb_lines = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                          radius_ft=drawn_kerb_radius_ft(), kerbs=kerb_ways)
-    props = build_props(model, state, crosswalk_offsets, model.center_ft, traffic_control,
-                         street_furniture, crossings,
-                         kerb_ways if kerb_ways is not None
-                         else fetch_kerbs(model.center_wgs84, radius_m=120),
-                         pavement=pavement)
+    # Every traced kerb in the world, which is the same set the 3D export writes - the axes limits
+    # are what cut it to the sheet. See src/geometry/intersection/kerb_sources.py:kerb_lines_with_tags_ft
+    # on why the drawing test is not the corner-fit's near set, and src/render/export.py for the
+    # matching call.
+    kerb_lines = kerb_lines_with_tags_ft(osm=model.osm)
+    props = build_props(model, state, crosswalk_offsets, pavement=pavement)
     _draw_paved_surfaces(ax, model.paved_surfaces)
     _draw_kerbs(ax, kerb_lines)
 
@@ -778,61 +765,24 @@ def draw_change_panel(fig, before: SceneMetrics, after: SceneMetrics) -> Compari
     return comparison
 
 
-def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: str, dimension_labels: bool = True,
-                       crossings: list[dict] | None = None, sidewalks: list[dict] | None = None,
-                       traffic_control: list[dict] | None = None, street_furniture: list[dict] | None = None,
-                       pavement=None, kerb_ways: list[dict] | None = None, frame=None,
-                       stop_lines: list[dict] | None = None):
-    """Every OSM layer may be SUPPLIED rather than fetched, exactly as export_scenario takes them,
-    so the two views cannot be drawn from different data. See that function for why a crop has to
-    supply them; `pavement` likewise overrides the ring built from corner fillets it has none of.
+def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: str,
+                       dimension_labels: bool = True, pavement=None, frame=None):
+    """Draw `model`'s world through a `frame`: every OSM layer is read from `model.osm`, exactly as
+    export_scenario reads it, so the two views cannot be drawn from different data. The frame is
+    the camera - it sets the axes and so what is visible, and decides nothing about what exists.
+    `pavement` overrides the ring built from corner fillets, which a crop of the borough document
+    has none of.
     """
-    if sidewalks is None:
-        try:
-            sidewalks = fetch_sidewalks(
-                model.center_wgs84,
-                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
-        except RuntimeError as e:
-            print(f"  WARNING: could not fetch OSM sidewalks ({e}) - drawn without them.")
-            sidewalks = []
-
-    if traffic_control is None:
-        try:
-            traffic_control = fetch_traffic_control(model.center_wgs84, radius_m=TRAFFIC_CONTROL_RADIUS_M)
-        except RuntimeError as e:
-            print(f"  WARNING: could not fetch OSM traffic control ({e}) - falling back to guesses.")
-            traffic_control = []
-    if street_furniture is None:
-        try:
-            street_furniture = fetch_street_furniture(
-                model.center_wgs84,
-                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
-        except RuntimeError:
-            street_furniture = []
-    for note in signalization_conflicts(model, traffic_control):
+    for note in signalization_conflicts(model):
         print(f"  NOTE: {note}")
 
     # Always resolved, not just when a treatment needs them: the crosswalks ARE the subject of
     # this project, so a plan view that omits them is not a reconstruction the 3D render can be
     # checked against - a mis-matched OSM crossing (src/render/crosswalks.py:_match_crossings_to_legs)
-    # is then visible only in the render. fetch_crossings is disk-cached per (center, radius).
-    if crossings is None:
-        try:
-            crossings = fetch_crossings(
-                model.center_wgs84,
-                radius_m=frame_covering_radius_m(model, BUILDING_CONTEXT_RADIUS_M))
-        except RuntimeError as e:
-            # Overpass unreachable and nothing cached. Don't fail the whole plan view for
-            # context data - fall back to the geometric estimate, which is drawn in a
-            # visibly different style and labeled as such, so it can't be mistaken for
-            # surveyed placement.
-            print(f"  WARNING: could not fetch OSM crossings ({e}) - crosswalk positions "
-                  f"shown are geometric estimates, not surveyed.")
-            crossings = []
+    # is then visible only in the render.
     # Once, for the whole figure: the pavement, every crossing and stop bar footprint, and the
     # offsets/skews everything else is measured from. See src/render/scene.py.
-    scene = SceneGeometry.resolve(model, state, crossings, stop_lines=stop_lines,
-                                   pavement=pavement, kerb_ways=kerb_ways)
+    scene = SceneGeometry.resolve(model, state, pavement=pavement)
     pavement = scene.pavement
     # Queued, not drawn: every label below is sized in points and has to be placed in feet, and
     # the conversion is a fact about axes limits this function sets last. See src/render/labels.py.
@@ -864,7 +814,7 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     #     run parallel to the kerb the two are in different places. Both are real; neither is a
     #     copy of the other, and conflating them would draw one and label it the other.
     _draw(ax, [line.buffer(SIDEWALK_WIDTH_FT / 2, cap_style=2, join_style=2)
-               for line in sidewalk_lines_ft(sidewalks)],
+               for line in sidewalk_lines_ft(model.osm["sidewalks"])],
           color="steelblue", alpha=0.16, zorder=2,
           boundary=dict(color="steelblue", linewidth=0.8, linestyle=(0, (4, 2)), alpha=0.65,
                         zorder=2))
@@ -940,14 +890,13 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
             labels.dimension("raised\ncrossing", (c.x, c.y), fontsize=6.5, color="indigo",
                              fontweight="bold")
 
-    _draw_surveyed_crossings(ax, crossings)
+    _draw_surveyed_crossings(ax, model.osm["crossings"])
     # Before the modelled crosswalks, so where the two ever overlap the modelled one wins
     # the pixel - and the four this junction models are drawn by _draw_crosswalks below.
     _draw_unmodelled_crossings(ax, scene)
     _draw_crosswalks(ax, scene, labels, dimension_labels)
-    props = _draw_props(ax, model, state, scene.crosswalk_offsets, traffic_control,
-                         street_furniture, crossings, labels, dimension_labels, pavement,
-                         kerb_ways)
+    props = _draw_props(ax, model, state, scene.crosswalk_offsets, labels, dimension_labels,
+                         pavement)
 
     # Every painted marking comes from src/geometry/paint/ - the same builder the 3D export
     # draws from and src/checks.py inspects. Never assembled here in parallel; the two copies

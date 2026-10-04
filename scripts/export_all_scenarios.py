@@ -38,9 +38,8 @@ from scripts.build_all import scenarios_for
 from scripts.jobs import MAX_BUILD_JOBS
 from src.geometry.intersection import load_intersection_model
 from src.geometry.treatments import DesignState, existing_conditions
-from src.render.export import BUILDING_CONTEXT_RADIUS_M, export_scenario
+from src.render.export import export_scenario
 from src.site import list_sites, load_site_scenarios, run_scenario, scenario_label
-from src.sources.osm_context import fetch_buildings, fetch_crossings
 
 
 def export_site(site: str, out_dir: Path) -> tuple[list[Path], list[str]]:
@@ -55,7 +54,7 @@ def export_site(site: str, out_dir: Path) -> tuple[list[Path], list[str]]:
 
     Two boundaries, matching scripts/build_all.py:
 
-    - PER SITE, around loading the model, its OSM context and its scenarios.py. This work
+    - PER SITE, around loading the model (which carries its OSM world) and its scenarios.py. This work
       is shared by every scenario, so if it fails the site has no exports to attempt and
       one line says so.
     - PER SCENARIO, around running the treatment and exporting it. Scenarios are
@@ -69,8 +68,6 @@ def export_site(site: str, out_dir: Path) -> tuple[list[Path], list[str]]:
     try:
         with contextlib.redirect_stdout(quiet):
             model = load_intersection_model(site=site)
-            crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
-            buildings = fetch_buildings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
             scenarios = load_site_scenarios(site)
             names = scenarios_for(site, scenarios)
     except Exception as e:
@@ -91,8 +88,7 @@ def export_site(site: str, out_dir: Path) -> tuple[list[Path], list[str]]:
                          run_scenario(getattr(scenarios, name), DesignState.from_model(model),
                                       model))
                 written.append(export_scenario(
-                    model, state, name, out_dir / site / f"geometry_{label}.json",
-                    buildings=buildings, crossings=crossings, theme={}))
+                    model, state, name, out_dir / site / f"geometry_{label}.json", theme={}))
         except Exception as e:
             # The scenario NAME and the actual error, not just a count: "3 scenarios failed"
             # sends the reader back to reproduce them one at a time, which is the cost this
