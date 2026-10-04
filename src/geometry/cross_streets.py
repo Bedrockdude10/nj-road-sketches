@@ -1,7 +1,7 @@
 """Where a leg crosses ANOTHER street, and what that costs the kerb.
 
-The fact needed was already fetched: `fetch_roads` pulls every `highway=*` way in range and has
-been read only for `overtaking=no`; the geometry was thrown away. This finds the crossings and
+The fact needed was already in the roads layer: every `highway=*` way of the area, read for
+`overtaking=no` and for nothing else while its geometry went unused. This finds the crossings and
 hands them to two existing mechanisms:
 
   * a NO-PARKING ZONE either side of the cross street (src/geometry/daylighting.py), the same
@@ -102,7 +102,7 @@ class CrossStreetCrosswalk:
     station_ft: float
     is_surveyed: bool
     #: Nodes of the traced crossing way, empty for a placed one. Nodes and not a way id because
-    #: src/sources/osm_context.py:fetch_crossings does not carry one - the same thing
+    #: a crossing way is identified by its nodes' topology - the same thing
     #: src/geometry/surveyed.py cites when it has to name a crossing.
     node_ids: tuple = ()
 
@@ -169,9 +169,9 @@ def cross_streets_from_model(model: "IntersectionModel") -> dict:
     resolved = getattr(model, "cross_streets", None)
     if resolved is not None:
         return resolved
-    if not all(hasattr(model, attr) for attr in ("center_wgs84", "center_ft", "legs")):
+    if not all(hasattr(model, attr) for attr in ("osm", "center_ft", "legs")) or not model.osm:
         return {}
-    return cross_streets_ft(model.center_wgs84, model.center_ft, model.legs)
+    return cross_streets_ft(model.osm, model.center_ft, model.legs)
 
 
 def _traced_crosswalks_on(leg_line: LineString, half_width_ft: float, crossing_lines: list
@@ -227,28 +227,16 @@ def _crosswalks_of(cross: "CrossStreet", traced: list[tuple[float, tuple]]) -> t
     return tuple(out)
 
 
-def _crossing_lines_ft(center_wgs84, osm: dict | None = None) -> list:
-    """Every traced OSM crossing near this junction, in state-plane feet. [] if none reachable.
+def _crossing_lines_ft(osm: dict) -> list:
+    """Every traced OSM crossing of the area, in state-plane feet.
 
-    Fetched at the radius the crossings are DRAWN at, so a crossing in the picture is a crossing
-    the statute is measured from - unless `osm` already carries "crossings", the same bargain
-    src/geometry/intersection/paved.py:_supplied strikes: a crop of the borough document has no
-    centre-and-radius to fetch at, only the window's own layers handed back by
-    src/geometry/network/area.py:area_context.
+    ALL of them: which belong to a given leg is decided per leg by _traced_crosswalks_on, against
+    the leg's own centreline and carriageway, so nothing is gated by how far a view reaches.
     """
     from src.geometry.intersection import to_state_plane
-    from src.geometry.intersection.paved import _supplied
-    from src.geometry.treatments.crossings import CROSSING_CONTEXT_RADIUS_M
-    from src.render.frame import context_radius_m
-    from src.sources.osm_context import fetch_crossings
 
-    try:
-        records = _supplied(osm, "crossings", lambda: fetch_crossings(
-            center_wgs84, radius_m=context_radius_m(CROSSING_CONTEXT_RADIUS_M)))
-    except Exception:
-        return []
     lines = []
-    for record in records:
+    for record in osm["crossings"]:
         coords = record.get("coords_wgs84") or []
         if len(coords) < 2:
             continue        # a crossing NODE has no direction - see surveyed._traced_line_ft
@@ -257,41 +245,30 @@ def _crossing_lines_ft(center_wgs84, osm: dict | None = None) -> list:
     return lines
 
 
-def cross_streets_ft(center_wgs84, center_ft: Point, legs: dict, osm: dict | None = None) -> dict:
+def cross_streets_ft(osm: dict, center_ft: Point, legs: dict) -> dict:
     """{leg name: [CrossStreet]} for every other street these legs run across.
 
     Takes the pieces rather than a model so `load_intersection_model` can call it while the
-    model is still being assembled. Guarded: no OSM reachable answers "none" rather than raising.
-
-    `osm`, supplied, wins over the fetch - the same bargain `_supplied` already strikes for the
-    driveways and roadway asphalt. A configured site has a centre and a radius to fetch at; a
-    crop of the borough document has neither, only the window's own "roads"/"crossings" layers,
-    and R.S. 39:4-138(e) applies at every cross street whether or not this call can reach OSM -
-    a window that answers "none" is stating that no other street crosses it, not merely omitting
-    one from the picture.
+    model is still being assembled. `osm` is the area's layers (`IntersectionModel.osm`); every
+    way of the area is a candidate and the relation to each leg - approaching within its own
+    carriageway, crossing at an angle - decides which are cross streets, so no radius about the
+    junction is needed to keep a far-off street out. R.S. 39:4-138(e) applies at every cross
+    street, and a leg that finds none is stating that no other street crosses it.
     """
-    from src.geometry.intersection import ROAD_CONTEXT_RADIUS_M, to_state_plane
-    from src.geometry.intersection.paved import _supplied
-    from src.render.frame import context_radius_m
-    from src.sources.osm_context import fetch_roads
+    from src.geometry.intersection import to_state_plane
 
-    try:
-        ways = _supplied(osm, "roads", lambda: fetch_roads(
-            center_wgs84, radius_m=context_radius_m(ROAD_CONTEXT_RADIUS_M)))
-    except Exception:
-        return {}
-    crossing_lines = _crossing_lines_ft(center_wgs84, osm)
+    # Projected once per way, not once per way per leg.
+    ways = [(way, LineString(to_state_plane(way["coords_wgs84"])))
+            for way in osm["roads"]
+            if is_carriageway(way.get("tags", {})) and len(way.get("coords_wgs84") or []) >= 2]
+    crossing_lines = _crossing_lines_ft(osm)
 
     out: dict[str, list[CrossStreet]] = {}
     for leg_name, leg in legs.items():
         # Once per leg, not once per cross street - see _traced_crosswalks_on.
         traced = _traced_crosswalks_on(leg.centerline, leg.curb_to_curb_ft / 2, crossing_lines)
-        for way in ways:
+        for way, way_line in ways:
             tags = way.get("tags", {})
-            coords = way.get("coords_wgs84") or []
-            if not is_carriageway(tags) or len(coords) < 2:
-                continue
-            way_line = LineString(to_state_plane(coords))
             # NOT a geometric intersection. A side street's OSM way stops on OSM's centreline for
             # the main road, and our leg is the NJDOT alignment - the two are a few feet apart.
             # So the test is APPROACH: a street that comes within our own carriageway is meeting us.

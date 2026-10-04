@@ -19,23 +19,18 @@ zero: a limit of 0.0 ft would refuse the whole leg and the drawing would come ou
 from shapely.geometry import LineString, Point, Polygon
 
 from src.render.coords import wgs84_to_state_plane
-from src.sources.osm_context import fetch_municipality_containing
+from src.sources.osm_context import municipality_containing
 
 
-# The snapshot window the boundary is looked for in. Same base every layer that follows a street
-# uses, and through the same `context_radius_m`, so a leg drawn to the line has the line in hand:
-# W Broad's southwest leg reaches 2,307 ft and its window opens to 703 m to match. Larger would
-# not help - a ring clipped by the snapshot AREA is dropped, not closed for (see
-# fetch_municipality_containing) - and the areas are sized off this same constant.
-BOUNDARY_CONTEXT_RADIUS_M = 130
+def municipal_boundary_ft(osm: dict, point_wgs84: Point) -> tuple | None:
+    """(name, boundary ring as a Polygon in state-plane feet) for the municipality holding a point.
 
-
-def municipal_boundary_ft(center_wgs84: Point) -> tuple | None:
-    """(name, boundary ring as a Polygon in state-plane feet) for this junction's municipality."""
-    from src.render.frame import context_radius_m   # lazy: render layers above this one
-
-    found = fetch_municipality_containing(center_wgs84,
-                                          context_radius_m(BOUNDARY_CONTEXT_RADIUS_M))
+    The point is a NETWORK ELEMENT - a junction node, the origin every leg runs out from - and the
+    ring is looked up by containment in the area's own layers, so nothing about how far a view
+    reaches decides whether the line is in hand. A ring the area's download clips is not a
+    municipality (see osm_context.osm_layers), so None here means "no closed boundary holds it".
+    """
+    found = municipality_containing(osm, point_wgs84)
     if found is None:
         return None
     name, ring = found
@@ -43,7 +38,7 @@ def municipal_boundary_ft(center_wgs84: Point) -> tuple | None:
     return name, Polygon(zip(xs, ys))
 
 
-def municipal_limits_ft(center_wgs84: Point, legs: dict) -> dict:
+def municipal_limits_ft(osm: dict, center_wgs84: Point, legs: dict) -> dict:
     """{leg name: station in feet where that leg crosses out of the municipality}.
 
     Only legs that DO cross appear, so `.get(leg)` returns None for the rest - see the module
@@ -54,7 +49,7 @@ def municipal_limits_ft(center_wgs84: Point, legs: dict) -> dict:
     facility ends at the first one, because the ground past it is not ours whatever happens
     after. Taking the max would carry a facility across somebody else's street to rejoin our own.
     """
-    found = municipal_boundary_ft(center_wgs84)
+    found = municipal_boundary_ft(osm, center_wgs84)
     if found is None:
         return {}
     _name, boundary = found

@@ -549,7 +549,7 @@ def _traced_side_count(legs: dict) -> int:
     return sum(len(leg.traced_sides) for leg in legs.values())
 
 
-def _extend_curbs_with_far_tracing(legs: dict, center_wgs84: Point, center_ft: Point,
+def _extend_curbs_with_far_tracing(legs: dict, osm: dict, center_ft: Point,
                                     near_coverage: dict | None = None) -> None:
     """Rebuild the curb lines once more, this time including kerb traced further out.
 
@@ -566,7 +566,7 @@ def _extend_curbs_with_far_tracing(legs: dict, center_wgs84: Point, center_ft: P
     redefine one. Guarded anyway on the fit's rule: if the wider set builds FEWER traced leg
     sides, the narrower result stands.
     """
-    wide = kerb_lines_with_tags_ft(center_wgs84, center_ft, legs)
+    wide = kerb_lines_with_tags_ft(osm, legs=legs)
     before = _traced_side_count(legs)
     saved = {name: (leg.left_curb, leg.right_curb, set(leg.traced_sides))
              for name, leg in legs.items()}

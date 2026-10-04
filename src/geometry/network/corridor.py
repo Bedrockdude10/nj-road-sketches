@@ -18,7 +18,7 @@ from shapely.geometry import LineString
 from src.geometry.context_roads import ROADWAY_DEFAULT_WIDTH_FT
 from src.geometry.model import (STRIP_SAMPLE_FT, frame_at, is_through_street, line_direction,
                                 place_in_measured_frame, station_offset_many)
-from src.geometry.network.kerb import (CORRIDOR_KERB_RADIUS_M, KerbRun, _complement_spans,
+from src.geometry.network.kerb import (KerbRun, _complement_spans,
                                        _corridor_kerb_ways, _intersect_spans, _junction_kerb_runs,
                                        _merged_spans, _traced_end_ft, _traced_kerb_runs,
                                        junction_corner_reach_ft)
@@ -28,15 +28,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:    # annotation-only: this type is layered above this package, so importing it
     # for real would close a cycle.
     from src.geometry.intersection.junction import IntersectionModel
-
-
-# How far past the outermost modelled leg the road is carried along NJDOT's alignment. The reach
-# is TRIMMED to where the tracing stops; the cap is a second bound on top of that.
-#
-# IT IS THE FETCH RADIUS, not a round number. A flat 500 ft cap silently dropped 21 of 22 kerb
-# ways northeast of Princeton Ave. CORRIDOR_KERB_RADIUS_M is the honest bound: past it no kerb
-# was fetched, and the trim cannot catch "no kerb fetched" vs "no kerb traced".
-CORRIDOR_EXTENSION_FT = CORRIDOR_KERB_RADIUS_M * 3.28084
 
 
 @dataclass(frozen=True)
@@ -654,7 +645,7 @@ def _extension(models: dict[str, "IntersectionModel"], kerb_ways, seam_point, aw
     how far the road may run: see _traced_end_ft. It is passed in rather than found here because
     the nearest modelled junction TO THE SEAM is not the same thing - the seam moves with the sheet,
     and at 2.5x on Broad St the nearest centre changed from one junction to another, which moved
-    the fetch circle the cap is applied in.
+    where the reach was measured from.
     """
     align = _sri_alignment(models, sri)
     if align is None:
@@ -663,13 +654,16 @@ def _extension(models: dict[str, "IntersectionModel"], kerb_ways, seam_point, aw
     _origin, tangent = frame_at(align, seam_ft)
     forward = bool(np.dot(tangent, np.asarray(away, dtype=float)) > 0)
     node_ft, _node_offset = _seam(align, (node_point.x, node_point.y))
-    end_ft = _traced_end_ft(align, node_ft, forward, kerb_ways, CORRIDOR_EXTENSION_FT,
-                            centre_xy=(node_point.x, node_point.y))
+    end_ft = _traced_end_ft(align, node_ft, forward, kerb_ways)
     lo = max(seam_ft, 0.0) if forward else max(end_ft, 0.0)
     hi = min(end_ft, align.length) if forward else min(seam_ft, align.length)
-    if hi - lo <= blend_ft:
-        # Shorter than the blend is not an extension, it is a stub of eased correction with no
-        # NJDOT alignment left in the middle of it. Better to end the road at the modelled leg.
+    if hi - lo <= 0.0:
+        # The traced kerb stops inside the modelled leg: nothing to carry the road out to.
+        #
+        # A STUB IS STILL AN EXTENSION. This used to refuse one shorter than the blend, which made
+        # whether a corridor reached its last traced kerb depend on where the SEAM fell, and the
+        # seam is a frame-cut leg end: on a 1x sheet the road stopped 15-19 ft short of kerb the
+        # 2.5x sheet reached. _eased_alignment already shrinks the blend to half the stub.
         return np.empty((0, 2)), abs(offset_ft)
     points = _eased_alignment(align, lo, hi, offset_ft if forward else 0.0,
                               0.0 if forward else offset_ft, blend_ft)

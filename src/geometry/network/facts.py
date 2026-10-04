@@ -16,7 +16,7 @@ from shapely.geometry import LineString, Point
 
 from src.geometry.model import (frame_at, line_direction, station_offset_many)
 from src.geometry.network.corridor import (Corridor)
-from src.geometry.network.kerb import (CORRIDOR_KERB_RADIUS_M, _complement_spans, _corridor_kerb_ways,
+from src.geometry.network.kerb import (_complement_spans, _corridor_kerb_ways,
                                        _intersect_spans, _kerb_samples_on, _merged_spans)
 from typing import TYPE_CHECKING
 
@@ -55,6 +55,29 @@ class CorridorFacts:
 
     def by_side(self, field: str, side: str) -> tuple:
         return next((values for name, values in getattr(self, field) if name == side), ())
+
+
+def _members_layer(models: dict[str, "IntersectionModel"], layer: str) -> list:
+    """One OSM layer of every member junction's area, each element once.
+
+    The members of a corridor usually share one area, whose layer is then read once; where they
+    do not, an element in two overlapping areas is one OSM element and is kept once. What lies
+    ALONG the corridor is each reader's own geometric test of it - there is no circle here.
+    """
+    out, seen_lists, seen_ids = [], set(), set()
+    for model in models.values():
+        elements = model.osm[layer]
+        if id(elements) in seen_lists:
+            continue
+        seen_lists.add(id(elements))
+        for element in elements:
+            key = element.get("id")
+            if key is not None:
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+            out.append(element)
+    return out
 
 
 def corridor_facts(corridor: Corridor, models: dict[str, "IntersectionModel"]) -> CorridorFacts:
@@ -97,8 +120,6 @@ def _openings_on(corridor: Corridor, models: dict[str, "IntersectionModel"], ker
     """
     from src.geometry.kerbs import (DRIVEWAY_WIDTH_FT, MIN_OPENING_LENGTH_FT, KerbOpening,
                                     KerbType, OpeningSource, opens_the_kerb)
-    from src.sources.osm_context import fetch_driveways
-
     found = []
     for way_id, (line, tags) in sorted(kerb_ways.items()):
         if not opens_the_kerb(tags):
@@ -113,22 +134,17 @@ def _openings_on(corridor: Corridor, models: dict[str, "IntersectionModel"], ker
                                         source=OpeningSource.DROPPED_KERB,
                                         kerb=KerbType.from_tags(tags), way_id=way_id)))
 
-    seen = set()
-    for model in models.values():
-        for drive in fetch_driveways(model.center_wgs84, radius_m=CORRIDOR_KERB_RADIUS_M):
-            if drive["id"] in seen:
-                continue
-            seen.add(drive["id"])
-            meeting = _driveway_meeting(corridor, drive)
-            if meeting is None:
-                continue
-            side, station = meeting
-            if any(other_side == side and opening.start_ft <= station <= opening.end_ft
-                   for other_side, opening in found):
-                continue
-            found.append((side, KerbOpening(start_ft=max(station - DRIVEWAY_WIDTH_FT / 2, 0.0),
-                                            end_ft=station + DRIVEWAY_WIDTH_FT / 2,
-                                            source=OpeningSource.DRIVEWAY, way_id=drive["id"])))
+    for drive in _members_layer(models, "driveways"):
+        meeting = _driveway_meeting(corridor, drive)
+        if meeting is None:
+            continue
+        side, station = meeting
+        if any(other_side == side and opening.start_ft <= station <= opening.end_ft
+               for other_side, opening in found):
+            continue
+        found.append((side, KerbOpening(start_ft=max(station - DRIVEWAY_WIDTH_FT / 2, 0.0),
+                                        end_ft=station + DRIVEWAY_WIDTH_FT / 2,
+                                        source=OpeningSource.DRIVEWAY, way_id=drive["id"])))
     return tuple(sorted(found, key=lambda pair: (pair[0], pair[1].start_ft)))
 
 
@@ -159,16 +175,14 @@ def _driveway_meeting(corridor: Corridor, drive: dict) -> tuple | None:
 
 
 def _corridor_ways(models: dict[str, "IntersectionModel"], predicate) -> dict:
-    """{way id: (LineString in feet, tags)} for OSM ways near any member junction that match."""
+    """{way id: (LineString in feet, tags)} for every OSM road of the members' areas that matches."""
     from src.geometry.intersection import to_state_plane
-    from src.sources.osm_context import fetch_roads
 
     ways = {}
-    for model in models.values():
-        for way in fetch_roads(model.center_wgs84, radius_m=CORRIDOR_KERB_RADIUS_M):
-            if not predicate(way.get("tags", {})) or len(way.get("coords_wgs84") or []) < 2:
-                continue
-            ways[way["id"]] = (LineString(to_state_plane(way["coords_wgs84"])), way["tags"])
+    for way in _members_layer(models, "roads"):
+        if not predicate(way.get("tags", {})) or len(way.get("coords_wgs84") or []) < 2:
+            continue
+        ways[way["id"]] = (LineString(to_state_plane(way["coords_wgs84"])), way["tags"])
     return ways
 
 
@@ -234,23 +248,21 @@ def _marked_crossings_on(corridor: Corridor, models: dict[str, "IntersectionMode
     """
     from src.geometry.cross_streets import MIN_CROSS_ANGLE_DEG, _crossing_angle_deg
     from src.geometry.intersection import to_state_plane
-    from src.sources.osm_context import fetch_crossings
 
     found = {}
-    for model in models.values():
-        for crossing in fetch_crossings(model.center_wgs84, radius_m=CORRIDOR_KERB_RADIUS_M):
-            coords = crossing.get("coords_wgs84") or []
-            if len(coords) < 2:
-                continue
-            line = LineString(to_state_plane(coords))
-            middle = line.interpolate(0.5, normalized=True)
-            station = float(corridor.centerline.project(middle))
-            if middle.distance(corridor.centerline) > _half_width_at(corridor, station):
-                continue
-            if _crossing_angle_deg(corridor.centerline, line, middle) < MIN_CROSS_ANGLE_DEG:
-                continue
-            key = tuple(crossing.get("node_ids") or [tuple(coords[0])])[:1]
-            found[key] = (station, crossing["tags"].get("crossing:markings"))
+    for crossing in _members_layer(models, "crossings"):
+        coords = crossing.get("coords_wgs84") or []
+        if len(coords) < 2:
+            continue
+        line = LineString(to_state_plane(coords))
+        middle = line.interpolate(0.5, normalized=True)
+        station = float(corridor.centerline.project(middle))
+        if middle.distance(corridor.centerline) > _half_width_at(corridor, station):
+            continue
+        if _crossing_angle_deg(corridor.centerline, line, middle) < MIN_CROSS_ANGLE_DEG:
+            continue
+        key = tuple(crossing.get("node_ids") or [tuple(coords[0])])[:1]
+        found[key] = (station, crossing["tags"].get("crossing:markings"))
     return tuple(sorted(found.values()))
 
 
@@ -273,8 +285,6 @@ def _no_parking_zones_on(corridor: Corridor, side: str, models: dict[str, "Inter
                                           SIDELINE_SETBACK_FT, STOP_SIGN_SETBACK_FT, NoParkingZone)
     from src.geometry.intersection import (PARKING_RESTRICTION_KEYS, parking_is_restricted,
                                            parking_restriction_by_side)
-    from src.sources.osm_context import fetch_street_furniture, fetch_traffic_control
-
     zones = []
     for cross in crossings:
         if side not in cross.sides:
@@ -287,9 +297,9 @@ def _no_parking_zones_on(corridor: Corridor, side: str, models: dict[str, "Inter
 
     for radius_ft, citation, nodes in (
             (STOP_SIGN_SETBACK_FT, "R.S. 39:4-138(h), 50 ft from a stop sign",
-             _corridor_nodes(models, fetch_traffic_control, lambda t: t.get("highway") == "stop")),
+             _corridor_nodes(models, "traffic_control", lambda t: t.get("highway") == "stop")),
             (FIRE_HYDRANT_SETBACK_FT, "R.S. 39:4-138(i), 10 ft from a fire hydrant",
-             _corridor_nodes(models, fetch_street_furniture,
+             _corridor_nodes(models, "street_furniture",
                              lambda t: t.get("emergency") == "fire_hydrant"))):
         for point in nodes:
             stations, offsets = station_offset_many(corridor.centerline,
@@ -314,15 +324,14 @@ def _no_parking_zones_on(corridor: Corridor, side: str, models: dict[str, "Inter
     return tuple(sorted(zones, key=lambda zone: zone.start_ft))
 
 
-def _corridor_nodes(models: dict[str, "IntersectionModel"], fetch, predicate) -> list[tuple]:
-    """Every OSM node near any member junction that matches, in state-plane feet, once each."""
+def _corridor_nodes(models: dict[str, "IntersectionModel"], layer: str, predicate) -> list[tuple]:
+    """Every OSM node of the members' areas in one layer that matches, in state-plane feet, once each."""
     from src.geometry.intersection import to_state_plane
 
     found = {}
-    for model in models.values():
-        for node in fetch(model.center_wgs84, radius_m=CORRIDOR_KERB_RADIUS_M):
-            if predicate(node.get("tags", {})):
-                found[(round(node["lon"], 7), round(node["lat"], 7))] = None
+    for node in _members_layer(models, layer):
+        if predicate(node.get("tags", {})):
+            found[(round(node["lon"], 7), round(node["lat"], 7))] = None
     return to_state_plane(list(found)) if found else []
 
 
@@ -395,27 +404,41 @@ def marked_parking_capacity(corridor: Corridor, facts: CorridorFacts, side: str,
     return stalls, measured_ft
 
 
-# How finely the OSM fetch window is walked along a road. Only used to say how much of the road
-# the fetch actually covered, so a couple of feet of edge either way does not matter.
+# How finely the corridor is walked to say how much of it lies inside the downloaded area. Only
+# used for that coverage figure, so a couple of feet of edge either way does not matter.
 _WINDOW_SAMPLE_FT = 10.0
 
 
 def osm_window_spans(corridor: Corridor,
                      models: dict[str, "IntersectionModel"]) -> tuple[tuple[float, float], ...]:
-    """The stretches of a road that fall inside the OSM fetch window round its member junctions.
+    """The stretches of a road that fall inside the OSM AREAS its member junctions were loaded from.
 
-    THE DENOMINATOR FOR ANYTHING COUNTED OUT OF OSM, and it exists because "nothing fetched" and
-    "nothing mapped" arrive identically. At the junction radius of 120 m the three circles on Broad
-    St leave 173 m outside every window; at CORRIDOR_KERB_RADIUS_M the same road is fully covered.
+    THE DENOMINATOR FOR ANYTHING COUNTED OUT OF OSM, and it exists because "nothing downloaded"
+    and "nothing mapped" arrive identically. An area is downloaded whole (osm_layers), so what is
+    left outside it is the stretch of a road that runs off the edge of the snapshot - a corridor
+    that leaves the borough's bbox reports the part past it as uncovered rather than as empty.
     Reported rather than believed.
     """
-    reach_ft = CORRIDOR_KERB_RADIUS_M / 0.3048
-    centres = [model.center_ft for model in models.values()]
+    from shapely.geometry import Polygon
+
+    from src.geometry.intersection import to_state_plane
+    from src.sources.osm_context import SNAPSHOT_AREAS
+
+    def area_ft(area: str) -> Polygon:
+        west, south, east, north = SNAPSHOT_AREAS[area]
+        # Densified edges: the state-plane grid is not the lon/lat one, so a box is not a box.
+        ring = ([(west + (east - west) * t / 20, south) for t in range(20)]
+                + [(east, south + (north - south) * t / 20) for t in range(20)]
+                + [(east - (east - west) * t / 20, north) for t in range(20)]
+                + [(west, north - (north - south) * t / 20) for t in range(20)])
+        return Polygon(to_state_plane(ring))
+
+    areas = [area_ft(area) for area in sorted({m.osm_area for m in models.values()})]
     n = max(int(np.ceil(corridor.length_ft / _WINDOW_SAMPLE_FT)) + 1, 2)
     inside = []
     for station in np.linspace(0.0, corridor.length_ft, n):
         point = corridor.centerline.interpolate(float(station))
-        if any(point.distance(centre) <= reach_ft for centre in centres):
+        if any(area.contains(point) for area in areas):
             inside.append((float(station) - _WINDOW_SAMPLE_FT / 2,
                            float(station) + _WINDOW_SAMPLE_FT / 2))
     return _intersect_spans(_merged_spans(inside), ((0.0, corridor.length_ft),))

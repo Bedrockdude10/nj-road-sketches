@@ -115,15 +115,6 @@ class IntersectionModel:
                 for span in self.leg_road_spans.get(leg_name, [])]
 
 
-class OSMDataUnavailableError(RuntimeError):
-    """Overpass could not be reached, so OSM-derived geometry can't be built.
-
-    Distinct from "OSM has no data here", which is a legitimate finding this project
-    reports and renders honestly. An unreachable server is not evidence of absence, and
-    treating it as such silently downgrades every OSM-derived value to a placeholder.
-    """
-
-
 class PavedKind(StrEnum):
     """What a piece of paved ground beside the carriageway IS.
 

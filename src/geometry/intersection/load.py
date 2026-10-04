@@ -72,9 +72,9 @@ def _build_corners(legs: dict, radius_ft: float, corner_radii: dict, kerb_lines:
     return fillets
 
 
-def _corner_radii_from_osm(center_wgs84: Point, center_ft: Point, legs: dict, fallback_ft: float) -> dict:
+def _corner_radii_from_osm(osm: dict, center_ft: Point, legs: dict, fallback_ft: float) -> dict:
     """Per-corner radii from traced kerbs, reporting what was and wasn't usable."""
-    radii, notes = corner_radii_from_kerbs(legs, _kerb_lines_ft(center_wgs84, center_ft), fallback_ft)
+    radii, notes = corner_radii_from_kerbs(legs, _kerb_lines_ft(osm, center_ft), fallback_ft)
     for note in notes:
         print(f"  NOTE: {note}")
     return radii
@@ -128,10 +128,8 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     # reports the projected part separately so a stall count does not move with a camera setting.
     scale = frame_scale()
     leg_lengths = {name: length * scale for name, length in surveyed_leg_lengths.items()}
-    # EVERYTHING BELOW FETCHES CONTEXT - kerbs, roads, driveways, parking, crossings - and it has
-    # to reach as far as this model is about to DRAW, not to a fixed radius. A per-leg
-    # working_length_ft is invisible to the frame scale, so without this a long leg is drawn
-    # through empty ground; see src/render/frame.py:_drawn_reach_ft.
+    # How far this model is about to DRAW, which the camera's frame is sized from - see
+    # src/render/frame.py:_drawn_reach_ft. It decides what is VISIBLE, never what exists.
     set_drawn_reach_ft(max(leg_lengths.values(), default=0.0))
     # ...and that scaled length is the WHOLE story: no second, shorter span travels with the Leg
     # for treatments to be sized over. A treatment applies to the street in the drawing, so what
@@ -164,17 +162,17 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
             legs[name] = Leg(name=name, centerline=piece,
                               curb_to_curb_ft=legs_cfg[name].get("curb_to_curb_ft"))
 
-    kerb_lines = _kerb_lines_ft(center, center_ft)
+    kerb_lines = _kerb_lines_ft(osm, center_ft)
     for name, width_ft in _widths_from_traced_kerbs(legs, kerb_lines, legs_cfg).items():
         legs[name] = Leg(name=name, centerline=legs[name].centerline, curb_to_curb_ft=width_ft)
 
     # The NEAR set for the fit - ways around the junction, not the wide set that
     # _extend_curbs_with_far_tracing adds afterwards.
-    kerb_ways = kerb_lines_with_tags_ft(center, center_ft)
+    kerb_ways = kerb_lines_with_tags_ft(osm, near=center_ft)
     # Twice: the first pass collects traced vertices with a rough assignment; the corrected
     # width and centre then change which vertices belong to which leg side, so it is redone.
     near_coverage = _fit_legs_to_traced_kerbs(legs, kerb_ways, center_ft, legs_cfg)
-    _extend_curbs_with_far_tracing(legs, center, center_ft, near_coverage)
+    _extend_curbs_with_far_tracing(legs, osm, center_ft, near_coverage)
     # Last, on the settled widths and the fullest tracing: the alignment is bent onto the
     # carriageway centre over the WHOLE leg. Everything below measures in this frame - the
     # road match, the cross streets, the corner fillets - so it happens before any of them.
@@ -183,7 +181,7 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     # centring each on its own kerbs cannot do. Both run before anything below measures in
     # this frame.
     _join_through_legs(legs)
-    leg_road_spans = _match_legs_to_osm_roads(legs, center, center_ft)
+    leg_road_spans = _match_legs_to_osm_roads(legs, osm)
     # The way covering MOST of the leg carries its whole-leg tags. Not the way nearest the
     # leg's midpoint, which is what this used to pick: on a split leg those differ, and the
     # nearest-to-midpoint rule has no claim to describing the leg as a whole.
@@ -204,7 +202,7 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     corner_radii = {}
     corner_fillets = {}
     if radius_ft:
-        corner_radii = _corner_radii_from_osm(center, center_ft, legs, radius_ft)
+        corner_radii = _corner_radii_from_osm(osm, center_ft, legs, radius_ft)
         corner_fillets = _build_corners(legs, radius_ft, corner_radii, kerb_lines)
 
     # A site with no parcels layer is a site in a county whose parcels this project has not
@@ -233,11 +231,10 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
         leg_osm_aligned=leg_osm_aligned,
         parcels=parcels,
         corner_parcels=corner_parcels,
-        paved_surfaces=_paved_surfaces_ft(center, corner_fillets),
+        paved_surfaces=_paved_surfaces_ft(osm, corner_fillets),
         surveyed_leg_lengths=surveyed_leg_lengths,
-        cross_streets=cross_streets_ft(center, center_ft, legs),
-        # WHERE THE CORRIDOR ENDS, from the boundary rather than from the drawing - resolved at
-        # the same radius everything else along the street is, so a leg drawn to the line has
-        # the line in hand. See src/geometry/intersection/municipality.py.
-        municipal_limits_ft=municipal_limits_ft(center, legs),
+        cross_streets=cross_streets_ft(osm, center_ft, legs),
+        # WHERE THE CORRIDOR ENDS, from the boundary rather than from the drawing - the ring of
+        # the municipality holding the junction node. See src/geometry/intersection/municipality.py.
+        municipal_limits_ft=municipal_limits_ft(osm, center, legs),
     )

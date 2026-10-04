@@ -43,9 +43,7 @@ def buffer_point_wgs84(point: Point, radius_m: float) -> tuple[float, float, flo
     """Buffer a WGS84 point by radius_m meters (via a local UTM projection) and
     return a WGS84 bbox as (minx, miny, maxx, maxy).
 
-    Memoized on (lon, lat, radius): src/sources/osm_context.py calls this twice per OSM fetch
-    (once to bound the layer, once in assert_within_snapshot) and there are eight fetchers
-    called repeatedly per site, all about the same centre. See _utm_crs_at.
+    Memoized on (lon, lat, radius), since the same buffer is asked for repeatedly. See _utm_crs_at.
     """
     return _buffer_bounds_wgs84(point.x, point.y, float(radius_m))
 
