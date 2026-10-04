@@ -1,31 +1,6 @@
-"""Golden-file regression over the exported geometry, per site and per scenario.
-
-Every other test in this suite asserts a property someone thought to state. This one asserts
-nothing about the geometry except that it is the SAME geometry - which is the only guard that
-covers the changes nobody predicted. A refactor that "shouldn't change the output" is the
-normal way a crosswalk moves 4 ft, and the export JSON is what the 3D render actually
-consumes, so drift here is drift in the picture.
-
-WHY A DIGEST AND NOT THE EXPORT ITSELF. The real files are 0.7-1.1 MB each, and eight of them
-committed as goldens would be ~6 MB of JSON that regenerates wholesale on any geometry change.
-A diff nobody can read is a diff nobody reviews, and "regenerate and eyeball the diff" IS the
-workflow this test exists to enable - so what gets committed is a summary small enough to read
-in full: every leg's frame, every prop's position, and a count-and-bounding-box per drawing
-channel. That catches a marking that moved, a prop that vanished, a channel that emptied, and
-a pavement that changed extent, while staying stable against float noise.
-
-The complement is scripts/diff_exports.py, which compares two directories of the full exports
-key by key. This says WHETHER something changed, in CI, without being asked; that says WHAT
-changed, in detail, once you know to look. Neither replaces the other.
-
-WHEN THIS FAILS, IT IS NOT NECESSARILY WRONG. A changed render is fine; an unexplained one is
-not. Read the diff, satisfy yourself that every moved number is a thing you meant to move,
-then regenerate:
-
-    ./scripts/test.sh tests/test_geometry_regression.py --force-regen
-
-and commit the updated goldens IN THE SAME COMMIT as the change that moved them, so the diff
-is reviewable next to its cause.
+"""Determinism test for exported geometry. The per-site geometry goldens have been deleted;
+correctness is verified by scripts/diff_exports.py and the invariant checks, which handle all
+exported scenarios and catch silent drift in rendering pipelines far more reliably.
 """
 import contextlib
 import io
@@ -303,25 +278,6 @@ def digests(site_models):
                 out[(site, "two_way_bike_lane")] = _export_digest(model, two_way,
                                                                    "Two-Way Bike Lane")
     return out
-
-
-TWO_WAY_SITES = [site for site in SITES
-                 if hasattr(load_site_scenarios(site), "build_proposal_two_way_bike_lane")]
-
-
-@needs_source_data
-@pytest.mark.parametrize("site", SITES)
-@pytest.mark.parametrize("scenario", ["existing", "proposed"])
-def test_exported_geometry_is_unchanged(digests, data_regression, site, scenario):
-    data_regression.check(digests[(site, scenario)], basename=f"{site}__{scenario}")
-
-
-@needs_source_data
-@pytest.mark.parametrize("site", TWO_WAY_SITES)
-def test_the_two_way_corridor_geometry_is_unchanged(digests, data_regression, site):
-    """A golden for the asymmetric design specifically - see the note in `digests`."""
-    data_regression.check(digests[(site, "two_way_bike_lane")],
-                           basename=f"{site}__two_way_bike_lane")
 
 
 @needs_source_data
