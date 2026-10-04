@@ -10,7 +10,9 @@ from pathlib import Path
 
 import bpy
 
-from blender_materials import make_material, make_retroreflective_material
+import blender_materials
+import blender_prims as prims
+from blender_materials import make_retroreflective_material
 
 # MUTCD-ish colors for procedurally-built signage (no CC0 traffic-sign model
 # was found - see README.md "Phase 4 fidelity"). Real geometric shape/color,
@@ -147,12 +149,10 @@ def add_streetlight(name: str, position: tuple, heading_deg: float, template, po
     # Procedural fallback: a plain pole + small head, used if the Poly Haven
     # model couldn't be fetched (no network) - not what ships when online.
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.08, depth=4.5, location=(x, y, 2.25))
-    pole = bpy.context.active_object
+    pole = prims.add_cylinder(radius=0.08, depth=4.5, location=(x, y, 2.25))
     pole.name = f"{name}_pole"
     pole.data.materials.append(pole_mat)
-    bpy.ops.mesh.primitive_cube_add(size=0.35, location=(x, y, 4.6))
-    head = bpy.context.active_object
+    head = prims.add_cube(size=0.35, location=(x, y, 4.6))
     head.name = f"{name}_head"
     head.scale = (1, 1, 0.5)
     head.data.materials.append(head_mat)
@@ -166,17 +166,15 @@ def _add_post_sign(name: str, position: tuple, heading_deg: float, n_sides: int,
     red) and the school zone sign (n_sides=5, yellow-green) - real MUTCD shapes
     and colors, just not a downloaded model (no CC0 traffic-sign source found)."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
-    post = bpy.context.active_object
+    post = prims.add_cylinder(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
 
-    bpy.ops.mesh.primitive_cylinder_add(radius=plate_radius, depth=SIGN_PLATE_THICKNESS_M,
-                                         vertices=n_sides, location=(x, y, 2.15))
-    plate = bpy.context.active_object
+    plate = prims.add_cylinder(radius=plate_radius, depth=SIGN_PLATE_THICKNESS_M,
+                                vertices=n_sides, location=(x, y, 2.15))
     plate.name = f"{name}_plate"
     plate.rotation_euler = (math.radians(90), 0, math.radians(heading_deg))
-    plate_mat = make_material(f"{name}_plate_mat", plate_color, roughness=0.35)
+    plate_mat = blender_materials.shared_material(f"{name}_plate_mat", plate_color, roughness=0.35)
     plate.data.materials.append(plate_mat)
     return post
 
@@ -229,8 +227,7 @@ def add_vehicle_signal_head(name: str, position: tuple, heading_deg: float, hous
     face = math.radians(heading_deg)
     fx, fy = math.cos(face), math.sin(face)
 
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, z))
-    housing = bpy.context.active_object
+    housing = prims.add_cube(size=1.0, location=(x, y, z))
     housing.name = f"{name}_housing"
     # square cross-section - housing orientation doesn't matter visually
     housing.scale = (VEHICLE_SIGNAL_HEAD_WIDTH_M, VEHICLE_SIGNAL_HEAD_WIDTH_M,
@@ -239,11 +236,10 @@ def add_vehicle_signal_head(name: str, position: tuple, heading_deg: float, hous
 
     for i, color in enumerate(VEHICLE_SIGNAL_LENS_COLORS):
         lens_pos = (x + fx * 0.17, y + fy * 0.17, z + 0.24 - i * 0.24)
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.09, depth=0.03, vertices=16, location=lens_pos)
-        lens = bpy.context.active_object
+        lens = prims.add_cylinder(radius=0.09, depth=0.03, vertices=16, location=lens_pos)
         lens.name = f"{name}_lens_{i}"
         lens.rotation_euler = (math.radians(90), 0, face)  # same flat-disc-facing-heading trick as sign plates
-        lens.data.materials.append(make_material(f"{name}_lens_{i}_mat", color, roughness=0.3))
+        lens.data.materials.append(blender_materials.shared_material(f"{name}_lens_{i}_mat", color, roughness=0.3))
     return housing
 
 
@@ -264,11 +260,10 @@ def add_traffic_signal_pole(name: str, position: tuple, head_facing_deg: float, 
     arm_length_m is computed upstream (src/render/props.py) from the real leg width
     this arm actually spans, not hardcoded."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(
-        radius=TRAFFIC_SIGNAL_POLE_RADIUS_M, depth=TRAFFIC_SIGNAL_POLE_HEIGHT_M,
-        location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
-    )
-    pole = bpy.context.active_object
+    pole = prims.add_cylinder(
+radius=TRAFFIC_SIGNAL_POLE_RADIUS_M, depth=TRAFFIC_SIGNAL_POLE_HEIGHT_M,
+location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
+)
     pole.name = f"{name}_pole"
     pole.data.materials.append(pole_mat)
 
@@ -276,9 +271,8 @@ def add_traffic_signal_pole(name: str, position: tuple, head_facing_deg: float, 
     dx, dy = math.cos(arm_dir), math.sin(arm_dir)
     arm_z = TRAFFIC_SIGNAL_POLE_HEIGHT_M - 0.4
     arm_center = (x + dx * arm_length_m / 2, y + dy * arm_length_m / 2, arm_z)
-    bpy.ops.mesh.primitive_cylinder_add(radius=MAST_ARM_RADIUS_M, depth=arm_length_m,
-                                         location=arm_center)
-    arm = bpy.context.active_object
+    arm = prims.add_cylinder(radius=MAST_ARM_RADIUS_M, depth=arm_length_m,
+                              location=arm_center)
     arm.name = f"{name}_arm"
     arm.rotation_euler = (0, math.radians(90), arm_dir)  # lay the cylinder flat, then point it along arm_dir
     arm.data.materials.append(pole_mat)
@@ -297,16 +291,14 @@ def add_pedestrian_signal_head(name: str, position: tuple, heading_deg: float, o
     at this same position (same pole - see sites/README.md `signals` block)."""
     x, y = position
     if own_post:
-        bpy.ops.mesh.primitive_cylinder_add(
-            radius=PED_SIGNAL_POST_RADIUS_M, depth=PED_SIGNAL_MOUNT_HEIGHT_M,
-            location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M / 2)
-        )
-        post = bpy.context.active_object
+        post = prims.add_cylinder(
+  radius=PED_SIGNAL_POST_RADIUS_M, depth=PED_SIGNAL_MOUNT_HEIGHT_M,
+  location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M / 2)
+)
         post.name = f"{name}_post"
         post.data.materials.append(post_mat)
 
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M))
-    head = bpy.context.active_object
+    head = prims.add_cube(size=1.0, location=(x, y, PED_SIGNAL_MOUNT_HEIGHT_M))
     head.name = f"{name}_head"
     head.scale = (PED_SIGNAL_HEAD_WIDTH_M, PED_SIGNAL_HEAD_WIDTH_M, PED_SIGNAL_HEAD_HEIGHT_M)
     head.rotation_euler = (0, 0, math.radians(heading_deg))
@@ -321,19 +313,17 @@ def add_no_turn_on_red_sign(name: str, position: tuple, heading_deg: float, post
     instead of a regular polygon - stop/school-zone signs are octagon/pentagon,
     NTOR signs are rectangular."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
-    post = bpy.context.active_object
+    post = prims.add_cylinder(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
 
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, 2.2))
-    plate = bpy.context.active_object
+    plate = prims.add_cube(size=1.0, location=(x, y, 2.2))
     plate.name = f"{name}_plate"
     # thin along local X (the facing/normal axis, before the Z rotation below)
     plate.scale = (RECTANGULAR_PLATE_THICKNESS_M, RECTANGULAR_PLATE_WIDTH_M,
                    RECTANGULAR_PLATE_HEIGHT_M)
     plate.rotation_euler = (0, 0, math.radians(heading_deg))
-    plate_mat = make_material(f"{name}_plate_mat", NO_TURN_ON_RED_WHITE, roughness=0.35)
+    plate_mat = blender_materials.shared_material(f"{name}_plate_mat", NO_TURN_ON_RED_WHITE, roughness=0.35)
     plate.data.materials.append(plate_mat)
     return post
 
@@ -354,9 +344,8 @@ def add_rrfb(name: str, position: tuple, heading_deg: float, post_mat):
     opposite curb - only one assembly is modeled per exported prop entry (see
     src/geometry/treatments/extras.py:ExtraProp)."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=RRFB_POST_RADIUS_M, depth=RRFB_MOUNT_HEIGHT_M,
-                                         location=(x, y, RRFB_MOUNT_HEIGHT_M / 2))
-    post = bpy.context.active_object
+    post = prims.add_cylinder(radius=RRFB_POST_RADIUS_M, depth=RRFB_MOUNT_HEIGHT_M,
+                               location=(x, y, RRFB_MOUNT_HEIGHT_M / 2))
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
 
@@ -364,24 +353,22 @@ def add_rrfb(name: str, position: tuple, heading_deg: float, post_mat):
     # axis (local X, rotated first) before the whole assembly is turned to face
     # heading_deg (local Z, rotated last) - same two-step convention as the
     # octagon/pentagon sign plates in _add_post_sign, generalized to a square.
-    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, RRFB_MOUNT_HEIGHT_M + 0.15))
-    sign = bpy.context.active_object
+    sign = prims.add_cube(size=1.0, location=(x, y, RRFB_MOUNT_HEIGHT_M + 0.15))
     sign.name = f"{name}_sign"
     sign.scale = (RRFB_PLATE_THICKNESS_M, RRFB_PLATE_WIDTH_M, RRFB_PLATE_WIDTH_M)
     sign.rotation_euler = (math.radians(45), 0, math.radians(heading_deg))
-    sign_mat = make_material(f"{name}_sign_mat", RRFB_SIGN_YELLOW_GREEN, roughness=0.35)
+    sign_mat = blender_materials.shared_material(f"{name}_sign_mat", RRFB_SIGN_YELLOW_GREEN, roughness=0.35)
     sign.data.materials.append(sign_mat)
 
     face = math.radians(heading_deg)
     fx, fy = math.cos(face), math.sin(face)
     for i in range(2):
         beacon_z = RRFB_MOUNT_HEIGHT_M - 0.15 - i * 0.15
-        bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x + fx * 0.05, y + fy * 0.05, beacon_z))
-        beacon = bpy.context.active_object
+        beacon = prims.add_cube(size=1.0, location=(x + fx * 0.05, y + fy * 0.05, beacon_z))
         beacon.name = f"{name}_beacon_{i}"
         beacon.scale = (0.03, 0.35, 0.08)
         beacon.rotation_euler = (0, 0, face)
-        beacon_mat = make_material(f"{name}_beacon_{i}_mat", RRFB_BEACON_AMBER, roughness=0.3)
+        beacon_mat = blender_materials.shared_material(f"{name}_beacon_{i}_mat", RRFB_BEACON_AMBER, roughness=0.3)
         beacon.data.materials.append(beacon_mat)
     return post
 
@@ -416,17 +403,15 @@ def add_bollard(name: str, position: tuple):
     vanishes into the post, which is the opposite of what the object is for.
     """
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=BOLLARD_RADIUS_M, depth=BOLLARD_HEIGHT_M,
-                                         location=(x, y, BOLLARD_HEIGHT_M / 2))
-    post = bpy.context.active_object
+    post = prims.add_cylinder(radius=BOLLARD_RADIUS_M, depth=BOLLARD_HEIGHT_M,
+                               location=(x, y, BOLLARD_HEIGHT_M / 2))
     post.name = f"{name}_post"
-    post.data.materials.append(make_material(f"{name}_post_mat", BOLLARD_SAFETY_ORANGE, roughness=0.5))
+    post.data.materials.append(blender_materials.shared_material(f"{name}_post_mat", BOLLARD_SAFETY_ORANGE, roughness=0.5))
 
     band_mat = make_retroreflective_material(f"{name}_band_mat", BOLLARD_REFLECTIVE_WHITE)
     for i, band_z in enumerate(bollard_band_centres_m()):
-        bpy.ops.mesh.primitive_cylinder_add(radius=BOLLARD_RADIUS_M * BOLLARD_BAND_RADIUS_SCALE,
-                                             depth=BOLLARD_BAND_HEIGHT_M, location=(x, y, band_z))
-        band = bpy.context.active_object
+        band = prims.add_cylinder(radius=BOLLARD_RADIUS_M * BOLLARD_BAND_RADIUS_SCALE,
+                                   depth=BOLLARD_BAND_HEIGHT_M, location=(x, y, band_z))
         band.name = f"{name}_band_{i}"
         band.data.materials.append(band_mat)
     return post
@@ -467,22 +452,20 @@ def add_pedestrian_pushbutton(name: str, position: tuple, heading_deg: float, po
     crossings are actuated and where the poles stand is real; the housing's size and
     mounting height are generic."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=PUSHBUTTON_POST_RADIUS_M, depth=PUSHBUTTON_POST_HEIGHT_M,
-                                         location=(x, y, PUSHBUTTON_POST_HEIGHT_M / 2))
-    post = bpy.context.active_object
+    post = prims.add_cylinder(radius=PUSHBUTTON_POST_RADIUS_M, depth=PUSHBUTTON_POST_HEIGHT_M,
+                               location=(x, y, PUSHBUTTON_POST_HEIGHT_M / 2))
     post.name = f"{name}_post"
     post.data.materials.append(post_mat)
 
     face = math.radians(heading_deg)
     fx, fy = math.cos(face), math.sin(face)
-    bpy.ops.mesh.primitive_cube_add(size=1.0,
-                                     location=(x + fx * 0.05, y + fy * 0.05, PUSHBUTTON_POST_HEIGHT_M - 0.1))
-    housing = bpy.context.active_object
+    housing = prims.add_cube(size=1.0,
+                              location=(x + fx * 0.05, y + fy * 0.05, PUSHBUTTON_POST_HEIGHT_M - 0.1))
     housing.name = f"{name}_housing"
     housing.scale = (PUSHBUTTON_HOUSING_DEPTH_M, PUSHBUTTON_HOUSING_WIDTH_M,
                      PUSHBUTTON_HOUSING_HEIGHT_M)
     housing.rotation_euler = (0, 0, face)
-    housing.data.materials.append(make_material(f"{name}_housing_mat", PUSHBUTTON_HOUSING_YELLOW, roughness=0.4))
+    housing.data.materials.append(blender_materials.shared_material(f"{name}_housing_mat", PUSHBUTTON_HOUSING_YELLOW, roughness=0.4))
     return post
 
 
@@ -499,16 +482,15 @@ def add_tactile_paving_pad(name: str, position: tuple, heading_deg: float,
     the road. Dimensions arrive with the prop for the same reason: that offset is half the
     depth, so placement and geometry have to agree on what the depth is."""
     x, y = position
-    bpy.ops.mesh.primitive_cube_add(size=1.0,
-                                     location=(x, y, TACTILE_PAD_Z_BASE + TACTILE_PAD_HEIGHT_M / 2))
-    pad = bpy.context.active_object
+    pad = prims.add_cube(size=1.0,
+                          location=(x, y, TACTILE_PAD_Z_BASE + TACTILE_PAD_HEIGHT_M / 2))
     pad.name = f"{name}_pad"
     # heading_deg runs ALONG the crossing, so local X is the pad's depth (into the
     # footway) and local Y its width (along the curb) - transposing these made the
     # pad long in the wrong direction and pushed it further into the road.
     pad.scale = (depth_m, width_m, TACTILE_PAD_HEIGHT_M)
     pad.rotation_euler = (0, 0, math.radians(heading_deg))
-    pad.data.materials.append(make_material(f"{name}_pad_mat", TACTILE_PAD_YELLOW, roughness=0.6))
+    pad.data.materials.append(blender_materials.shared_material(f"{name}_pad_mat", TACTILE_PAD_YELLOW, roughness=0.6))
     return pad
 
 
@@ -517,24 +499,21 @@ def add_fire_hydrant(name: str, position: tuple):
     position. Background detail, but it is also one of the things that genuinely
     constrains where a curb extension or a parking stall can go."""
     x, y = position
-    bpy.ops.mesh.primitive_cylinder_add(radius=HYDRANT_RADIUS_M, depth=HYDRANT_HEIGHT_M,
-                                         location=(x, y, HYDRANT_HEIGHT_M / 2))
-    barrel = bpy.context.active_object
+    barrel = prims.add_cylinder(radius=HYDRANT_RADIUS_M, depth=HYDRANT_HEIGHT_M,
+                                 location=(x, y, HYDRANT_HEIGHT_M / 2))
     barrel.name = f"{name}_barrel"
-    hydrant_mat = make_material(f"{name}_mat", HYDRANT_RED, roughness=0.45)
+    hydrant_mat = blender_materials.shared_material(f"{name}_mat", HYDRANT_RED, roughness=0.45)
     barrel.data.materials.append(hydrant_mat)
 
-    bpy.ops.mesh.primitive_uv_sphere_add(radius=0.1, location=(x, y, HYDRANT_HEIGHT_M))
-    bonnet = bpy.context.active_object
+    bonnet = prims.add_uv_sphere(radius=0.1, location=(x, y, HYDRANT_HEIGHT_M))
     bonnet.name = f"{name}_bonnet"
     bonnet.scale = (1.0, 1.0, 0.55)
     bonnet.data.materials.append(hydrant_mat)
 
     for i, sign in enumerate((1, -1)):
-        bpy.ops.mesh.primitive_cylinder_add(radius=0.045, depth=0.16,
-                                             location=(x + sign * 0.1, y, HYDRANT_HEIGHT_M * 0.62),
-                                             rotation=(0, math.radians(90), 0))
-        outlet = bpy.context.active_object
+        outlet = prims.add_cylinder(radius=0.045, depth=0.16,
+                                     location=(x + sign * 0.1, y, HYDRANT_HEIGHT_M * 0.62),
+                                     rotation=(0, math.radians(90), 0))
         outlet.name = f"{name}_outlet_{i}"
         outlet.data.materials.append(hydrant_mat)
     return barrel
@@ -593,13 +572,11 @@ def build_tree_proxy(trunk_mat, foliage_mat):
     realistic photoscanned assets (multi-material, alpha-masked foliage cards)
     disproportionately heavy for background dressing instanced many times over
     at this render's scale/distance. See README.md "Phase 4 fidelity"."""
-    bpy.ops.mesh.primitive_cylinder_add(radius=0.15, depth=2.0, vertices=6, location=(0, 0, 1.0))
-    trunk = bpy.context.active_object
+    trunk = prims.add_cylinder(radius=0.15, depth=2.0, vertices=6, location=(0, 0, 1.0))
     trunk.name = "tree_trunk"
     trunk.data.materials.append(trunk_mat)
 
-    bpy.ops.mesh.primitive_cone_add(radius1=1.3, depth=3.0, vertices=8, location=(0, 0, 3.3))
-    foliage = bpy.context.active_object
+    foliage = prims.add_cone(radius1=1.3, depth=3.0, vertices=8, location=(0, 0, 3.3))
     foliage.name = "tree_foliage"
     foliage.data.materials.append(foliage_mat)
 
