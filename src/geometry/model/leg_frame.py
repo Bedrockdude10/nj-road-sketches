@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 import numpy as np
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from shapely.ops import linemerge
 
 
 
@@ -66,8 +67,47 @@ class Leg:
     def __post_init__(self):
         if self.curb_to_curb_ft is not None:
             half = self.curb_to_curb_ft / 2
-            self.left_curb = self.centerline.offset_curve(half)
-            self.right_curb = self.centerline.offset_curve(-half)
+            self.left_curb = offset_curb_line(self.centerline, half)
+            self.right_curb = offset_curb_line(self.centerline, -half)
+
+
+def offset_curb_line(centerline: LineString, offset_ft: float) -> LineString:
+    """`centerline` offset `offset_ft` to one side (left positive), as ONE LineString.
+
+    GEOS 3.13's offset_curve SPLITS a simple, smooth line into touching pieces. Measured: a
+    355 ft centreline of twelve 5 ft segments and then one 295 ft segment, turning at most 0.3
+    degrees at any vertex, offset 19.93 ft comes back as a MultiLineString of [5.0 ft, 349.96
+    ft] with a gap of 0.0 ft between them - 15 of 800 random lines of that shape do it. Nothing
+    is missing and nothing overlaps: the raw offset overlaps itself by a few thousandths of a
+    foot at the vertex where the segment length jumps, and the cleaner cuts there. Every reader
+    of a curb (substring, project, .coords) wants a LineString, and the one that met a
+    MultiLineString crashed in build_corner_fillets, three modules away.
+
+    So the pieces are joined back, not worked around. linemerge on pieces that touch end to end
+    is lossless, which `join_style='mitre'` is not - it changes the outside of every bend, so
+    every leg that never split would move - and it is not immune either (it still split one of
+    those 15). Nor is a station-based offset the same thing: it places a point per VERTEX and
+    leaves a step at each, where this is the same line offset_curve always drew. The merged line
+    is turned to run the way the centreline does, because curb readers take coords[0] as the
+    junction end and linemerge is free to return either direction.
+
+    Refuses a result that does not join, which is a REAL gap - the offset exceeds the radius of
+    a bend and the inside has collapsed - rather than handing back a line that is not the curb.
+    """
+    curb = centerline.offset_curve(offset_ft)
+    if not isinstance(curb, MultiLineString):
+        return curb
+    curb = linemerge(curb)
+    if not isinstance(curb, LineString) or curb.is_empty:
+        raise ValueError(
+            f"offsetting a {centerline.length:.0f} ft centreline {offset_ft:+.2f} ft left "
+            f"{curb.geom_type} rather than one line - the offset is larger than a bend can carry.")
+    # A line that was never split keeps offset_curve's own direction, so only the merged one is
+    # turned: its first coordinate is the end nearer the centreline's start.
+    start = Point(centerline.coords[0])
+    if Point(curb.coords[-1]).distance(start) < Point(curb.coords[0]).distance(start):
+        curb = LineString(curb.coords[::-1])
+    return curb
 
 
 def unit_vector(v: np.ndarray) -> np.ndarray:

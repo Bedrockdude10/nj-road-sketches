@@ -160,6 +160,10 @@ def _traced_cross_section(leg, legs=None) -> tuple[np.ndarray, np.ndarray] | Non
     right = curb_offsets_at_stations(leg, "right", stations)
     if left is None or right is None:
         return None
+    if (left <= 0).any() or (right >= 0).any():
+        # Not a cross-section: two kerbs on one side of the alignment, or crossed, measure a
+        # width that is zero or negative or merely wrong. See _curbs_hold_their_sides.
+        return None
     return left - right, (left + right) / 2
 
 
@@ -682,6 +686,61 @@ def _fit_legs_to_traced_kerbs(legs: dict, kerb_ways: list, center_ft: Point, leg
 UNTRACED_CORNER_THRESHOLD_FT = 35.0
 
 
+def _tracing_supports_the_extension(points: list) -> bool:
+    """Whether a through street's curb may be carried back to the junction from these vertices.
+
+    Only as far as the tracing it is read off: the same rule the OUTWARD end already follows (a
+    trend is carried no further than the baseline it was measured over). prospect_street_1 has its
+    left kerb traced over 614-620 ft and was carried 614 ft inward on that slope, to -34 ft at the
+    junction; its right kerb, traced 570-672 ft, was carried 570 ft and the two "measured" a width
+    of 37.3 ft where the vertices themselves say 27. A gap longer than the evidence is a
+    fabrication, so the curb starts where it was traced and the leg is measured from what is there.
+    """
+    stations = [station for station, _offset in points]
+    return min(stations) <= max(stations) - min(stations)
+
+
+def _curbs_hold_their_sides(leg, curbs: dict, quiet: bool) -> bool:
+    """Whether the curbs just built for `leg` can be the two edges of ONE street.
+
+    A left kerb has to stay left of the alignment and a right kerb right of it, at every vertex.
+    A pair that does not is not a cross-section, whatever number comes out of subtracting them:
+    prospect_street_1 (643 ft) is traced by 3 left vertices at 614-620 ft and 5 right ones at
+    570-672 ft, and a through street's curb is carried back to the junction by the slope those
+    vertices show - here a slope read off 6 ft of kerb, run 614 ft inward. The left kerb came
+    out at -34.0 ft at the junction and +10.6 ft at the far end, the pair measured -9.4 ft wide,
+    and the export died on a leg of negative width. The assignment cannot see it: it hands a
+    vertex to a side by the sign of its offset, so every VERTEX is on its side and only the line
+    drawn between them is not.
+
+    Refused whole, not clamped and not patched: if one kerb of a leg crosses the centreline the
+    other was read against the same evidence and the same alignment, and a width off a pair
+    that is half wrong is not half right. The leg falls back to what an untraced one has.
+    """
+    for side, (curb, _points) in curbs.items():
+        _stations, offsets = station_offset_many(leg.centerline, np.asarray(curb.coords, dtype=float))
+        wrong_side = offsets <= 0 if side == "left" else offsets >= 0
+        if wrong_side.any():
+            if not quiet:
+                print(f"  NOTE: {leg.name}'s traced {side} kerb runs from {offsets[0]:+.1f} to "
+                      f"{offsets[-1]:+.1f} ft off its alignment and crosses it ({wrong_side.sum()} of "
+                      f"{len(offsets)} vertices on the wrong side), so the traced kerbs here are not the "
+                      f"two edges of one street. Refused: the leg is drawn {leg.curb_to_curb_ft:.1f} ft "
+                      f"wide from its alignment, as an untraced one is.")
+            return False
+    return True
+
+
+def _fall_back_to_offset_curbs(leg) -> None:
+    """Put `leg` back to what a leg nobody traced has: both curbs an offset from its alignment."""
+    from src.geometry.model.leg_frame import offset_curb_line
+
+    half = leg.curb_to_curb_ft / 2
+    leg.left_curb = offset_curb_line(leg.centerline, half)
+    leg.right_curb = offset_curb_line(leg.centerline, -half)
+    leg.traced_sides.clear()
+
+
 def _apply_traced_curb_lines(legs: dict, kerb_ways: list, center_ft: Point,
                               quiet: bool = False,
                               ratio_bounds: tuple[float, float] | None = None
@@ -715,13 +774,20 @@ def _apply_traced_curb_lines(legs: dict, kerb_ways: list, center_ft: Point,
     # Which kerbs have no corner return at their junction end, and so should be extended in
     # to the node rather than stopping where the tracing happens to stop.
     straight_through = through_street_sides(legs)
-    for name, sides in assigned.items():
+    for name, sides in list(assigned.items()):
         leg = legs[name]
+        curbs = {}
         for side, points in sides.items():
             curb = curb_line_from_points(points, leg, leg.centerline.length,
-                                          extend_to_junction=(name, side) in straight_through)
-            if curb is None:
-                continue
+                                          extend_to_junction=(name, side) in straight_through
+                                          and _tracing_supports_the_extension(points))
+            if curb is not None:
+                curbs[side] = (curb, points)
+        if not _curbs_hold_their_sides(leg, curbs, quiet):
+            _fall_back_to_offset_curbs(leg)
+            del assigned[name]      # nothing of it is traced now, and the gap report below must say so
+            continue
+        for side, (curb, points) in curbs.items():
             setattr(leg, f"{side}_curb", curb)
             leg.traced_sides.add(side)
             near, far = min(p[0] for p in points), max(p[0] for p in points)
