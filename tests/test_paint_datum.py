@@ -104,16 +104,16 @@ class TestCentreProfile:
         assert all(s == "state" for s in result.source)
 
     def test_D8_mixed_sources_priority_kerbs_then_state(self):
-        """D8: left traced 0..100, right traced 0..200, state at 1; kerbs 0..100, state 100..200."""
+        """D8: left traced 0..100, right traced 0..200, state at -3; kerbs 0..100, state 100..200."""
         leg = straight()
         trace(leg, "left", [(0, 20), (100, 20)])
         trace(leg, "right", [(0, -16), (200, -16)])
-        leg.state_centreline = LineString([(0, 1), (200, 1)])
+        leg.state_centreline = LineString([(0, -3), (200, -3)])
 
         result = centre_profile(leg, S)
         # Stations 0-100 (11 stations): kerbs, midpoint = (20-16)/2 = 2
-        # Stations 110-200 (10 stations): state = 1
-        expected = [2.0] * 11 + [1.8, 1.6, 1.4, 1.2, 1.0] + [1.0] * 5
+        # Stations 110-200 (10 stations): state = -3, tapered 0.20 ft/ft off station 100's 2.0
+        expected = [2.0] * 11 + [0.0, -2.0] + [-3.0] * 8
         np.testing.assert_allclose(result.offsets_ft, expected, atol=0.01)
         assert list(result.source)[:11] == ["kerbs"] * 11
         assert all(s == "state" for s in result.source[11:])

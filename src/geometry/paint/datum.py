@@ -105,54 +105,22 @@ def _state(leg, s: np.ndarray) -> np.ndarray:
 
 
 def _smooth_seams(s: np.ndarray, offsets: np.ndarray, rank: np.ndarray) -> np.ndarray:
-    """Smooth seams between different source ranks.
-    
-    For each worse-rank station, interpolate from the nearest better-rank station's value
-    towards this station's value, limited by MAX_KERB_FOLLOW_TAPER per unit distance.
+    """Clip each station to within MAX_KERB_FOLLOW_TAPER x distance of the nearest station with a
+    better source, best ranks first, so a fallback meets better data on a taper instead of a
+    step. Rank-0 stations are never moved.
     """
-    result = offsets.copy()
-    unique_ranks = np.unique(rank[np.isfinite(rank)])
-    
-    for r in sorted(unique_ranks):
-        if r == 0:
+    out = np.asarray(offsets, dtype=float).copy()
+    for r in sorted({int(x) for x in np.unique(rank)} - {0}):
+        better = np.flatnonzero(rank < r)
+        if better.size == 0:
             continue
-        
-        # Find stations at this rank
-        at_rank = np.where(rank == r)[0]
-        if len(at_rank) == 0:
-            continue
-        
-        # For each station at rank r, find nearest station with rank < r
-        for i in at_rank:
-            if not np.isfinite(result[i]):
-                continue
-            
-            # Find best rank stations
-            better = np.where(rank < r)[0]
-            if len(better) == 0:
-                continue
-            
-            # Find nearest by distance
-            distances = np.abs(s[better] - s[i])
-            nearest_idx = better[np.argmin(distances)]
-            d = distances[np.argmin(distances)]
-            
-            # Compute interpolation based on taper rate
-            better_val = result[nearest_idx]
-            worse_val = offsets[i]  # Use original value
-            diff = abs(better_val - worse_val)
-
-            if diff > 0:
-                # Maximum distance (in feet) over which to taper
-                # Computed from slope limit MAX_KERB_FOLLOW_TAPER
-                max_taper_dist = diff / MAX_KERB_FOLLOW_TAPER
-                # Interpolation factor: how much of the taper to apply
-                # Decreases with distance from the boundary
-                taper_factor = max(0.0, 1.0 - d / max_taper_dist)
-                # Interpolate from worse_val towards better_val
-                result[i] = worse_val + (better_val - worse_val) * taper_factor
-    
-    return result
+        for i in np.flatnonzero(rank == r):
+            dist = np.abs(s[better] - s[i])
+            k = int(np.argmin(dist))
+            j, d = better[k], dist[k]
+            out[i] = np.clip(out[i], out[j] - MAX_KERB_FOLLOW_TAPER * d,
+                             out[j] + MAX_KERB_FOLLOW_TAPER * d)
+    return out
 
 
 def kerb_profile(leg, side: str, stations: np.ndarray) -> Profile:
