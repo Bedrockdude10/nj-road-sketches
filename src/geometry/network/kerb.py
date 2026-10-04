@@ -36,8 +36,8 @@ if TYPE_CHECKING:    # annotation-only: this type is layered above this package,
 # HOW THE ROAD IS EXTENDED. Inside each modelled junction the centreline is THE JUNCTION ROAD'S
 # OWN, vertex for vertex: the checkpoint above compares the road's width reading against the leg's,
 # and the two only agree if they share a frame. Beyond the legs there is no fitted centreline to
-# inherit, so the road follows NJDOT's SRI alignment, eased laterally onto each modelled junction's
-# centre at the seam over fitting.py's THROUGH_JOIN_BLEND_FT.
+# inherit, so the road follows NJDOT's SRI alignment, laid at the lateral offset each modelled
+# junction's centre was measured at (corridor.py:_carried_alignment).
 #
 # WHAT IS NOT INVENTED. The kerb is the traced kerb and nothing else: where the tracing stops,
 # `width_at_ft` returns None rather than interpolating across the gap (see _kerb_offset_at).
