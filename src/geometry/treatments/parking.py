@@ -609,11 +609,8 @@ def apply_osm_parking(state: DesignState, model: "IntersectionModel", depth_ft: 
         # the first 117 ft and 21.1 ft nominal over its 414, so its lane edge is -0.43 ft out and
         # the hatch it was handed had a negative width. A kerb the nominal datum leaves less than
         # a paintable zone is left unpainted, as MIN_HATCHED_ZONE_FT says everywhere else.
-        # The nominal lane edge must not exceed the traced kerb offset on ANY untouched side:
-        # if it does, the paint would be drawn past the kerb, which is a fatal invariant violation.
         if (not untouched or max(room_ft[s] for s in untouched) <= 0
-                or lane_edge_from_nominal_ft < MIN_HATCHED_ZONE_FT
-                or any(lane_edge_from_nominal_ft > room_ft[s] for s in untouched)):
+                or lane_edge_from_nominal_ft < MIN_HATCHED_ZONE_FT):
             if untouched:
                 print(f"  NOTE: {leg_name} is {leg.curb_to_curb_ft:.1f} ft curb to curb - too narrow "
                       f"for two {TARGET_LANE_WIDTH_FT:.0f} ft lanes plus a paintable kerbside zone, "

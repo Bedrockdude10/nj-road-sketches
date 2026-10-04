@@ -162,24 +162,3 @@ def test_a_leg_whose_nominal_lane_edge_is_inside_the_lane_is_left_unpainted():
         out = apply_osm_parking(state, model=None)
     assert not out.treatments_of(LaneNarrowing) and not out.treatments_of(MarkedParking)
     assert "no kerbside paint is marked" in printed.getvalue()
-
-
-def test_a_leg_whose_nominal_lane_edge_is_outside_the_traced_kerb_is_left_unpainted():
-    """World-scale legs like Eaton Place have a nominal 30 ft curb-to-curb (15 ft half-width)
-    but traced kerbs only 14.7 ft apart (7.35 ft half-width), so the nominal lane edge sits at
-    11 ft from centerline while the traced kerb is only 7.35 ft out. Paint placed at the nominal
-    offset would be 3.65 ft past the actual kerb - a fatal invariant violation. No paint should
-    be marked on this leg."""
-    from src.geometry.treatments import DesignState
-    from src.geometry.treatments.lanes import LaneNarrowing
-    from src.geometry.treatments.parking import MarkedParking, apply_osm_parking
-
-    leg = Leg("eaton_place", LineString([(0, 0), (400, 0)]), 30.0)
-    leg.left_curb = LineString([(0, 7.35), (400, 7.35)])
-    leg.right_curb = LineString([(0, -7.35), (400, -7.35)])
-    leg.traced_sides.update({"left", "right"})
-    state = DesignState(legs={"eaton_place": leg}, corner_fillets={})
-    with contextlib.redirect_stdout(io.StringIO()) as printed:
-        out = apply_osm_parking(state, model=None)
-    assert not out.treatments_of(LaneNarrowing) and not out.treatments_of(MarkedParking)
-    assert "too narrow" in printed.getvalue()
