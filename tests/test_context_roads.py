@@ -14,9 +14,11 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString
 
-from src.geometry.context_roads import (MIN_TRACED_FRACTION, ROADWAY_DEFAULT_WIDTH_FT,
-                                        assign_kerbs_to_roads, assumed_width_ft, is_carriageway,
-                                        kerb_points, osm_maxspeed_mph, roadway_surface)
+from src.geometry.context_roads import (MAX_HALF_WIDTH_FT, MIN_TRACED_FRACTION,
+                                        ROADWAY_DEFAULT_WIDTH_FT, assign_kerbs_to_roads,
+                                        assumed_width_ft, is_carriageway, kerb_points,
+                                        osm_maxspeed_mph, roadway_surface)
+from src.geometry.model import station_offset_many
 from tests.conftest import SITES, needs_source_data
 
 
@@ -141,6 +143,45 @@ def test_a_kerb_goes_to_the_nearest_street_not_to_every_street_in_reach():
     assert len(far_st) == 0, "a street 42 ft away also claimed it"
 
 
+def _assigned_by_brute_force(centerlines, points):
+    """The definition, with no shortcut: every road against every vertex, nearest road wins."""
+    stations, offsets = zip(*(station_offset_many(line, points) for line in centerlines))
+    stations, offsets = np.vstack(stations), np.vstack(offsets)
+    lengths = np.asarray([line.length for line in centerlines])[:, None]
+    reach = np.where((stations >= 0) & (stations <= lengths), np.abs(offsets), np.inf)
+    nearest = np.argmin(reach, axis=0)
+    claimed = np.take_along_axis(reach, nearest[None, :], axis=0)[0] <= MAX_HALF_WIDTH_FT
+    return [(stations[i][claimed & (nearest == i)], offsets[i][claimed & (nearest == i)])
+            for i in range(len(centerlines))]
+
+
+def test_reading_only_the_vertices_near_a_road_changes_no_assignment():
+    """Roads now meet every kerb vertex in a whole area, so each reads only those within reach of
+    its bounding box - the shortcut that keeps this from being roads x every vertex in the
+    borough. It is only allowed to be a shortcut: against the definition (every road, every
+    vertex) the answer must be identical, including at the margin where a vertex sits exactly
+    MAX_HALF_WIDTH_FT off a street, which is claimed, and just past it, which is not.
+    """
+    rng = np.random.default_rng(7)
+    streets = [LineString([(0.0, 0.0), (400.0, 0.0)]),
+               LineString([(0.0, 60.0), (400.0, 60.0)]),
+               LineString([(500.0, -200.0), (520.0, 300.0), (900.0, 420.0)]),    # bent, off to the side
+               LineString([(-2000.0, 5000.0), (-1800.0, 5100.0)])]               # nowhere near
+    points = np.vstack([
+        rng.uniform([-300.0, -300.0], [1000.0, 500.0], size=(2000, 2)),
+        [[200.0, -MAX_HALF_WIDTH_FT], [200.0, -MAX_HALF_WIDTH_FT - 0.01],        # the margin
+         [-0.01, 0.0], [400.01, 0.0], [5000.0, 5000.0]],                          # past an end; far away
+    ])
+    fast = assign_kerbs_to_roads(streets, points)
+    slow = _assigned_by_brute_force(streets, points)
+    for (fast_s, fast_o), (slow_s, slow_o) in zip(fast, slow):
+        order_f, order_s = np.argsort(fast_s), np.argsort(slow_s)
+        np.testing.assert_allclose(fast_s[order_f], slow_s[order_s])
+        np.testing.assert_allclose(fast_o[order_f], slow_o[order_s])
+    assert sum(len(s) for s, _o in fast) > 100, "the comparison had almost nothing to compare"
+    assert len(fast[3][0]) == 0, "a street nowhere near any kerb claimed one"
+
+
 def test_a_kerb_beyond_a_streets_own_ends_is_not_its_kerb():
     """Station outside [0, length] means the vertex is past what this way covers.
 
@@ -179,25 +220,29 @@ def test_a_mappers_width_tag_beats_the_class_assumption():
 def test_the_traced_corridor_reaches_the_drawing(site, site_models):
     """The regression itself: kerb past the junction has to survive into what gets rendered.
 
-    Before this, the renderers took kerb_lines_with_tags_ft's default - the near set, 80 ft of
-    the centre - and a corridor traced for hundreds of feet arrived as four corner returns. The
+    Before this, the renderers took the NEAR set - kerb within 80 ft of the centre - and a
+    corridor traced for hundreds of feet arrived as four corner returns. The
     assertion is deliberately about REACH rather than a count: what was wrong was not how many
     kerbs there were but how far out they went.
     """
-    from src.geometry.intersection import (KERB_NEAR_JUNCTION_FT, drawn_kerb_radius_ft,
-                                            kerb_lines_with_tags_ft)
+    from src.geometry.intersection import KERB_NEAR_JUNCTION_FT, kerb_lines_with_tags_ft
 
     model = site_models[site]
-    radius_ft = drawn_kerb_radius_ft()
-    drawn = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft, radius_ft=radius_ft)
-    near = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft)
+    drawn = kerb_lines_with_tags_ft(model.osm)
+    near = kerb_lines_with_tags_ft(model.osm, near=model.center_ft)
     assert len(drawn) > len(near), "the drawing test found no kerb the corner fit was dropping"
     reach = max((line.distance(model.center_ft) for line, _t, _w in drawn), default=0.0)
     assert reach > KERB_NEAR_JUNCTION_FT, (
         f"{site}: every drawn kerb is still inside the {KERB_NEAR_JUNCTION_FT} ft near set, so "
         f"the render has nothing past the junction to draw")
-    assert all(line.distance(model.center_ft) <= radius_ft for line, _t, _w in drawn), (
-        "a kerb beyond the fetched radius is being drawn")
+    # THE OLD "NOTHING BEYOND THE FETCHED RADIUS" CHECK, as the property it protected: the
+    # drawing's kerbs are the world's kerbs, no more and no fewer. A radius that cut some off was
+    # the failure; a stray extra would be a kerb that is not in the surveyed layer at all.
+    traced = [k for k in model.osm["kerbs"] if k.get("coords_wgs84")]
+    assert {w for _l, _t, w in drawn} == {k["id"] for k in traced}, (
+        f"{site}: the drawn kerbs are not the area's traced kerbs - a filter is deciding what "
+        f"the drawing contains")
+    assert {w for _l, _t, w in near} <= {w for _l, _t, w in drawn}
 
 
 @needs_source_data
@@ -213,12 +258,11 @@ def test_a_surveyed_corridor_keeps_its_kerbs_the_whole_way(site_models):
     from shapely.ops import unary_union
 
     from src.geometry.context_roads import MAX_HALF_WIDTH_FT
-    from src.geometry.intersection import drawn_kerb_radius_ft, kerb_lines_with_tags_ft
+    from src.geometry.intersection import kerb_lines_with_tags_ft
 
     checked = 0
     for site, model in site_models.items():
-        drawn = kerb_lines_with_tags_ft(model.center_wgs84, model.center_ft,
-                                         radius_ft=drawn_kerb_radius_ft())
+        drawn = kerb_lines_with_tags_ft(model.osm)
         surveyed = [p for p in model.paved_surfaces
                     if str(p.kind) == "roadway" and p.extent_is_surveyed and p.line.length > 100]
         if not surveyed or not drawn:
