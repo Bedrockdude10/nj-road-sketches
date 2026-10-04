@@ -168,13 +168,17 @@ class TestPlace:
 
         # Find matching stations and verify the difference is 11.00
         # Both lines should have points at similar stations
+        n_compared = 0
         for i, st in enumerate(s0):
             if not np.isnan(st):
                 # Find nearest station in s1
-                idx = np.nanargmin(np.abs(s1 - st))
-                if abs(s1[idx] - st) < 0.1:
-                    diff = off1[idx] - off0[i]
-                    assert abs(diff - 11.0) < 0.01
+                matches = np.isclose(s1, st, atol=0.1)
+                assert matches.any(), f"No matching station in s1 for {st}"
+                idx = np.where(matches)[0][0]
+                diff = off1[idx] - off0[i]
+                assert abs(diff - 11.0) < 0.01
+                n_compared += 1
+        assert n_compared == len(S), f"Only compared {n_compared} stations, expected {len(S)}"
 
     def test_D12_band_area_calculation(self):
         """D12: band between Kerb(0) and Centre(11); area from trapezoid integration."""
@@ -197,7 +201,7 @@ class TestPlace:
         # Verify width is never negative
         assert (width >= 0).all()
 
-        expected_area = np.trapz(width, S)
+        expected_area = np.trapezoid(width, S)
         actual_area = placed.geometry.area
 
         # Within 1% tolerance
@@ -217,8 +221,9 @@ class TestPlace:
         # Geometry is non-None but only covers the latter part
         assert placed.geometry is not None
         bounds = placed.geometry.bounds  # (minx, miny, maxx, maxy)
-        assert bounds[0] >= 110  # x >= 110
-        assert bounds[3] >= 11 - 0.01  # y_max >= 11
+        assert abs(bounds[0] - 110) < 0.01  # x_min = 110
+        assert abs(bounds[2] - 200) < 0.01  # x_max = 200
+        assert bounds[1] >= 11 - 0.01  # y_min >= 11 (band not swapped into lane)
 
     def test_D14_kerb_to_kerb_polygon(self):
         """D14: KerbToKerb on D1 setup with S = [90, 100, 110]."""
