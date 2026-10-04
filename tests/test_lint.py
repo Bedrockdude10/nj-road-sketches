@@ -45,6 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TARGETS = ["src", "scripts", "sites", "tests", "conftest.py"]
 RUFF = Path(sys.executable).parent / "ruff"
 LINT_IMPORTS = Path(sys.executable).parent / "lint-imports"
+MYPY = Path(sys.executable).parent / "mypy"
 
 # The subset that is a guaranteed crash on whatever path reaches it, as opposed to the rest
 # of ruff.toml's selection, which is code that works but shouldn't be written that way.
@@ -155,3 +156,21 @@ def test_import_contracts_hold():
         "import contract(s) broken - see .importlinter for what each rule is for:\n\n"
         + "\n".join(line for line in report.splitlines() if not line.startswith(("╔", "╚", "║", " ║", "  └", "      ╚")))
     )
+
+
+def test_typed_modules_pass_mypy():
+    """Every module listed in mypy.ini type-checks strictly: no unannotated function, no type error.
+
+    The list in mypy.ini only grows - a module joins when it is written or substantially touched -
+    so the typed part of the repo can widen without first paying for the whole of src/. Fails,
+    rather than skips, when mypy is missing, for the same reason the ruff tests do.
+    """
+    if not MYPY.exists():
+        raise AssertionError(
+            f"mypy is not installed in this interpreter's environment ({sys.executable}).\n"
+            f"  expected: {MYPY}\n\n"
+            "Install it with everything else:\n\n"
+            "  .venv/bin/pip install -r requirements.txt"
+        )
+    result = subprocess.run([str(MYPY)], cwd=REPO_ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, "mypy (strict, modules in mypy.ini):\n" + result.stdout.strip()

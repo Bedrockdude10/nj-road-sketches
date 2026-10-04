@@ -29,7 +29,15 @@ select = [
     "C4",    # flake8-comprehensions
     "UP",    # pyupgrade
     "RUF",   # ruff's own rules
+    "PLW",   # pylint's warnings, as ported to ruff: redefined loop names, unchecked subprocess.
+    # Importing another module's _private name. A helper that has to be reached from outside
+    # is public and belongs in its package's re-exports; a private reached across modules is
+    # how a second copy of a fact gets wired in without anyone seeing it. Preview-only, hence
+    # explicit-preview-rules below: preview is switched on for this rule and nothing else.
+    "PLC2701",
 ]
+preview = true
+explicit-preview-rules = true
 
 ignore = [
     # zip() without strict=. This is a genuine correctness rule for geometry code - a zip
@@ -67,4 +75,5 @@ ignore = [
 # are not errors here.
 "scripts/blender/*.py" = ["F403", "F405"]
 # Tests assert on private helpers and construct deliberately-degenerate inputs.
-"tests/*.py" = ["B011"]
+"tests/*.py" = ["B011", "PLC2701"]
+"conftest.py" = ["PLC2701"]
