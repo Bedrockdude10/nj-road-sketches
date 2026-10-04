@@ -148,9 +148,10 @@ def slice_context(features: gpd.GeoDataFrame) -> dict[str, list[dict]]:
     context["street_furniture"] = [{"lon": p.x, "lat": p.y, "tags": t,
                                     "id": next(iter(ids(row, "way_ids")), None)}
                                    for t, p, row in nodes if is_street_furniture(t)]
-    # The document names a feature's municipality and does not carry the ring, so there is none to
-    # offer - which is what an empty layer says.
-    context["municipalities"] = []
+    # The town boundary the document carries, in the (name, ring) shape `osm_layers` gives it.
+    context["municipalities"] = [(row.municipality, list(part.exterior.coords))
+                                 for row in of_kind("municipality") for part in _parts(row.geometry)
+                                 if part.geom_type == "Polygon"]
     return context
 
 

@@ -28,7 +28,9 @@ from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.corridor_paint import paint_facility
 from src.geometry.markings import (BIKE_BUFFER_FILL, BIKE_LANE_EDGE_LINE,
                                    BIKE_LANE_SURFACE)
+from src.geometry.intersection.municipality import municipal_boundary_ft
 from src.geometry.network.area import area_context, area_corridors, corridor_pavement
+from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
 from src.sources.observations import ELEMENT_FROM_OSM
 from src.geometry.treatments import route_decision_for
 from src.geometry.treatments.corridor import CorridorFacility
@@ -181,6 +183,15 @@ def network_features(area: str) -> gpd.GeoDataFrame:
 
     paved = [r["geometry"] for r in rows if r["kind"] == "pavement"]
     rows += _context_rows(area, unary_union(paved) if paved else None)
+    # THE TOWN'S OWN BOUNDARY, so the document answers "which town is this in" for anything in
+    # it. A route decision is keyed on (street, town), and a world built from this document has
+    # no other place to ask.
+    bbox = SNAPSHOT_AREAS[area]
+    found = municipal_boundary_ft(osm_layers(area), Point((bbox[0] + bbox[2]) / 2,
+                                                          (bbox[1] + bbox[3]) / 2))
+    if found is not None:
+        rows.append({"kind": "municipality", "name": found[0], "municipality": found[0],
+                     "geometry": found[1]})
     return gpd.GeoDataFrame(rows, geometry="geometry", crs=NJ_STATE_PLANE_FT)
 
 

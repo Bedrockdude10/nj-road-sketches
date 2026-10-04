@@ -18,8 +18,10 @@ answer "which approaches of this junction are on this street" the same way, off 
 street name - see legs_on_road, which is the one place that question is asked.
 """
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
+from shapely.geometry import Polygon
 
 from src.geometry.model import side_facing
 from src.geometry.network import _street_name
@@ -34,6 +36,7 @@ from src.geometry.treatments.bikeways import (BIKE_LANE_BOLLARD_SPACING_FT,
 from src.geometry.treatments.parking import (MarkedParking, hold_travel_lane_at_target,
                                              osm_derived_baseline)
 from src.geometry.treatments.state import DesignState
+from src.render.coords import wgs84_to_state_plane
 from src.sources.osm_context import municipality_containing
 from typing import TYPE_CHECKING
 
@@ -122,32 +125,59 @@ def same_municipality(one: str, other: str) -> bool:
 
 
 def _legs_on_route(model: "IntersectionModel", road: str, municipality: str) -> list[str]:
-    """`legs_on_road`, refusing a junction in a DIFFERENT town, and one in no known town.
+    """`legs_on_road`, keeping only the legs that lie in `municipality`.
 
     Both route decisions share it, and both mean the same thing by an empty list: this route does
-    not reach this junction, so leave its cross-sections alone.
+    not reach these legs, so leave their cross-sections alone.
 
-    IT USED TO FAIL OPEN, and the case it failed open on was the whole document: a model with no
-    stated town answered None and the decision applied regardless. With municipality_of reading
-    the boundary too, "no town" stops meaning "not a site" and starts meaning what it says.
+    PER LEG, NOT PER MODEL. A model can be one junction or a whole town, and "which town is this
+    in" is a fact about each street segment - asking it of one centre point is the site-circle
+    idea in another form, and for a whole borough that point is the middle of a bounding box. A
+    site that STATES its town answers for all its legs, which is DesignState.centerline_style's
+    precedence: config wins by being present.
 
-    SO IT RAISES, AND AN EMPTY LIST WOULD NOT DO. `route_decision_for` refuses the same lookup -
-    the town is half its key and there is no wildcard - and this gate exists only because a
-    site's scenarios apply a decision object directly, bypassing it. Returning [] would file the
-    refusal under the other meaning above, which CorridorCalming prints "no leg of this junction
-    is on {road}" off: a junction whose town could not be read, reported as a junction on another
-    street. A check that cannot see anything has to say so rather than pass.
+    A leg NO closed boundary holds is refused, not treated: the town is half the route's key and
+    there is no wildcard. If none of the route's legs can be placed it RAISES rather than
+    returning [] - an empty list reads as "not on this street", and a junction whose town could
+    not be read must not be filed under that. A check that cannot see anything has to say so.
     """
-    here = municipality_of(model)
-    if here is None:
+    on_road = legs_on_road(model, road)
+    stated = (model.config.get("intersection") or {}).get("municipality")
+    if stated:
+        return on_road if same_municipality(stated, municipality) else []
+    towns = {leg: _town_of_leg(model, leg) for leg in on_road}
+    placed = [leg for leg, town in towns.items() if town is not None]
+    if on_road and not placed:
         raise ValueError(
-            f"{road} is a route through {municipality}, and this junction is in no town this "
-            f"project can name: its config states no intersection.municipality and no OSM "
-            f"admin_level=8 boundary contains its centre. A route is (street, town) - applying "
-            f"this one here would be a claim about whose street it is that nothing supports.")
-    if not same_municipality(here, municipality):
-        return []
-    return legs_on_road(model, road)
+            f"{road} is a route through {municipality}, and none of its {len(on_road)} leg(s) here "
+            f"lies in a town this project can name: no intersection.municipality is stated and no "
+            f"closed admin_level=8 boundary in the model's OSM layers contains them. A route is "
+            f"(street, town) - applying this one here would be a claim about whose street it is "
+            f"that nothing supports.")
+    unplaced = sorted(set(on_road) - set(placed))
+    if unplaced:
+        print(f"  NOTE: {road}: {len(unplaced)} leg(s) lie in no closed town boundary and are not "
+              f"treated as {municipality}'s: {', '.join(unplaced)}")
+    return [leg for leg in placed if same_municipality(towns[leg], municipality)]
+
+
+def _town_of_leg(model: "IntersectionModel", leg_name: str) -> str | None:
+    """The town whose closed boundary holds this leg's midpoint, from the model's own layers.
+
+    The MIDPOINT rather than the end at the junction: a junction node can sit on the boundary
+    itself, and the middle of a node-to-node segment is unambiguously on one side of it.
+    """
+    point = model.legs[leg_name].centerline.interpolate(0.5, normalized=True)
+    for name, ring in (getattr(model, "osm", None) or {}).get("municipalities", ()):
+        if _ring_ft(tuple(map(tuple, ring))).contains(point):
+            return name
+    return None
+
+
+@lru_cache(maxsize=16)
+def _ring_ft(ring_wgs84: tuple) -> Polygon:
+    xs, ys = wgs84_to_state_plane.transform([c[0] for c in ring_wgs84], [c[1] for c in ring_wgs84])
+    return Polygon(zip(xs, ys))
 
 
 @dataclass(frozen=True)

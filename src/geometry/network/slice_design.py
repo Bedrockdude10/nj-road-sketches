@@ -269,21 +269,19 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None,
     # (parking_restriction_spans). Without it every leg fell back to the repo's dashed default,
     # which claims on the sheet that passing is permitted - on five of the seven named ways
     # through Broad & Greenwood, where the survey says it is not.
-    spans = _match_legs_to_osm_roads(legs, center_wgs84, center_ft,
-                                     roads=(osm or {}).get("roads")) if osm is not None else {}
+    spans = _match_legs_to_osm_roads(legs, osm) if osm is not None else {}
     dominant = {name: max(rows, key=lambda span: span.length_ft) for name, rows in spans.items()}
     # R.S. 39:4-138(e) applies at every cross street whether or not this slice is centred on one,
     # so a crop that never resolves it is making a false statement about the street, not merely
     # drawing less. Gated like `spans` and `paved_surfaces`: without `osm` there is nothing to
-    # match against, and this call would fetch by centre-and-radius over the whole window instead
-    # of reading its own layers.
-    cross_streets = (cross_streets_ft(center_wgs84, center_ft, legs, osm=osm)
+    # match against.
+    cross_streets = (cross_streets_ft(osm, center_ft, legs)
                      if osm is not None else {})
     # THE CORNERS, per junction, off the window's own traced kerbs. Without them a crop had
     # `corner_fillets={}`, and that one empty dict is upstream of most of what a slice was
     # missing: build_pavement_polygon has no ring, build_sidewalk_pieces has no edge to widen,
     # the signal hardware has no corner to stand on, and every corner return and apron is absent.
-    traced = [k for k in ((osm or {}).get("kerb_ways") or [])
+    traced = [k for k in ((osm or {}).get("kerbs") or [])
               if len(k.get("coords_wgs84") or []) >= 2]
     kerb_lines = [LineString(to_state_plane(k["coords_wgs84"])) for k in traced]
     kerb_ways = [(line, k.get("tags") or {}, k.get("id")) for line, k in zip(kerb_lines, traced)]
@@ -314,7 +312,7 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None,
         # instead of stopping on the circle inscribed in it. Cut around the junction rings AND
         # the traced pavement - see slice_pavement, which is the one place a window says what
         # its asphalt is.
-        paved_surfaces=_paved_surfaces_ft(center_wgs84, osm=osm,
+        paved_surfaces=_paved_surfaces_ft(osm,
                                           pavement=slice_pavement(features, corner_fillets),
                                           reach=box(minx, miny, maxx, maxy))
         if osm is not None else (),
