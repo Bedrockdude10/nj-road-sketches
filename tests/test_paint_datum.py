@@ -51,24 +51,24 @@ class TestKerbProfile:
         assert all(s == "nominal" for s in result.source)
 
     def test_D3_partial_traced_kerb_tapers_to_nominal(self):
-        """D3: traced left [(50,20),(150,20)] on 60 ft width; offsets taper from 30 to 20 to 30."""
+        """D3: traced left [(50,20),(150,20)] on 60 ft width; its own 20 ft is carried past the span."""
         leg = straight(60.0)
         trace(leg, "left", [(50, 20), (150, 20)])
 
         result = kerb_profile(leg, "left", S)
-        expected = [30, 28, 26, 24, 22] + [20] * 11 + [22, 24, 26, 28, 30]
+        expected = [20] * 21
         np.testing.assert_allclose(result.offsets_ft, expected, atol=0.01)
-        assert list(result.source) == (["nominal"] * 5 + ["traced"] * 11 + ["nominal"] * 5)
+        assert list(result.source) == (["carried"] * 5 + ["traced"] * 11 + ["carried"] * 5)
 
     def test_D4_mirrored_kerb_from_opposite_side(self):
-        """D4: same as D3 on right; source is 'mirrored' where traced left."""
+        """D4: D3 on the right; no state line, so one 60 ft width off the left kerb, tapering to nominal."""
         leg = straight(60.0)
         trace(leg, "left", [(50, 20), (150, 20)])
 
         result = kerb_profile(leg, "right", S)
-        expected = [-30, -28, -26, -24, -22] + [-20] * 11 + [-22, -24, -26, -28, -30]
+        expected = [-30, -32, -34, -36, -38] + [-40] * 11 + [-38, -36, -34, -32, -30]
         np.testing.assert_allclose(result.offsets_ft, expected, atol=0.01)
-        assert list(result.source) == (["nominal"] * 5 + ["mirrored"] * 11 + ["nominal"] * 5)
+        assert list(result.source) == (["nominal"] * 5 + ["offset"] * 11 + ["nominal"] * 5)
 
     def test_D5_mirrored_from_state_centreline(self):
         """D5: right traced at -18; state centreline at +2; left is mirrored (2*2-(-18)=22)."""

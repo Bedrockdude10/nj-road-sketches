@@ -4,7 +4,9 @@ THE ONE HOME of the source priority, read by paint (src.geometry.paint.datum) an
 surface (src.geometry.context_roads). Inputs are signed offsets, left-positive, NaN where that
 evidence does not reach; how each was measured is the caller's business.
 
-    kerb:   traced -> mirrored (2 x centre - the other side's traced kerb) -> nominal half-width
+    kerb:   traced -> mirrored about the registered state line (never about the OSM way, which
+            can sit 10 ft off) -> one street width off the far kerb -> this side's own measured
+            offset, carried past its traced end -> nominal half-width
     centre: kerbs (midway, both traced) -> state (registered NJDOT line) -> osm (the way itself)
 
 A worse source meets a better one on a MAX_KERB_FOLLOW_TAPER taper, never a step.
@@ -21,6 +23,8 @@ from src.geometry.targets import Side
 class KerbSource(StrEnum):
     TRACED = "traced"
     MIRRORED = "mirrored"
+    OFFSET = "offset"
+    CARRIED = "carried"
     NOMINAL = "nominal"
 
 
@@ -35,6 +39,28 @@ class Profile:
     stations: np.ndarray
     offsets_ft: np.ndarray      # signed, left-positive
     source: np.ndarray          # object array of KerbSource | CentreSource
+
+
+@dataclass(frozen=True)
+class StreetMeasures:
+    """What the WHOLE street's tracing says, so a kerb past the traced span is placed from the
+    street's own measurements and not from the stretch being drawn (which moves with the sheet)."""
+    width_ft: float | None      # median kerb-to-kerb where both sides are traced
+    left_ft: float | None       # median traced left offset, signed
+    right_ft: float | None
+
+    @classmethod
+    def of(cls, left: np.ndarray, right: np.ndarray) -> "StreetMeasures":
+        both = np.isfinite(left) & np.isfinite(right)
+
+        def median(v: np.ndarray) -> float | None:
+            return float(np.median(v)) if len(v) else None
+
+        return cls(median(left[both] - right[both]), median(left[np.isfinite(left)]),
+                   median(right[np.isfinite(right)]))
+
+    def typical(self, side: Side) -> float | None:
+        return self.left_ft if Side(side) is Side.LEFT else self.right_ft
 
 
 def bridged(stations: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -77,12 +103,21 @@ def _first_finite(stations: np.ndarray, layers: list[np.ndarray], sources: list[
 
 
 def kerb_chain(stations: np.ndarray, side: Side, own: np.ndarray, other: np.ndarray,
-               state: np.ndarray, nominal_half_ft: float | None, label: str) -> Profile:
-    """One side's kerb. `nominal_half_ft` None raises where nothing else reaches."""
-    centre = np.where(np.isfinite(state), state, 0.0)
-    nominal = np.full(len(stations), np.nan if nominal_half_ft is None
-                      else Side(side).sign * nominal_half_ft)
-    return _first_finite(stations, [own, 2 * centre - other, nominal], list(KerbSource), label)
+               state: np.ndarray, street: StreetMeasures, nominal_half_ft: float | None,
+               label: str) -> Profile:
+    """One side's kerb. The far-kerb width is the street's measured width, else the nominal one;
+    `nominal_half_ft` None raises where nothing else reaches."""
+    side = Side(side)
+    nan = np.full(len(stations), np.nan)
+    width = street.width_ft if street.width_ft is not None else (
+        None if nominal_half_ft is None else 2 * nominal_half_ft)
+    typical = street.typical(side)
+    layers = [own,
+              2 * state - other,
+              nan if width is None else other + side.sign * width,
+              nan if typical is None else np.full(len(stations), typical),
+              nan if nominal_half_ft is None else np.full(len(stations), side.sign * nominal_half_ft)]
+    return _first_finite(stations, layers, list(KerbSource), label)
 
 
 def centre_chain(stations: np.ndarray, left: np.ndarray, right: np.ndarray,

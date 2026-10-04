@@ -20,7 +20,8 @@ wins where the two overlap.
 import numpy as np
 from shapely.geometry import LineString, Polygon
 
-from src.geometry.model import station_offset_many
+from src.geometry.model import StreetMeasures, bridged, kerb_chain, station_offset_many
+from src.geometry.targets import Side
 
 # A kerb further from a centreline than this belongs to some other street. Generous enough for
 # a 68 ft leg's own kerbs plus a corner return, tight enough that a parallel street one lot
@@ -219,39 +220,24 @@ def _edge_offsets(line: LineString, stations: np.ndarray, offsets: np.ndarray,
     """(sample stations, left offsets, right offsets, which sides are SURVEYED).
 
     Left is positive and right negative, the sign convention station_offset_many already uses.
-    Each sample takes the MEDIAN of its side's kerb offsets inside a STATION_WINDOW_FT window.
-    Fallback when a sample has nothing in the window, most-measured first:
-
-      1. This side's OWN median, where the side was traced anywhere.
-      2. The OTHER side's traced edge, less the assumed width - placing it a full width off
-         the traced kerb rather than half off the centreline is the difference between using
-         the measurement and ignoring it.
-      3. Half the assumed width either side of the centreline.
+    Each sample is its side's MEDIAN kerb offset in a window (`measured_edges`); gaps inside a
+    side's traced span are bridged and everything else comes off `kerb_chain`, the priority paint
+    is placed by, so the asphalt and the paint cannot disagree about an untraced kerb. No state
+    line is read here, so the far kerb of a one-side-traced street is one width off the traced one.
 
     The fraction test decides only which sides are reported SURVEYED. It never discards a
     measurement - see MIN_TRACED_FRACTION.
     """
     samples, left, right = measured_edges(line, stations, offsets)
-    measured = {"left": left, "right": right}
-    coverage = {side: float(np.isfinite(v).mean()) for side, v in measured.items()}
-
-    edges = {}
-    for side in ("left", "right"):
-        sign = 1.0 if side == "left" else -1.0
-        values, other = measured[side].copy(), measured["right" if side == "left" else "left"]
-        gaps = ~np.isfinite(values)
-        if gaps.any():
-            if np.isfinite(values).any():                                  # (1) its own median
-                values[gaps] = float(np.nanmedian(values))
-            elif np.isfinite(other).any():                                 # (2) off the far kerb
-                fallback = np.where(np.isfinite(other), other, np.nanmedian(other))
-                values[gaps] = (fallback + sign * assumed_width_ft_)[gaps]
-            else:                                                          # (3) nothing traced
-                values[gaps] = sign * assumed_width_ft_ / 2
-        edges[side] = values
-
-    traced = {side for side in ("left", "right") if coverage[side] >= MIN_TRACED_FRACTION}
-    return samples, edges["left"], edges["right"], traced
+    measured = {Side.LEFT: left, Side.RIGHT: right}
+    street = StreetMeasures.of(left, right)
+    no_state = np.full(len(samples), np.nan)
+    edges = {side: kerb_chain(samples, side, bridged(samples, measured[side]),
+                              bridged(samples, measured[side.other]), no_state, street,
+                              assumed_width_ft_ / 2, "road").offsets_ft
+             for side in Side}
+    traced = {str(side) for side in Side if np.isfinite(measured[side]).mean() >= MIN_TRACED_FRACTION}
+    return samples, edges[Side.LEFT], edges[Side.RIGHT], traced
 
 
 def _edge_points(line: LineString, stations: np.ndarray, offsets: np.ndarray) -> list:

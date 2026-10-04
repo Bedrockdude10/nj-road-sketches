@@ -9,8 +9,8 @@ import shapely
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.ops import unary_union
 
-from src.geometry.model import (STRIP_SAMPLE_FT, Profile, band_from_offsets, centre_chain,
-                                curb_station_span, kerb_chain, line_from_offsets,
+from src.geometry.model import (STRIP_SAMPLE_FT, Profile, StreetMeasures, band_from_offsets,
+                                centre_chain, curb_station_span, kerb_chain, line_from_offsets,
                                 nominal_half_ft, station_offset_many, tapered_curb_offsets)
 from src.geometry.targets import Side
 
@@ -72,10 +72,16 @@ def _state(leg: "Leg", s: np.ndarray) -> np.ndarray:
     return np.interp(s, st[keep][order], off[keep][order], left=np.nan, right=np.nan)
 
 
+def _street(leg: "Leg") -> StreetMeasures:
+    """The leg's whole tracing, sampled every STRIP_SAMPLE_FT, whatever stations are asked for."""
+    grid = np.append(np.arange(0.0, leg.centerline.length, STRIP_SAMPLE_FT), leg.centerline.length)
+    return StreetMeasures.of(_traced(leg, Side.LEFT, grid), _traced(leg, Side.RIGHT, grid))
+
+
 def kerb_profile(leg: "Leg", side: Side | str, stations: np.ndarray) -> Profile:
     side = Side(side)
     return kerb_chain(stations, side, _traced(leg, side, stations),
-                      _traced(leg, side.other, stations), _state(leg, stations),
+                      _traced(leg, side.other, stations), _state(leg, stations), _street(leg),
                       nominal_half_ft(leg, default=None), leg.name)
 
 
