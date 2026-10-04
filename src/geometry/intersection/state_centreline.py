@@ -1,143 +1,84 @@
-"""Registered state centrelines - Phase 1 of paint spec v2.
+"""NJDOT centrelines registered to the traced kerbs: the centre chain's second source.
 
-Register NJDOT centrelines to traced kerbs by calibrating lateral offsets.
+NJDOT's line surveys the route, not this kerb-to-kerb: on Route 518 it sits 9-14 ft south of the
+traced kerbs' midpoint. Each line is moved, station by station, onto that midpoint wherever both
+kerbs were traced, and held at the nearest correction beyond them. Computed once per area for
+every line in it; nothing here knows about a site or leg until `attach_state_centrelines`.
 """
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import numpy as np
-from shapely.geometry import LineString, MultiLineString, Point
-from shapely.ops import linemerge, unary_union
+from shapely.geometry import LineString, MultiLineString
+from shapely.ops import linemerge
 
-from src.geometry.model import NJ_STATE_PLANE_FT
-from src.sources.data_loader import load_road_network, MissingSourceData
-from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
+from src.geometry.context_roads import (MAX_HALF_WIDTH_FT, assign_kerbs_to_roads, kerb_points,
+                                        measured_edges)
 from src.geometry.intersection.kerb_sources import kerb_lines_with_tags_ft
+from src.geometry.model import NJ_STATE_PLANE_FT, point_at_many
+from src.sources.data_loader import MissingSourceData, load_road_network
+from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
 
-STATE_CALIBRATION_STEP_FT = 10.0     # sample spacing along each NJDOT line
-STATE_KERB_SEARCH_FT = 40.0          # how far each side to look for a traced kerb
-
-
-def _corrections(line: LineString, kerbs: list[LineString]):
-    """(points, normals, d, cal, corr) for `line` against `kerbs`, or None when nothing calibrates.
-
-    d: stations every STATE_CALIBRATION_STEP_FT plus the end. cal: stations where a traced kerb was
-    found within STATE_KERB_SEARCH_FT on BOTH sides. corr: the signed shift to the kerb midpoint
-    (+ = left of the line's own direction), interpolated between calibrated stations and held
-    at the end values beyond them.
-    """
-    if not kerbs:
-        return None
-
-    # Step 1: sample points along the line
-    d = np.append(np.arange(0.0, line.length, STATE_CALIBRATION_STEP_FT), line.length)
-
-    # Step 2: Points p_i and unit tangents t_i
-    p_i = np.array([line.interpolate(d_val).coords[0] for d_val in d], dtype=float)
-
-    # Tangent: use points ±1 ft along the line, or clamp to line bounds
-    tangent_d_before = np.maximum(d - 1.0, 0.0)
-    tangent_d_after = np.minimum(d + 1.0, line.length)
-    p_before = np.array([line.interpolate(d_val).coords[0] for d_val in tangent_d_before], dtype=float)
-    p_after = np.array([line.interpolate(d_val).coords[0] for d_val in tangent_d_after], dtype=float)
-    tangent = p_after - p_before
-    tangent_norm = np.linalg.norm(tangent, axis=1, keepdims=True)
-    # Avoid division by zero
-    tangent_norm = np.where(tangent_norm > 0, tangent_norm, 1.0)
-    t_i = tangent / tangent_norm  # unit tangent (dx, dy)
-
-    # Left normal: (-ty, tx)
-    n_i = np.column_stack([-t_i[:, 1], t_i[:, 0]])
-
-    # Step 3: Find kerb intersections
-    wall = unary_union(kerbs)
-
-    dl = np.full(len(d), np.nan, dtype=float)
-    dr = np.full(len(d), np.nan, dtype=float)
-
-    for i in range(len(d)):
-        # Left ray: from p_i in the +n_i direction
-        p_start = Point(p_i[i])
-        p_end_left = Point(p_i[i] + STATE_KERB_SEARCH_FT * n_i[i])
-        left_ray = LineString([p_start, p_end_left])
-        left_intersection = left_ray.intersection(wall)
-        if not left_intersection.is_empty:
-            dl[i] = p_start.distance(left_intersection)
-
-        # Right ray: from p_i in the -n_i direction
-        p_end_right = Point(p_i[i] - STATE_KERB_SEARCH_FT * n_i[i])
-        right_ray = LineString([p_start, p_end_right])
-        right_intersection = right_ray.intersection(wall)
-        if not right_intersection.is_empty:
-            dr[i] = p_start.distance(right_intersection)
-
-    # Step 4: Check if calibration is possible
-    cal = np.isfinite(dl) & np.isfinite(dr)
-    if not cal.any():
-        return None
-
-    # Step 5: Interpolate corrections
-    # corr_cal is signed: + means kerb midpoint is LEFT of the line
-    corr_cal = (dl[cal] - dr[cal]) / 2.0
-    corr = np.interp(d, d[cal], corr_cal)
-    return p_i, n_i, d, cal, corr
+if TYPE_CHECKING:
+    from src.geometry.model import Leg
 
 
-def register_line(line: LineString, kerbs: list[LineString]) -> LineString:
-    """Register a line to traced kerbs by calibrating lateral offsets.
-
-    Returns the same line object if no kerbs available or no calibration possible.
-    Otherwise returns a new LineString with lateral offsets computed from kerb positions.
-    Samples points at regular intervals, computes corrections, and returns all sampled points.
-    """
-    found = _corrections(line, kerbs)
-    if found is None:
-        return line
-    p_i, n_i, _d, _cal, corr = found
-    return LineString(p_i + corr[:, np.newaxis] * n_i)
-
-
-@lru_cache(maxsize=1)
-def registered_state_centrelines(area: str) -> dict[str, LineString]:
-    """Load and register NJDOT centrelines to traced kerbs.
-
-    Returns a memoized dict mapping SRI -> registered LineString.
-    Returns empty dict if data/ is absent.
-    """
-    try:
-        bbox = SNAPSHOT_AREAS[area]
-    except KeyError:
-        return {}
-
-    try:
-        net = load_road_network(bbox=bbox)
-    except (MissingSourceData, FileNotFoundError):
-        return {}
-
-    net = net.to_crs(NJ_STATE_PLANE_FT)
-
-    # Get kerbs from OSM
-    osm = osm_layers(area)
-    kerbs = [line for line, _tags, _id in kerb_lines_with_tags_ft(osm)]
-
-    out = {}
-
-    for _, row in net.iterrows():
-        sri = row.get("SRI")
-        geom = row.geometry
-        if not sri or geom is None or geom.is_empty:
-            continue
-        if geom.geom_type == "MultiLineString":
-            geom = linemerge(geom)
-        parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
-        registered = [register_line(g, kerbs) for g in parts if g.geom_type == "LineString"]
-        if not registered:
-            continue
-        out[sri] = registered[0] if len(registered) == 1 else MultiLineString(registered)
-
+def _corrections(lines: list[LineString], kerbs: list[LineString]
+                 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray] | None]:
+    """Per line: (sample stations, calibrated mask, signed shift to the kerb midpoint), or None
+    where no sample found a kerb on both sides. Each kerb vertex goes to its NEAREST line
+    (assign_kerbs_to_roads), so two parallel routes cannot share a kerb. The shift is interpolated
+    between calibrated samples and held at the end values beyond them."""
+    out = []
+    for line, (stations, offsets) in zip(lines, assign_kerbs_to_roads(lines, kerb_points(kerbs))):
+        samples, left, right = measured_edges(line, stations, offsets)
+        cal = np.isfinite(left) & np.isfinite(right)
+        out.append(None if not cal.any() else
+                   (samples, cal, np.interp(samples, samples[cal], (left[cal] + right[cal]) / 2)))
     return out
 
 
-def attach_state_centrelines(legs: dict, area: str) -> None:
+def register_lines(lines: list[LineString], kerbs: list[LineString]) -> list[LineString]:
+    """Each line moved onto its kerbs' midpoint; a line nothing calibrates is returned as is."""
+    return [line if c is None else LineString(point_at_many(line, c[0], c[2]))
+            for line, c in zip(lines, _corrections(lines, kerbs))]
+
+
+def register_line(line: LineString, kerbs: list[LineString]) -> LineString:
+    """register_lines for one line."""
+    return register_lines([line], kerbs)[0]
+
+
+def _parts(geom) -> list[LineString]:
+    if geom is None or geom.is_empty:
+        return []
+    if geom.geom_type == "MultiLineString":
+        geom = linemerge(geom)
+    return [g for g in getattr(geom, "geoms", [geom]) if g.geom_type == "LineString"]
+
+
+def _area_lines(area: str) -> tuple[list[str], list[LineString], list[LineString]]:
+    """(SRI per line, NJDOT lines, traced kerbs) for `area`."""
+    net = load_road_network(bbox=SNAPSHOT_AREAS[area]).to_crs(NJ_STATE_PLANE_FT)
+    rows = [(row["SRI"], part) for _, row in net.iterrows() for part in _parts(row.geometry)]
+    kerbs = [line for line, _tags, _id in kerb_lines_with_tags_ft(osm_layers(area))]
+    return [sri for sri, _ in rows], [line for _, line in rows], kerbs
+
+
+@lru_cache(maxsize=1)
+def registered_state_centrelines(area: str) -> dict[str, LineString | MultiLineString]:
+    """{SRI: registered line} for every NJDOT line in `area`; {} where data/ is absent (CI)."""
+    try:
+        sris, lines, kerbs = _area_lines(area)
+    except (MissingSourceData, FileNotFoundError):
+        return {}
+    grouped: dict[str, list[LineString]] = {}
+    for sri, line in zip(sris, register_lines(lines, kerbs)):
+        grouped.setdefault(sri, []).append(line)
+    return {sri: ls[0] if len(ls) == 1 else MultiLineString(ls) for sri, ls in grouped.items()}
+
+
+def attach_state_centrelines(legs: dict[str, "Leg"], area: str) -> None:
     """Attach registered state centrelines to legs.
 
     For each leg, finds the best-matching registered line and clips it to the leg.
@@ -152,7 +93,7 @@ def attach_state_centrelines(legs: dict, area: str) -> None:
         for reg_line in registered.values():
             # Clip the registered line to the leg's centerline
             clipped = reg_line.intersection(
-                leg.centerline.buffer(STATE_KERB_SEARCH_FT, cap_style="flat")
+                leg.centerline.buffer(MAX_HALF_WIDTH_FT, cap_style="flat")
             )
 
             # Handle MultiLineString
@@ -179,20 +120,13 @@ def attach_state_centrelines(legs: dict, area: str) -> None:
 
 
 if __name__ == "__main__":
-    # Per-SRI calibration report: how many stations found a traced kerb on both sides, and how
-    # far the NJDOT line moves to reach their midpoint (+ = left of the line's own direction).
-    area = "hopewell_borough"
-    net = load_road_network(bbox=SNAPSHOT_AREAS[area]).to_crs(NJ_STATE_PLANE_FT)
-    kerbs = [line for line, _tags, _id in kerb_lines_with_tags_ft(osm_layers(area))]
-    for _, row in net.iterrows():
-        geom = row.geometry
-        parts = list(geom.geoms) if geom.geom_type == "MultiLineString" else [geom]
-        for part in parts:
-            found = _corrections(part, kerbs)
-            if found is None:
-                print(f"{row['SRI']}: 0 calibrated (line used as-is)")
-                continue
-            _p, _n, d, cal, corr = found
-            c = corr[cal]
-            print(f"{row['SRI']}: {int(cal.sum())}/{len(d)} calibrated, median {np.median(c):+.1f} ft, "
-                  f"range {c.min():+.1f}..{c.max():+.1f} ft")
+    # Per-SRI calibration report: samples with a traced kerb on both sides, and how far the NJDOT
+    # line moves to reach their midpoint (+ = left of the line's own direction).
+    sris, lines, kerbs = _area_lines("hopewell_borough")
+    for sri, c in zip(sris, _corrections(lines, kerbs)):
+        if c is None:
+            print(f"{sri}: 0 calibrated (line used as-is)")
+            continue
+        samples, cal, corr = c
+        print(f"{sri}: {int(cal.sum())}/{len(samples)} calibrated, median {np.median(corr[cal]):+.1f} "
+              f"ft, range {corr[cal].min():+.1f}..{corr[cal].max():+.1f} ft")

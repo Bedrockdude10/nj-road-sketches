@@ -1,6 +1,5 @@
 """Tests for registered state centrelines (paint spec v2, Phase 1)."""
 import numpy as np
-import pytest
 from shapely.geometry import LineString
 
 from src.geometry.intersection.state_centreline import register_line, registered_state_centrelines, attach_state_centrelines
@@ -24,7 +23,7 @@ class TestRegisterLine:
         result = register_line(line, K)
         coords = np.asarray(result.coords)
         np.testing.assert_allclose(coords[:, 1], -6.0, atol=0.01)
-        np.testing.assert_allclose(coords[:, 0], np.append(np.arange(0.0, L, 10.0), L), atol=0.01)
+        np.testing.assert_allclose(coords[[0, -1], 0], [0.0, L], atol=0.01)
 
     def test_S2_reversed_line_registers_to_same_midpoint(self):
         """S2: register_line with reversed input [(200,0),(0,0)]."""

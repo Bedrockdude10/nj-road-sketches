@@ -194,6 +194,26 @@ def assign_kerbs_to_roads(centerlines: list, kerb_points: np.ndarray) -> list:
             for i in range(len(centerlines))]
 
 
+def measured_edges(line: LineString, stations: np.ndarray, offsets: np.ndarray
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(sample stations, left, right): each side's MEDIAN traced-kerb offset inside a
+    STATION_WINDOW_FT window every SAMPLE_SPACING_FT along `line`, signed left-positive, NaN
+    where the window holds nothing."""
+    n = max(int(line.length // SAMPLE_SPACING_FT) + 1, 2)
+    samples = np.linspace(0.0, line.length, n)
+    half_window = STATION_WINDOW_FT / 2
+    measured = {}
+    for side, keep in (("left", offsets > 0), ("right", offsets < 0)):
+        st, off = stations[keep], offsets[keep]
+        values = np.full(len(samples), np.nan)
+        for i, station in enumerate(samples):
+            window = np.abs(st - station) <= half_window
+            if window.any():
+                values[i] = float(np.median(off[window]))
+        measured[side] = values
+    return samples, measured["left"], measured["right"]
+
+
 def _edge_offsets(line: LineString, stations: np.ndarray, offsets: np.ndarray,
                    assumed_width_ft_: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, set]:
     """(sample stations, left offsets, right offsets, which sides are SURVEYED).
@@ -211,20 +231,9 @@ def _edge_offsets(line: LineString, stations: np.ndarray, offsets: np.ndarray,
     The fraction test decides only which sides are reported SURVEYED. It never discards a
     measurement - see MIN_TRACED_FRACTION.
     """
-    n = max(int(line.length // SAMPLE_SPACING_FT) + 1, 2)
-    samples = np.linspace(0.0, line.length, n)
-    half_window = STATION_WINDOW_FT / 2
-
-    measured, coverage = {}, {}
-    for side, keep in (("left", offsets > 0), ("right", offsets < 0)):
-        st, off = stations[keep], offsets[keep]
-        values = np.full(len(samples), np.nan)
-        for i, station in enumerate(samples):
-            window = np.abs(st - station) <= half_window
-            if window.any():
-                values[i] = float(np.median(off[window]))
-        measured[side] = values
-        coverage[side] = float(np.isfinite(values).mean()) if len(samples) else 0.0
+    samples, left, right = measured_edges(line, stations, offsets)
+    measured = {"left": left, "right": right}
+    coverage = {side: float(np.isfinite(v).mean()) for side, v in measured.items()}
 
     edges = {}
     for side in ("left", "right"):
