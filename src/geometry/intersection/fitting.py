@@ -597,8 +597,8 @@ def _extend_curbs_with_far_tracing(legs: dict, osm: dict, center_ft: Point,
               f"{KERB_NEAR_JUNCTION_FT:.0f} ft junction radius the fit is restricted to.")
 
 
-def _fit_legs_to_traced_kerbs(legs: dict, kerb_ways: list, center_ft: Point, legs_cfg: dict
-                               ) -> dict[tuple[str, str], tuple[float, float]]:
+def _fit_legs_to_traced_kerbs(legs: dict, kerb_ways: list, center_ft: Point, legs_cfg: dict,
+                               bounded: bool = False) -> dict[tuple[str, str], tuple[float, float]]:
     """Iterate assignment and measurement until they agree, then report the result.
 
     These two steps each need the other's answer: a traced vertex is assigned to the leg side
@@ -614,6 +614,8 @@ def _fit_legs_to_traced_kerbs(legs: dict, kerb_ways: list, center_ft: Point, leg
     round changes nothing material. Converges in 2-3 rounds at all four junctions; if one
     never settles, the cap ends it and the printed widths are still the ones used.
 
+    `bounded` is for legs drawn node to node - see assign_curb_points_to_legs.
+
     Returns the {(leg, side): (near_ft, far_ft)} coverage it reported, so the far-tracing pass
     can correct those figures where it extends a curb past them.
     """
@@ -622,7 +624,7 @@ def _fit_legs_to_traced_kerbs(legs: dict, kerb_ways: list, center_ft: Point, leg
 
     def apply_curbs(quiet=True, ratio_bounds=None):
         coverage = _apply_traced_curb_lines(legs, kerb_ways, center_ft, quiet=quiet,
-                                             ratio_bounds=ratio_bounds)
+                                             ratio_bounds=ratio_bounds, bounded=bounded)
         # Only the loud round, because `reported` exists to be corrected against what the
         # reader was actually shown. The quiet rounds print nothing to correct.
         if not quiet:
@@ -743,7 +745,8 @@ def _fall_back_to_offset_curbs(leg) -> None:
 
 def _apply_traced_curb_lines(legs: dict, kerb_ways: list, center_ft: Point,
                               quiet: bool = False,
-                              ratio_bounds: tuple[float, float] | None = None
+                              ratio_bounds: tuple[float, float] | None = None,
+                              bounded: bool = False
                               ) -> dict[tuple[str, str], tuple[float, float]]:
     """Replace a leg's derived curb lines with the surveyor's traced kerbs.
 
@@ -770,7 +773,7 @@ def _apply_traced_curb_lines(legs: dict, kerb_ways: list, center_ft: Point,
     if not lines:
         return {}
     coverage: dict[tuple[str, str], tuple[float, float]] = {}
-    assigned = assign_curb_points_to_legs(legs, lines, ratio_bounds)
+    assigned = assign_curb_points_to_legs(legs, lines, ratio_bounds, bounded)
     # Which kerbs have no corner return at their junction end, and so should be extended in
     # to the node rather than stopping where the tracing happens to stop.
     straight_through = through_street_sides(legs)

@@ -603,11 +603,22 @@ def apply_osm_parking(state: DesignState, model: "IntersectionModel", depth_ft: 
         half_ft = leg.curb_to_curb_ft / 2
         lane_edge_from_nominal_ft = half_ft - TARGET_LANE_WIDTH_FT
         room_ft = {side: kerbside_allowance_ft(leg, side) for side in ("left", "right")}
-        if not untouched or max(room_ft[s] for s in untouched) <= 0:
+        # BOTH DATUMS HAVE TO HAVE ROOM, not just the one that measures. The traced kerb can spare
+        # 3.9 ft beside a lane while the nominal half-width, which is where the paint is PLACED
+        # from, sits INSIDE the lane edge: Seminary Ave is 29.7 ft between its traced kerbs for
+        # the first 117 ft and 21.1 ft nominal over its 414, so its lane edge is -0.43 ft out and
+        # the hatch it was handed had a negative width. A kerb the nominal datum leaves less than
+        # a paintable zone is left unpainted, as MIN_HATCHED_ZONE_FT says everywhere else.
+        # The nominal lane edge must not exceed the traced kerb offset on ANY untouched side:
+        # if it does, the paint would be drawn past the kerb, which is a fatal invariant violation.
+        if (not untouched or max(room_ft[s] for s in untouched) <= 0
+                or lane_edge_from_nominal_ft < MIN_HATCHED_ZONE_FT
+                or any(lane_edge_from_nominal_ft > room_ft[s] for s in untouched)):
             if untouched:
                 print(f"  NOTE: {leg_name} is {leg.curb_to_curb_ft:.1f} ft curb to curb - too narrow "
-                      f"for two {TARGET_LANE_WIDTH_FT:.0f} ft lanes, so no kerbside paint is marked "
-                      f"here. Its lanes are {half_ft:.1f} ft as they stand.")
+                      f"for two {TARGET_LANE_WIDTH_FT:.0f} ft lanes plus a paintable kerbside zone, "
+                      f"so no kerbside paint is marked here. Its lanes are {half_ft:.1f} ft as they "
+                      f"stand.")
             continue
 
         # Hatched end to end only where the restriction covers the whole kerb. A kerb restricted

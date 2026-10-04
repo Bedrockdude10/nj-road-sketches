@@ -13,6 +13,8 @@ for empty.
 """
 from __future__ import annotations
 
+from collections import defaultdict
+
 from itertools import pairwise
 
 import geopandas as gpd
@@ -119,7 +121,32 @@ def _approaches(line: LineString, nodes: list[Point]) -> list[LineString]:
     return pieces
 
 
-def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float], nodes: list[Point],
+def _traced_widths(streets: gpd.GeoDataFrame, paved: gpd.GeoDataFrame) -> dict[int, float]:
+    """{street row: the width of ITS OWN asphalt}, pavement polygon area over centreline length.
+
+    PER FEATURE, NOT PER NAME. A street is several features (Broad Street is a dozen, Eaton Place
+    four) and each has a pavement polygon of its own, so keying by name kept ONE polygon's area
+    and divided it by the length of every feature sharing the name: Eaton Place's 6,350 sq ft over
+    1,133 ft of its four pieces read 5.6 ft wide, and every one of them was drawn that wide. A
+    window holding one feature per name never saw it.
+
+    A pavement belongs to the same-named street whose MIDDLE it contains - the midpoint of the
+    line, not its centroid, which for a closed loop is the empty middle of the ring.
+    """
+    widths: dict[int, float] = {}
+    for index, street in streets.iterrows():
+        if street.geometry.length <= 0:
+            continue
+        middle = street.geometry.interpolate(0.5, normalized=True)
+        own = paved[paved["name_"] == street["name_"]]
+        if own.empty:
+            continue
+        pavement = own.geometry.iloc[int(own.geometry.distance(middle).argmin())]
+        widths[index] = pavement.area / street.geometry.length
+    return widths
+
+
+def _legs_of(streets: gpd.GeoDataFrame, width_by_street: dict[int, float], nodes: list[Point],
              street_of: dict[str, str]) -> dict[str, Leg]:
     """One leg per APPROACH: each named street in the window, cut at every junction on it.
 
@@ -128,13 +155,20 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float], nodes: 
     treatment applies to all of the street in the picture by construction.
     """
     legs: dict[str, Leg] = {}
+    taken: dict[str, int] = defaultdict(int)
     for row in streets.itertuples():
         pieces = [approach
                   for part in getattr(row.geometry, "geoms", [row.geometry])
                   if isinstance(part, LineString) and part.length > 0
                   for approach in _approaches(part, nodes)]
-        for index, piece in enumerate(pieces):
-            slug = str(row.name_).lower().replace(" ", "_")
+        slug = str(row.name_).lower().replace(" ", "_")
+        for piece in pieces:
+            # NUMBERED ACROSS EVERY FEATURE OF THE NAME, not within one. A street is several
+            # features (Eaton Place four, Prospect Street two) and each started again at the bare
+            # slug, so the second feature's first piece overwrote the first's: 99 approaches
+            # went in and 92 legs came out, the seven that vanished being whole streets.
+            index = taken[slug]
+            taken[slug] += 1
             key = slug if index == 0 else f"{slug}_{index}"
             # `Leg.name` IS THE KEY, as it is at a site. The street name lives only in
             # `config["legs"][key]["street_name"]`, which is where `legs_on_road` reads it and
@@ -149,7 +183,7 @@ def _legs_of(streets: gpd.GeoDataFrame, width_by_name: dict[str, float], nodes: 
             # nothing to fit a lane into" rather than failing. The document's own figure, the
             # one corridor_pavement drew the asphalt to.
             legs[key] = Leg(name=key, centerline=piece,
-                            curb_to_curb_ft=width_by_name.get(str(row.name_)))
+                            curb_to_curb_ft=width_by_street.get(row.Index))
             street_of[key] = str(row.name_)
     return legs
 
@@ -207,7 +241,7 @@ def _fit_to_traced_kerbs(legs: dict[str, Leg], groups: list[dict[str, Leg]],
                                             centerline=group[name].centerline,
                                             curb_to_curb_ft=width_ft)
         node = Point(next(iter(group.values())).centerline.coords[0])
-        _fit_legs_to_traced_kerbs(group, kerb_ways, node, {})
+        _fit_legs_to_traced_kerbs(group, kerb_ways, node, {}, bounded=True)
         _centre_legs_on_traced_kerbs(group)
         _join_through_legs(group)
         legs.update(group)
@@ -254,10 +288,8 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None,
     # half-width lands inside its own street's pavement and furniture_in_roadway fires. One kerb
     # for the drawing and the placement, which is the whole of that invariant's complaint.
     # `name_`, because itertuples gives every row a `.name` of its own - the index's.
-    paved = features[features["kind"] == "pavement"].rename(columns={"name": "name_"})
-    traced = {row.name_: row.geometry.area / length
-              for row in paved.itertuples()
-              if (length := streets[streets["name_"] == row.name_].geometry.length.sum()) > 0}
+    traced = _traced_widths(streets, features[features["kind"] == "pavement"]
+                            .rename(columns={"name": "name_"}))
     nodes = junction_nodes(features)
     street_of: dict[str, str] = {}
     legs = _legs_of(streets, traced, nodes, street_of)

@@ -378,7 +378,8 @@ def corner_return_scale(leg, legs) -> float:
 
 
 def assign_curb_points_to_legs(legs: dict, kerb_lines: list[LineString],
-                                ratio_bounds: tuple[float, float] | None = None) -> dict:
+                                ratio_bounds: tuple[float, float] | None = None,
+                                bounded: bool = False) -> dict:
     """{leg_name: {"left": [(station, offset), ...], "right": [...]}} from traced kerbs.
 
     Every vertex of every traced kerb way is considered, and goes to the single leg side
@@ -398,6 +399,16 @@ def assign_curb_points_to_legs(legs: dict, kerb_lines: list[LineString],
     NJDOT's badly off-centre alignment, sat at 0.43x and was discarded as a median. Opening
     the window admits both, and the proportional scoring still hands each vertex to the leg
     it best fits. See src/geometry/intersection/fitting.py:_fit_legs_to_traced_kerbs.
+
+    `bounded` says the legs are drawn NODE TO NODE, so a leg's far end is a junction and a vertex
+    past it belongs to the next leg's street, not to this one. It defaults off because a site's
+    legs are not like that: they are stubs cut at a working length of 130-170 ft, and the kerb
+    vertices beyond that cut are this street's own, which `curb_line_from_points` reads to carry
+    the curb out to it (claims overshoot the cut by up to 295 ft at the seven Hopewell sites, and
+    bounding them moved ebroad_princeton and wbroad_louellen). In a world of node-to-node legs the
+    terminal ray that station_offset_many measures a past-the-end vertex against runs on forever,
+    and broad_street_1 (1,464.6 ft) claimed vertices out to station 4,829 - the Broad Street kerb
+    3,300 ft down the road, 19 ft off the extension of its end - and drew a 4,836 ft kerb.
     """
     if not kerb_lines:
         return {}
@@ -428,7 +439,9 @@ def assign_curb_points_to_legs(legs: dict, kerb_lines: list[LineString],
         # were judged on ratio alone and a badly seeded width won the contest.
         reach_ft = CURB_POINT_CORNER_ZONE_FT * corner_return_scale(leg, legs)
         doubted = skewed & (leg_stations > CURB_POINT_CORNER_ZONE_FT)
-        disqualified = ((leg_stations < -CURB_POINT_BEHIND_TOLERANCE_FT)
+        past_the_end = (bounded & (leg_stations > leg.centerline.length
+                                   + CURB_POINT_BEHIND_TOLERANCE_FT))
+        disqualified = ((leg_stations < -CURB_POINT_BEHIND_TOLERANCE_FT) | past_the_end
                         | (ratio < low) | (ratio > high)
                         | (skewed & (leg_stations > reach_ft)))
         # Still claimable behind the node, but only if nobody has it in front - see

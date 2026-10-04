@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 import numpy as np
-from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from shapely.geometry import LinearRing, LineString, MultiLineString, Point, Polygon
 from shapely.ops import linemerge
 
 
@@ -94,6 +94,8 @@ def offset_curb_line(centerline: LineString, offset_ft: float) -> LineString:
     Refuses a result that does not join, which is a REAL gap - the offset exceeds the radius of
     a bend and the inside has collapsed - rather than handing back a line that is not the curb.
     """
+    if centerline.is_ring:
+        return _offset_ring(centerline, offset_ft)
     curb = centerline.offset_curve(offset_ft)
     if not isinstance(curb, MultiLineString):
         return curb
@@ -108,6 +110,38 @@ def offset_curb_line(centerline: LineString, offset_ft: float) -> LineString:
     if Point(curb.coords[-1]).distance(start) < Point(curb.coords[0]).distance(start):
         curb = LineString(curb.coords[::-1])
     return curb
+
+
+def _offset_ring(centerline: LineString, offset_ft: float) -> LineString:
+    """The curb of a street that closes on itself - a turning loop - as one closed ring.
+
+    `offset_curve` treats a closed line as an open one with two ends, so the offset of a ring
+    stays open and carries the cap where its ends meet: on Eaton Place's 253 ft loop the OUTER
+    curb came back 74 vertices long with a stub that crosses the centreline (offsets from +12.5
+    to -5.6) and stations out to 287 ft on a line 253 ft long. The inner curb happened to close;
+    which side breaks is whichever the loop is wound against, which is why only one did.
+
+    So the ring is offset as the ring it is: the buffer of the area it encloses, whose boundary
+    is the curb whichever way the loop is wound. Left is the inside of a counter-clockwise loop
+    and the outside of a clockwise one. It is rotated to start where the centreline does, and
+    run in the same direction, because curb readers take coords[0] as the junction end.
+    """
+    ring = LinearRing(centerline.coords)
+    outside = (offset_ft > 0) == (not ring.is_ccw)
+    shape = Polygon(ring).buffer(abs(offset_ft) if outside else -abs(offset_ft))
+    parts = [g for g in getattr(shape, "geoms", [shape]) if not g.is_empty]
+    if not parts:
+        raise ValueError(
+            f"offsetting a {centerline.length:.0f} ft loop {offset_ft:+.2f} ft collapsed it - the "
+            f"offset is larger than the loop's radius.")
+    boundary = LinearRing(max(parts, key=lambda g: g.area).exterior.coords)
+    coords = list(boundary.coords)[:-1]
+    if boundary.is_ccw != ring.is_ccw:
+        coords.reverse()
+    start = Point(centerline.coords[0])
+    first = min(range(len(coords)), key=lambda i: Point(coords[i]).distance(start))
+    coords = coords[first:] + coords[:first]
+    return LineString([*coords, coords[0]])
 
 
 def unit_vector(v: np.ndarray) -> np.ndarray:
@@ -1216,9 +1250,15 @@ def station_offset_many(centerline: LineString, points: np.ndarray) -> tuple[np.
 
     # The two terminal rays: the first and last segments, unbounded on their outward side.
     lower = np.zeros_like(seg_len)
-    lower[0] = -np.inf
     upper = np.array(seg_len, dtype=float)
-    upper[-1] = np.inf
+    # EXCEPT ON A LOOP. A centreline that returns to its own start has no outward side at either
+    # end - the street carries on round the loop - and its terminal rays run straight through the
+    # enclosed ground and the outer kerb: on Eaton Place's 253 ft ring a vertex of the outer curb
+    # 12.5 ft from the centreline was 2.6 ft from the end ray, so it was read as station 284 on a
+    # 253 ft street and the curb was reported 33 ft back through a junction it never reaches.
+    if not np.array_equal(verts[0], verts[-1]):
+        lower[0] = -np.inf
+        upper[-1] = np.inf
 
     clamped = np.clip(along, lower[None, :], upper[None, :])
     perp = rel - clamped[:, :, None] * seg_dir[None, :, :]
