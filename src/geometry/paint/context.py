@@ -26,6 +26,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,
     # so importing them for real would close a cycle.
     from shapely.geometry import Point
+    from src.geometry.markings import PaintKind
+    from src.geometry.paint.datum import KerbToKerb, Ref
+    from src.geometry.targets import Side
     from src.geometry.treatments.state import DesignState
 
 @dataclass
@@ -109,7 +112,7 @@ class PaintContext:
         return piece
 
     def add(self, kind, geometry, leg=None, side: str | None = None, beyond_ft=None,
-            shares_a_kerb=False, datum: dict | None = None):
+            shares_a_kerb=False, datum: dict[str, float] | None = None):
         """Clip `geometry` clear of the crossings, keep what survives, return those pieces.
 
         beyond_ft drops any surviving piece that fell WHOLLY on the JUNCTION side of the
@@ -492,8 +495,7 @@ class PaintContext:
                             crosswalk_is_marked=leg_name in self.marked,
                             mouth_end_ft=None if mouth is None else mouth[1])
 
-    def paint(self, kind, leg_name: str, side: str, span: tuple[float, float], outer, inner=None,
-              step_ft: float = 1.0, **add_kwargs) -> list[PaintPiece]:
+    def paint(self, kind: "PaintKind", leg_name: str, side: "Side | str", span: tuple[float, float], outer: "Ref | KerbToKerb", inner: "Ref | None" = None, step_ft: float = 1.0, **add_kwargs) -> list[PaintPiece]:
         """Paint a marking using the datum system.
 
         Computes the geometry and datum for a marking defined by outer/inner references.
