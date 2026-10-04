@@ -23,7 +23,7 @@ a layer is empty only where nothing is mapped in the whole area.
 import math
 from dataclasses import dataclass
 
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, Point, box
 from shapely.ops import unary_union
 
 from typing import TYPE_CHECKING
@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,
     # so importing them for real would close a cycle.
     from src.geometry.intersection.junction import IntersectionModel
+    from src.render.frame import Frame
 
 # How much of a surveyed way's own length has to lie under drawn paint before the drawing counts
 # as containing it. Measured: a drawn crossing has 62-91% of its traced length inside its band (the
@@ -107,7 +108,7 @@ class Uncovered:
         return f"{self.layer}: {self.count} of {self.total} surveyed in the frame are not drawn"
 
 
-def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | None = None,
+def coverage_gaps(model: "IntersectionModel", paint, frame: "Frame | None" = None,
                   osm: dict | None = None) -> list[Uncovered]:
     """Every layer where the drawing omits a surveyed feature inside its own frame.
 
@@ -119,7 +120,9 @@ def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | No
         paint, props = scene.build_paint_and_posts(props)
         coverage_gaps(model, [*paint, *scene.crosswalk_bands.values(), *props])
 
-    `frame_radius_ft` defaults to the frame both views draw (src/render/frame.py:junction_frame).
+    `frame` is the VIEW being audited - the square a sheet draws - and defaults to the one both
+    views draw (src/render/frame.py:junction_frame). It decides what is in the picture, never
+    what exists: the features come from the whole area's layers.
     Only layers WITH a gap come back; an empty list means the drawing is faithful.
 
     `osm` is what the drawing itself was built from - keyed `crossings`, `traffic_control`,
@@ -132,10 +135,10 @@ def coverage_gaps(model: "IntersectionModel", paint, frame_radius_ft: float | No
     # repo has to survive one of those rather than raising on it.
     if not all(hasattr(model, attr) for attr in ("center_wgs84", "center_ft", "legs", "osm")):
         return []
-    radius_ft = _frame_radius_ft(model, frame_radius_ft)
+    frame = frame if frame is not None else _junction_frame(model)
     osm = osm if osm is not None else model.osm
     drawing = _read_drawing(paint)
-    gaps = [layer(model, drawing, radius_ft, osm) for layer in LAYERS]
+    gaps = [layer(model, drawing, frame, osm) for layer in LAYERS]
     return [gap for gap in gaps if gap is not None]
 
 
@@ -248,33 +251,25 @@ def _read_drawing(paint) -> _Drawing:
                     lines=tuple(drawn_lines))
 
 
-def _frame_radius_ft(model: "IntersectionModel", given: float | None) -> float:
-    """The radius of the frame both views draw, or the caller's own.
-
-    Local import: src.render.frame reaches back into src.geometry.model, and this module is
-    imported from src.geometry.
-    """
-    if given is not None:
-        return float(given)
+def _junction_frame(model: "IntersectionModel") -> "Frame":
+    """The frame both views draw. Local import: src.render.frame reaches back into
+    src.geometry.model, and this module is imported from src.geometry."""
     from src.render.frame import junction_frame
 
-    return junction_frame(model).radius_ft
+    return junction_frame(model)
 
 
-def _in_frame(model: "IntersectionModel", radius_ft: float):
+def _in_frame(model: "IntersectionModel", frame: "Frame"):
     """A test for "this is in the picture", and the distance to report it at.
 
-    Two different centres: membership from the FRAME's centre (what is drawn), distance from
-    the JUNCTION (what a reader means by "263 ft out"). Against the radius rather than the
-    square, so a feature reported as dropped cannot be dismissed as one the 3D camera never
-    framed.
+    Membership is the frame's own SQUARE - the view the sheet draws. Distance is from the
+    JUNCTION, which is what a reader means by "263 ft out".
     """
-    from src.render.frame import junction_frame
-
-    centre = junction_frame(model).center_ft
+    xmin, xmax, ymin, ymax = frame.bounds_ft()
+    view = box(xmin, ymin, xmax, ymax)
 
     def inside(geometry) -> bool:
-        return geometry.distance(centre) <= radius_ft
+        return geometry.intersects(view)
 
     def out_ft(geometry) -> float:
         return geometry.distance(model.center_ft)
@@ -308,7 +303,7 @@ def _uncovered(layer: str, features: list[tuple]) -> Uncovered | None:
 # The layers
 # ---------------------------------------------------------------------------
 
-def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, frame: "Frame",
                   osm: dict) -> Uncovered | None:
     """Surveyed pedestrian crossings the drawing does not draw.
 
@@ -332,7 +327,7 @@ def crossing_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: floa
     angles, and buffering it would let it "cover" a fifth of each); what counts here is a drawn
     line that runs ALONG the crossing rather than across it.
     """
-    inside, out_ft = _in_frame(model, radius_ft)
+    inside, out_ft = _in_frame(model, frame)
     features, unrecorded = [], []
     for crossing in osm["crossings"]:
         line = _line_ft(crossing["coords_wgs84"])
@@ -379,7 +374,7 @@ def _markings_label(tags: dict | None) -> str:
     return "no markings tag"
 
 
-def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, frame: "Frame",
               osm: dict) -> Uncovered | None:
     """Traced kerb ways in the frame that the render does not draw. THE CONTROL CASE.
 
@@ -395,7 +390,7 @@ def kerb_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
     """
     from src.geometry.intersection import kerb_lines_with_tags_ft
 
-    inside, out_ft = _in_frame(model, radius_ft)
+    inside, out_ft = _in_frame(model, frame)
     handed_over = {way_id for _line, _tags, way_id in kerb_lines_with_tags_ft(osm)}
     features = [(way_id in handed_over, out_ft(line),
                  f"traced kerb way {way_id}, {line.length:.0f} ft long, kerb={(tags or {}).get('kerb', 'untagged')}")
@@ -410,7 +405,7 @@ def _kerb_ways_ft(osm: dict):
             for kerb in osm["kerbs"] if len(kerb.get("coords_wgs84") or []) >= 2]
 
 
-def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, frame: "Frame",
                    osm: dict) -> Uncovered | None:
     """Surveyed kerb ramps - kerb ways tagged tactile_paving=yes - with no pad drawn on them.
 
@@ -422,7 +417,7 @@ def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: flo
     """
     from src.geometry.intersection import kerb_lines_with_tags_ft
 
-    inside, out_ft = _in_frame(model, radius_ft)
+    inside, out_ft = _in_frame(model, frame)
     pads = drawing.props_of(("tactile_paving_pad",))
     features = []
     for line, tags, way_id in kerb_lines_with_tags_ft(osm):
@@ -435,7 +430,7 @@ def kerb_ramp_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: flo
     return _uncovered("kerb_ramps", features)
 
 
-def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_ft: float,
+def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, frame: "Frame",
                          osm: dict) -> Uncovered | None:
     """Surveyed stop / give-way / signal nodes with no hardware drawn for them.
 
@@ -448,7 +443,7 @@ def traffic_control_gaps(model: "IntersectionModel", drawing: _Drawing, radius_f
     """
     from src.render.props import control_nodes_ft  # local: props imports geometry, avoid a cycle
 
-    inside, out_ft = _in_frame(model, radius_ft)
+    inside, out_ft = _in_frame(model, frame)
     features = []
     for node in control_nodes_ft(osm["traffic_control"]):
         kind = (node.get("tags") or {}).get("highway")

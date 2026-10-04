@@ -15,6 +15,7 @@ Requires Blender on PATH, or set BLENDER_BIN to the executable
 (e.g. /Applications/Blender.app/Contents/MacOS/Blender on macOS).
 """
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -102,6 +103,41 @@ def render_all(blender_bin: str, jobs: list[tuple[Path, Path]]):
                            f"Scenes in this batch: {scenes}")
     for _, output_path in jobs:
         print(f"Rendered {output_path}")
+
+
+def _run_blender(cmd: list[str], token: str, expected: int, what: str) -> None:
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    done = result.stdout.count(token)
+    if result.returncode == 0 and done == expected:
+        return
+    if result.returncode == -signal.SIGKILL:
+        raise RuntimeError(f"Blender was killed by the OS (SIGKILL) during {what} - almost "
+                           f"always out of memory.")
+    print(result.stdout[-3000:])
+    print(result.stderr[-3000:])
+    raise RuntimeError(f"Blender {what} failed ({done}/{expected} done, exit {result.returncode}).")
+
+
+def build_world(blender_bin: str, world_json: Path, blend_path: Path) -> Path:
+    """Build the whole world from one geometry JSON and save it as a .blend - once."""
+    blend_path.parent.mkdir(parents=True, exist_ok=True)
+    _run_blender([blender_bin, "--background", "--python", str(BLENDER_SCENE_SCRIPT), "--",
+                  "--build", str(world_json), "--save", str(blend_path)],
+                 "WORLD_SAVED", 1, f"world build of {world_json.name}")
+    return blend_path
+
+
+def render_cameras(blender_bin: str, blend_path: Path, cameras: list[dict], out_dir: Path
+                   ) -> list[Path]:
+    """One PNG per camera in a saved world, all in one Blender process. A camera is
+    {"name", "center_m", "radius_m"} in the world JSON's own local-metre frame."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    spec = out_dir / "cameras.json"
+    spec.write_text(json.dumps(cameras, indent=1))
+    _run_blender([blender_bin, "--background", "--python", str(BLENDER_SCENE_SCRIPT), "--",
+                  "--open", str(blend_path), "--camera", str(spec), "--out-dir", str(out_dir)],
+                 "RENDER_DONE", len(cameras), f"camera renders from {blend_path.name}")
+    return [out_dir / f"{camera['name']}.png" for camera in cameras]
 
 
 def main():

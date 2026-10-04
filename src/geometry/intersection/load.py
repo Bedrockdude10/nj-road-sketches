@@ -12,7 +12,7 @@ from src.sources.data_loader import load_parcels_in, load_road_network
 from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
 from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.municipality import municipal_limits_ft
-from src.render.frame import frame_scale, set_drawn_reach_ft
+from src.render.frame import frame_scale
 from src.geometry.model import (
     Leg,
     assign_kerbs_to_corners,
@@ -128,9 +128,6 @@ def load_intersection_model(config: dict | None = None, site: str | None = None)
     # reports the projected part separately so a stall count does not move with a camera setting.
     scale = frame_scale()
     leg_lengths = {name: length * scale for name, length in surveyed_leg_lengths.items()}
-    # How far this model is about to DRAW, which the camera's frame is sized from - see
-    # src/render/frame.py:_drawn_reach_ft. It decides what is VISIBLE, never what exists.
-    set_drawn_reach_ft(max(leg_lengths.values(), default=0.0))
     # ...and that scaled length is the WHOLE story: no second, shorter span travels with the Leg
     # for treatments to be sized over. A treatment applies to the street in the drawing, so what
     # the street can hold is asked over exactly the street the reader is looking at. Sizing over a
