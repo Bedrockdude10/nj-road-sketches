@@ -9,6 +9,7 @@ from shapely.geometry import LineString, Point, Polygon
 
 from src.geometry.intersection import IntersectionModel
 from src.checks import PAD_MAX_DISTANCE_FROM_CURB_FT, _all_curb_lines
+from src.geometry.coverage import CONTROL_NEAR_NODE_FT
 from src.geometry.model import bollard_points_ft, build_pavement_polygon, leg_clearance_ft
 from src.geometry.treatments import DesignState
 from src.render.coords import FT_TO_M, wgs84_to_state_plane
@@ -29,10 +30,37 @@ def control_nodes_ft(traffic_control: list[dict] | None) -> list[dict]:
     return out
 
 
+def controls_at_junction(model, nodes) -> list[dict]:
+    """The control nodes standing AT this model's junction, from the whole world's layer.
+
+    A RELATION TO THE JUNCTION'S OWN LEGS, NOT A CIRCLE ABOUT ITS CENTRE: a node governs this
+    junction when it stands within CONTROL_NEAR_NODE_FT of where one of its legs meets it, which
+    is the measured "this node belongs to this junction" distance (src/geometry/coverage.py -
+    15-43 ft for a node that does against 250 ft for one that does not). Whether THIS junction
+    is signalized therefore cannot be decided by a signal at another one, however close the
+    street runs - the 60 m net this replaces pulled in a neighbour's at any junction pair closer
+    than that.
+
+    A model holding several junctions (a window onto the network) keeps the nodes at any of them.
+    """
+    legs = getattr(model, "legs", {}).values()
+    return [node for node in nodes if any(stands_at_mouth(leg, node) for leg in legs)]
+
+
+def stands_at_mouth(leg, node: dict) -> bool:
+    """Is this control node within CONTROL_NEAR_NODE_FT of where `leg` meets its junction?
+
+    lon/lat, as every control node in this project's layers carries them - a node layer holds
+    {"lon", "lat", "tags"}, not the {"coords_wgs84"} a WAY carries.
+    """
+    point = Point(*wgs84_to_state_plane.transform(node["lon"], node["lat"]))
+    return leg.centerline.interpolate(0.0).distance(point) <= CONTROL_NEAR_NODE_FT
+
+
 def _osm_streetlight_props(nodes_ft: list[dict]) -> list[dict]:
     """Streetlights at their real OSM-surveyed positions.
 
-    Returns [] when no highway=street_lamp node is mapped nearby - the case at every one
+    Returns [] when no highway=street_lamp node is mapped in the world - the case at every one
     of this project's four sites - and nothing is drawn. There is deliberately no
     fallback: a lamp at every corner was the previous behaviour and it fabricated all 14
     lamps across the four sites. See build_props and data_gaps.
@@ -407,8 +435,7 @@ def _tactile_pad_props(line: LineString, pavement, leg_name: str, heading: float
 
 
 def _osm_crossing_hardware_props(state: DesignState, crossings: list[dict], nodes_ft: list[dict],
-                                  kerb_ways: list | None = None, center_ft: Point = None,
-                                  pavement=None) -> list[dict]:
+                                  kerb_ways: list | None = None, pavement=None) -> list[dict]:
     """Pushbuttons, RRFBs and tactile paving pads for every crossing we can match to a leg.
 
     Reuses the same matcher the crosswalk geometry uses, so a crossing credited to a leg
@@ -685,7 +712,7 @@ def _bollard_props(state: DesignState) -> list[dict]:
     return props
 
 
-def _traffic_signal_props(model: IntersectionModel, state: DesignState, center_ft: Point,
+def _traffic_signal_props(model: IntersectionModel, state: DesignState,
                            pavement=None) -> list[dict]:
     """
     Traffic signal pole + pedestrian signal head at each corner listed in the
@@ -717,7 +744,7 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState, center_f
         if cfg is None:
             continue
         mid = pieces["arc"].interpolate(0.5, normalized=True)
-        outward = np.array([mid.x - center_ft.x, mid.y - center_ft.y])
+        outward = np.array([mid.x - model.center_ft.x, mid.y - model.center_ft.y])
         norm = np.linalg.norm(outward)
         outward = outward / norm if norm > 1e-6 else np.array([1.0, 0.0])
         # A signal pole stands on the corner footway. The fillet arc midpoint is on the
@@ -1043,12 +1070,15 @@ def _daylight_device_props(state: DesignState, offsets_ft: dict, so_far: list[di
     return props
 
 
-def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, center_ft: Point,
-                 traffic_control: list[dict] | None = None, street_furniture: list[dict] | None = None,
-                 crossings: list[dict] | None = None, kerb_ways: list | None = None,
+def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict,
                  pavement=None) -> list[dict]:
-    """All street-furniture props for one scenario export: a streetlight at every corner
-    (always), the junction's traffic control, and any site- or scenario-specific extras.
+    """All street-furniture props for one scenario export: every surveyed streetlight, the
+    junction's traffic control, and any site- or scenario-specific extras.
+
+    THE SURVEYED PROPS ARE READ FROM `model.osm` - the whole world, not a circle about this
+    junction. Each one that belongs to a junction is matched to it by the geometry that makes it
+    belong: a stop node to the leg it stands on, a pad to the kerb it sits against, a pushbutton
+    to the crossing way it ends.
 
     NOTHING IS DRAWN THAT ISN'T ATTESTED. A prop appears only if its EXISTENCE is
     recorded either in OSM or in the site config's own observations. There is no
@@ -1080,16 +1110,16 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, 
     Signals and stop signs are not mutually exclusive: a signalized junction can still
     have a stop sign on a minor approach, and OSM will say so if it does.
     """
-    furniture_ft = control_nodes_ft(street_furniture)  # same lon/lat -> point_ft conversion
-    control_ft = control_nodes_ft(traffic_control)
+    furniture_ft = control_nodes_ft(model.osm["street_furniture"])  # same lon/lat -> point_ft conversion
+    control_ft = control_nodes_ft(model.osm["traffic_control"])
     pavement = pavement if pavement is not None else _modelled_pavement(state)
     props = (
         _osm_streetlight_props(furniture_ft)
         + _osm_control_props(state, control_ft, pavement)
-        + _osm_crossing_hardware_props(state, crossings or [], control_ft, kerb_ways, center_ft,
-                                        pavement)
+        + _osm_crossing_hardware_props(state, model.osm["crossings"], control_ft,
+                                        model.osm["kerbs"], pavement)
         + _hydrant_props(furniture_ft)
-        + _traffic_signal_props(model, state, center_ft, pavement)
+        + _traffic_signal_props(model, state, pavement)
         + _no_turn_on_red_props(model, state, offsets_ft, pavement)
         + _extra_props_from_config(model, state, offsets_ft, pavement)
         + _extra_props_from_state(state, offsets_ft, pavement)
@@ -1102,13 +1132,17 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict, 
     return props + _daylight_device_props(state, offsets_ft, props)
 
 
-def data_gaps(traffic_control: list[dict] | None, street_furniture: list[dict] | None,
-               signalized: bool = False) -> list[str]:
+def data_gaps(model: IntersectionModel) -> list[str]:
     """Describe what this junction is being DERIVED rather than sourced, so a gap in OSM
     is visible in the phase output instead of silently becoming a confident-looking prop.
 
-    Every item here is a concrete invitation to improve the render by improving OSM.
+    Every item here is a concrete invitation to improve the render by improving OSM. The control
+    nodes are the ones AT this junction (`controls_at_junction`); the lamps are the world's,
+    because that is the set the render draws from.
     """
+    street_furniture = model.osm["street_furniture"]
+    traffic_control = controls_at_junction(model, model.osm["traffic_control"])
+    signalized = bool(model.config.get("signals"))
     gaps = []
     if not any(n["tags"].get("highway") == "street_lamp" for n in (street_furniture or [])):
         gaps.append("no highway=street_lamp nodes mapped - NO streetlights are drawn. Map them in OSM "
@@ -1121,7 +1155,7 @@ def data_gaps(traffic_control: list[dict] | None, street_furniture: list[dict] |
                     "NO traffic control is drawn at all. Map the control in OSM, or record it in "
                     "the site config.")
     # tactile_paving / button_operated live on the highway=crossing NODES, which
-    # fetch_traffic_control returns - NOT on the crossing ways from fetch_crossings.
+    # the traffic_control layer holds - NOT on the crossing ways of the crossings layer.
     crossing_nodes = [n for n in (traffic_control or []) if n["tags"].get("highway") == "crossing"]
     if not crossing_nodes:
         gaps.append("no highway=crossing nodes mapped - no pedestrian-facing crossing detail "
@@ -1175,14 +1209,15 @@ def hydrant_position_conflicts(street_furniture: list[dict] | None, pavement) ->
     return notes
 
 
-def signalization_conflicts(model: IntersectionModel, traffic_control: list[dict] | None) -> list[str]:
+def signalization_conflicts(model: IntersectionModel) -> list[str]:
     """Cross-check the config's observed signal state against OSM's, and describe any
     disagreement. Purely advisory - the observation wins either way (see build_props) -
     but a silent disagreement between two sources is worth surfacing, the same way
     phase2 reports a field-measured width that OSM's sidewalks contradict.
     """
     configured = bool(model.config.get("signals"))
-    osm_signalled = any(n["tags"].get("highway") == "traffic_signals" for n in (traffic_control or []))
+    osm_signalled = any(n["tags"].get("highway") == "traffic_signals"
+                        for n in controls_at_junction(model, model.osm["traffic_control"]))
     if configured and not osm_signalled:
         return ["config declares a `signals` block but OSM maps no traffic_signals node here. "
                 "The observation stands; consider adding the signal to OSM."]

@@ -62,15 +62,11 @@ from src.geometry.targets import BOTH_SIDES
 from src.geometry.treatments.base import TARGET_LANE_WIDTH_FT, kerbside_allowance_ft
 from src.render.crosswalks import crosswalk_reach_on_leg_side_ft
 from src.geometry.treatments import DesignState, existing_conditions
-from src.render.export import (BUILDING_CONTEXT_RADIUS_M, KERB_RADIUS_M,
-                               TRAFFIC_CONTROL_RADIUS_M)
 from src.render.frame import FRAME_SCALE_ENV
 from src.render.coords import FT_TO_M
 from src.render.props import build_props
 from src.render.scene import SceneGeometry
 from src.site import list_sites, load_site_scenarios, run_scenario
-from src.sources.osm_context import (fetch_crossings, fetch_kerbs, fetch_street_furniture,
-                                     fetch_traffic_control)
 
 
 class Built(NamedTuple):
@@ -111,15 +107,10 @@ def build(site: str, scenario: str | None) -> Built:
             # existing-conditions drawing has a 20 ft angled bay against each kerb, which is the
             # measuring tool making the mistake its own report is supposed to catch.
             state = existing_conditions(model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
-        scene = SceneGeometry.resolve(model, state, crossings)
-        props = build_props(model, state, scene.crosswalk_offsets, model.center_ft,
-                            fetch_traffic_control(model.center_wgs84, radius_m=TRAFFIC_CONTROL_RADIUS_M),
-                            fetch_street_furniture(model.center_wgs84,
-                                                   radius_m=BUILDING_CONTEXT_RADIUS_M),
-                            crossings, fetch_kerbs(model.center_wgs84, radius_m=KERB_RADIUS_M))
+        scene = SceneGeometry.resolve(model, state)
+        props = build_props(model, state, scene.crosswalk_offsets)
         paint, _props = scene.build_paint_and_posts(props)
-    return Built(model, state, scene, paint, crossings)
+    return Built(model, state, scene, paint, model.osm["crossings"])
 
 
 def piece_coords(geom) -> np.ndarray:

@@ -13,11 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import matplotlib.pyplot as plt
 
 from src.geometry.intersection import load_intersection_model
-from src.render.plan_view import (BUILDING_CONTEXT_RADIUS_M, draw_change_panel, legend_handles,
-                                   plot_design_state)
+from src.render.plan_view import draw_change_panel, legend_handles, plot_design_state
 from src.site import DEFAULT_SCENARIO, add_scenario_arg, add_site_arg, load_site_scenarios, scenario_label, site_output_dir, run_scenario
 from src.geometry.treatments import DesignState, existing_conditions
-from src.sources.osm_context import fetch_crossings
 
 
 def main():
@@ -31,19 +29,13 @@ def main():
     for note in scenario.notes:
         print(f"  {note}")
 
-    # Fetched once and reused for both panels (same real crossings either way) - the exact same
-    # radius/source src/render/export.py's 3D pipeline uses, so a leg's crosswalk_offset here always
-    # matches what the 3D render is built from.
-    crossings = fetch_crossings(model.center_wgs84, radius_m=BUILDING_CONTEXT_RADIUS_M)
-
     fig, axes = plt.subplots(1, 2, figsize=(18, 10))
     # existing_conditions(model), not the baseline the scenario was built on: this panel is
     # what the proposal is MEASURED AGAINST, so a bay that is already on the ground has to be
     # in it or the comparison credits the proposal with parking it did not add.
     existing = plot_design_state(axes[0], model, existing_conditions(model),
-                                  "Existing Conditions", crossings=crossings)
-    proposed = plot_design_state(axes[1], model, scenario, f"Proposed Treatments ({args.scenario})",
-                                  crossings=crossings)
+                                  "Existing Conditions")
+    proposed = plot_design_state(axes[1], model, scenario, f"Proposed Treatments ({args.scenario})")
     # What the proposal achieves, measured off the two panels above rather than recomputed -
     # see src/metrics.py. Printed as well as drawn: these are the numbers the scenario is
     # discussed in, and reading them off a PNG to quote them is a step nobody should need.
