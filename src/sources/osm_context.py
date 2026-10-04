@@ -1,7 +1,9 @@
-"""OSM/Overpass context data (building massing) for presentation-quality 3D
-renders. This is background dressing only - never used for the authoritative
-curb/pavement geometry, which comes from NJDOT SLD + field measurement (see
-src/sources/data_loader.py for why OSM's own data isn't trusted for that)."""
+"""OSM, read once per area: the one way into OpenStreetMap for this project.
+
+`osm_layers(area)` returns every layer the pipeline reads - kerbs, crossings, roads, buildings,
+signals, furniture, boundaries - over the WHOLE downloaded area, with field observations merged.
+There is no centre and no radius: what exists in a drawing is never a question about where its
+camera stands. Snapshots are downloaded per sites/osm_areas.yaml area and cached."""
 import hashlib
 import json
 import os
@@ -13,7 +15,6 @@ from shapely.geometry import Point, Polygon
 import requests
 
 from src.sources.data_loader import OVERPASS_USER_AGENT, query_overpass
-from src.geometry.model import buffer_point_wgs84
 
 DEFAULT_BUILDING_HEIGHT_M = 7.0  # ~2 stories, typical for small-borough Main St buildings
 METERS_PER_LEVEL = 3.0
@@ -189,37 +190,12 @@ SNAPSHOT_AREAS: dict[str, tuple[float, float, float, float]] = _load_snapshot_ar
 BOROUGH_BBOX = SNAPSHOT_AREAS["hopewell_borough"]
 
 
-class SiteOutsideSnapshotError(RuntimeError):
-    """A site's context window reaches outside every downloaded snapshot area."""
-
-
 def _snapshot_path(bbox: tuple | None = None) -> Path:
     # The key format is unchanged, so Hopewell's cache file and the committed fixture keep
     # the name they already have.
     bbox = BOROUGH_BBOX if bbox is None else bbox
     key = hashlib.sha1(f"borough,v1,{tuple(bbox)}".encode()).hexdigest()[:16]
     return CACHE_DIR / f"borough_{key}.json"
-
-
-def _area_for(center_wgs84: Point, radius_m: float) -> tuple[float, float, float, float]:
-    """The snapshot area whose bbox fully contains this site's context window.
-
-    FULLY contains, not "overlaps": a window half inside an area is served the elements
-    that fall inside it and nothing for the rest - which arrives as geometry rather than
-    as an error.
-    """
-    west, south, east, north = buffer_point_wgs84(center_wgs84, radius_m)
-    for bbox in SNAPSHOT_AREAS.values():
-        bw, bs, be, bn = bbox
-        if west >= bw and south >= bs and east <= be and north <= bn:
-            return bbox
-    areas = "; ".join(f"{name} {bbox}" for name, bbox in SNAPSHOT_AREAS.items())
-    raise SiteOutsideSnapshotError(
-        f"this site's {radius_m:.0f} m context window ({west:.5f},{south:.5f},{east:.5f},"
-        f"{north:.5f}) is not fully inside any downloaded snapshot area. Areas: {areas}. "
-        f"Add one for this site to {SNAPSHOT_AREAS_FILE.parent.name}/{SNAPSHOT_AREAS_FILE.name} "
-        f"(SNAPSHOT_AREAS) - a new area is a separate download and leaves every existing "
-        f"cache and fixture untouched.")
 
 
 def _download_snapshot(bbox: tuple | None = None) -> list[dict]:
@@ -285,34 +261,10 @@ def fetch_borough_osm(use_cache: bool = True, bbox: tuple | None = None) -> dict
     return _MEMO[key]
 
 
-def assert_within_snapshot(center_wgs84: Point, radius_m: float) -> None:
-    """A site reaching outside every snapshot area gets NOTHING, silently, which is precisely
-    how ground truth disappears in this project. Refuse instead."""
-    _area_for(center_wgs84, radius_m)
-
-
-def snapshot_for_site(center_wgs84: Point, radius_m: float) -> dict:
-    """The parsed snapshot covering this site, refusing rather than half-serving it."""
-    return fetch_borough_osm(bbox=_area_for(center_wgs84, radius_m))
-
-
 # One resolved layer per (layer, centre, radius). Each entry stores the snapshot it was built
 # from and is only served while that is still the snapshot in hand - the identity test is what
 # makes a re-pull reach the render without an invalidation call someone could forget.
 _LAYER_VIEWS: dict[tuple, tuple] = {}
-
-
-def _layer(kind: str, center_wgs84: Point, radius_m: float, build):
-    # The site's OWN area, so a view is invalidated by a re-pull of the snapshot it actually
-    # came from. Keyed on the centre and radius as before, which already distinguishes areas.
-    snapshot = snapshot_for_site(center_wgs84, radius_m)
-    key = (kind, round(center_wgs84.x, 7), round(center_wgs84.y, 7), float(radius_m))
-    cached = _LAYER_VIEWS.get(key)
-    if cached is not None and cached[0] is snapshot:
-        return cached[1]
-    view = build()
-    _LAYER_VIEWS[key] = (snapshot, view)
-    return view
 
 
 def _in_bbox(bbox, lon: float, lat: float) -> bool:
@@ -323,52 +275,6 @@ def _in_bbox(bbox, lon: float, lat: float) -> bool:
 def _way_coords(snapshot: dict, way: dict) -> list[tuple[float, float]]:
     nodes = snapshot["nodes"]
     return [(nodes[nid]["lon"], nodes[nid]["lat"]) for nid in way.get("nodes", [])]
-
-
-def _ways_near(center_wgs84: Point, radius_m: float, predicate) -> list[tuple[dict, list]]:
-    """[(way, coords)] for tagged ways with at least one vertex in the leg's bbox.
-
-    Same rectangle-and-any-vertex rule Overpass applies to a bbox query, so switching
-    source doesn't quietly change which elements a junction sees.
-    """
-    snapshot = snapshot_for_site(center_wgs84, radius_m)
-    bbox = buffer_point_wgs84(center_wgs84, radius_m)
-    out = []
-    for way in snapshot["ways"]:
-        if not predicate(way.get("tags") or {}):
-            continue
-        coords = _way_coords(snapshot, way)
-        if any(_in_bbox(bbox, lon, lat) for lon, lat in coords):
-            out.append((way, coords))
-    return out
-
-
-def _nodes_near(center_wgs84: Point, radius_m: float, predicate) -> list[dict]:
-    snapshot = snapshot_for_site(center_wgs84, radius_m)
-    bbox = buffer_point_wgs84(center_wgs84, radius_m)
-    return [n for n in snapshot["nodes"].values()
-            if predicate(n.get("tags") or {}) and _in_bbox(bbox, n["lon"], n["lat"])]
-
-
-def fetch_buildings(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM building footprints near a point.
-
-    Returns [{"coords_wgs84": [...], "tags": {...}, "height_m": float|None,
-              "height_source": str|None}, ...]. Height is None unless a mapper recorded one;
-    see src/sources/assessor.py for where the answer comes from when they did not.
-    """
-    def build():
-        out = []
-        for way, coords in _ways_near(center_wgs84, radius_m, is_building):
-            if len(coords) < 3:
-                continue
-            tags = way.get("tags") or {}
-            recorded = height_from_tags(tags)
-            out.append({"coords_wgs84": coords, "tags": tags,
-                        "height_m": recorded[0] if recorded else None,
-                        "height_source": recorded[1] if recorded else None})
-        return out
-    return _layer("buildings", center_wgs84, radius_m, build)
 
 
 # WHICH OSM ELEMENTS A RENDER READS, as predicates on tags rather than as query strings.
@@ -414,79 +320,6 @@ def is_road(tags: dict) -> bool:
     return "highway" in tags
 
 
-def fetch_crossings(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped pedestrian crossings (footway=crossing ways) - real surveyed crosswalk
-    lines rather than a geometric estimate of where one probably is.
-    Returns [{"coords_wgs84": [...], "tags": {...}, "node_ids": [...]}, ...]."""
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {}),
-                 "node_ids": way.get("nodes", [])}
-                for way, coords in _ways_near(center_wgs84, radius_m,
-                                               is_crossing_way)
-                if len(coords) >= 2]
-    return _layer("crossings", center_wgs84, radius_m, build)
-
-
-def fetch_sidewalks(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped sidewalk centerlines (footway=sidewalk ways).
-
-    Real surveyed geometry, and what OSM's crossing ways actually connect to - a crossing
-    runs sidewalk-centerline to sidewalk-centerline, not curb to curb.
-    """
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {})}
-                for way, coords in _ways_near(center_wgs84, radius_m,
-                                               is_sidewalk)
-                if len(coords) >= 2]
-    return _layer("sidewalks", center_wgs84, radius_m, build)
-
-
-def fetch_driveways(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped driveways (highway=service + service=driveway).
-
-    Drawn so a gap in the kerbside markings has something visible on the other side of it.
-    NOT the signal for where markings open: that is the dropped kerb, which is tagged in
-    places a driveway way is not drawn (see src/geometry/kerbs.py). This layer is for
-    DRAWING, and the two are deliberately independent.
-    """
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
-                for way, coords in _ways_near(center_wgs84, radius_m,
-                                               is_driveway)
-                if len(coords) >= 2]
-    return _layer("driveways", center_wgs84, radius_m, build)
-
-
-def fetch_parking_aisles(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped parking aisles (highway=service + service=parking_aisle).
-
-    Centrelines like driveways, carrying no width tag. Where the aisle is inside a mapped
-    amenity=parking area, that area's own surveyed outline is drawn instead and the aisle is
-    dropped; both layers are read because only 6 of the 20 are inside a lot.
-    """
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
-                for way, coords in _ways_near(center_wgs84, radius_m,
-                                               is_parking_aisle)
-                if len(coords) >= 2]
-    return _layer("parking_aisles", center_wgs84, radius_m, build)
-
-
-def fetch_parking_lots(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped parking areas (amenity=parking), as the AREAS they are mapped as.
-
-    A polygon somebody traced off imagery - the same standing as a building footprint or a
-    traced kerb. A driveway and an aisle are centrelines that have to be widened; a lot
-    needs no assumption.
-    """
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
-                for way, coords in _ways_near(center_wgs84, radius_m,
-                                               is_parking_lot)
-                if len(coords) >= 4]
-    return _layer("parking_lots", center_wgs84, radius_m, build)
-
-
 def is_traffic_control(tags: dict) -> bool:
     """highway=traffic_signals / stop / give_way / crossing.
 
@@ -512,40 +345,6 @@ def is_kerb(tags: dict) -> bool:
     return tags.get("barrier") == "kerb"
 
 
-def fetch_traffic_control(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM traffic control nodes near a junction. See `is_traffic_control`."""
-    def build():
-        return [{"lon": n["lon"], "lat": n["lat"], "tags": n.get("tags", {})}
-                for n in _nodes_near(center_wgs84, radius_m, is_traffic_control)]
-    return _layer("traffic_control", center_wgs84, radius_m, build)
-
-
-def fetch_street_furniture(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM street furniture near a junction. See `is_street_furniture`."""
-    def build():
-        return [{"lon": n["lon"], "lat": n["lat"], "tags": n.get("tags", {})}
-                for n in _nodes_near(center_wgs84, radius_m, is_street_furniture)]
-    return _layer("street_furniture", center_wgs84, radius_m, build)
-
-
-def fetch_kerbs(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped kerb lines and kerb nodes. See `is_kerb`.
-
-    Two-vertex ways are kept - a straight run of kerb is two points, and dropping them threw
-    away 12 of the 23 traced ways at two of these sites.
-    """
-    def build():
-        kerbs = [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"],
-                  "node_ids": way.get("nodes", [])}
-                 for way, coords in _ways_near(center_wgs84, radius_m, is_kerb)
-                 if len(coords) >= 2]
-        kerbs += [{"coords_wgs84": None, "lon": n["lon"], "lat": n["lat"],
-                   "tags": n.get("tags", {}), "id": n["id"]}
-                  for n in _nodes_near(center_wgs84, radius_m, is_kerb)]
-        return kerbs
-    return _layer("kerbs", center_wgs84, radius_m, build)
-
-
 def height_from_tags(tags: dict) -> tuple[float, str] | None:
     """(height in metres, which tag said so) if a mapper recorded one, else None.
 
@@ -564,81 +363,6 @@ def height_from_tags(tags: dict) -> tuple[float, str] | None:
         except ValueError:
             pass
     return None
-
-
-def fetch_roads(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM highway ways near a point, with their tags and geometry.
-
-    The road ways themselves, not the furniture on them. `overtaking=no` is the one tag
-    currently used: it is what a double-yellow centerline MEANS.
-    """
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
-                for way, coords in _ways_near(center_wgs84, radius_m, is_road)
-                if len(coords) >= 2]
-    return _layer("roads", center_wgs84, radius_m, build)
-
-
-def fetch_stop_lines(center_wgs84: Point, radius_m: float) -> list[dict]:
-    """OSM-mapped stop bars (road_marking=stop_line ways) near a point.
-
-    A surveyed stop bar gives all three things this project was previously deriving: how far
-    back from the junction it sits, how wide it is, and which half of the roadway it covers.
-    """
-    def build():
-        return [{"coords_wgs84": coords, "tags": way.get("tags", {}), "id": way["id"]}
-                for way, coords in _ways_near(center_wgs84, radius_m,
-                                               is_stop_line)
-                if len(coords) >= 2]
-    return _layer("stop_lines", center_wgs84, radius_m, build)
-
-
-def fetch_municipality_containing(center_wgs84: Point, radius_m: float) -> tuple | None:
-    """(name, [ring of (lon, lat)]) for the municipality this junction stands in, or None.
-
-    WHY THIS LAYER EXISTS. Every terminus in this project is jurisdictional - the corridor stops
-    at the borough line because nothing past it is the borough's to build - and until this was
-    read, the terminus device was placed against the end of the DRAWN leg instead. Those agree
-    to 0.3 ft at W Broad & Lanning by construction (that leg is configured to the line) and they
-    are not the same fact: a leg's length is a rendering decision (.claude/SKILLS.md section 0b),
-    so on a 2.5x sheet the two-stage turn box marched 195 ft into Hopewell Township.
-
-    BY CONTAINMENT, NOT BY NAME, because the names do not line up and the failure is silent.
-    OSM calls the borough "Hopewell" while every site config says "Hopewell Borough", and the
-    neighbour it shares this corridor with is "Hopewell Township" - so a substring match returns
-    the wrong municipality and an exact match returns nothing. Which polygon holds the junction
-    needs no naming convention to be right. `admin_level=8` is New Jersey's municipality level.
-
-    A RING THAT DOES NOT CLOSE IS NOT A MUNICIPALITY, so it is dropped rather than closed for it.
-    Member ways come out of the area snapshot, and a municipality bigger than its bbox has its
-    ring clipped - which is not a smaller town but a polygon with a straight edge down the bbox,
-    that a leg can cross anywhere. Measured over the five areas here: Hopewell and Pennington
-    close from one way each, Lavallette closes in its own area and is clipped in the other, and
-    Hopewell Township (14 ways, none of them in the borough's snapshot) never appears at all.
-    A junction whose municipality does not resolve returns None, and `municipal_limit_ft` then
-    has nothing to say about that leg - the same answer as a leg that never leaves town.
-    """
-    def build():
-        snapshot = snapshot_for_site(center_wgs84, radius_m)
-        nodes, ways = snapshot["nodes"], {w["id"]: w for w in snapshot["ways"]}
-        for relation in snapshot.get("relations", []):
-            tags = relation.get("tags") or {}
-            if tags.get("boundary") != "administrative" or tags.get("admin_level") != "8":
-                continue
-            for member in relation.get("members", []):
-                if member.get("type") != "way" or member.get("role") not in ("outer", ""):
-                    continue
-                way = ways.get(member["ref"])
-                if way is None:
-                    continue
-                ring = [(nodes[nid]["lon"], nodes[nid]["lat"])
-                        for nid in way.get("nodes", []) if nid in nodes]
-                if len(ring) < 4 or ring[0] != ring[-1]:
-                    continue
-                if Polygon(ring).contains(center_wgs84):
-                    return (_qualified_municipality(tags), ring)
-        return None
-    return _layer("municipality", center_wgs84, radius_m, build)
 
 
 class UnknownAreaError(KeyError):
