@@ -55,14 +55,8 @@ BAND_CENTRE_TOLERANCE_FT = 3.0
 
 
 def _crossings_layer(model):
-    """The fetched OSM crossing layer, quietly - loading a site prints its phase notes."""
-    from src.sources.osm_context import fetch_crossings
-    from src.geometry.treatments import CROSSING_CONTEXT_RADIUS_M
-    from src.render.frame import context_radius_m
-
-    with contextlib.redirect_stdout(io.StringIO()):
-        return fetch_crossings(model.center_wgs84,
-                               radius_m=context_radius_m(CROSSING_CONTEXT_RADIUS_M))
+    """The area's whole OSM crossing layer - the world the frame is a view onto, not a window of it."""
+    return model.osm["crossings"]
 
 
 def _traced_lines_ft(crossings):
@@ -158,7 +152,7 @@ def test_a_leg_matched_crossing_lands_where_the_per_leg_code_puts_it(site_models
     model = site_models[GREENWOOD]
     crossings = _crossings_layer(model)
     with contextlib.redirect_stdout(io.StringIO()):
-        scene = SceneGeometry.resolve(model, DesignState.from_model(model), crossings)
+        scene = SceneGeometry.resolve(model, DesignState.from_model(model))
 
     on_a_leg = [c for c in surveyed_crossings_in_frame(model, crossings) if c.leg is not None]
     assert len(on_a_leg) == CROSSINGS_ON_A_MODELLED_LEG

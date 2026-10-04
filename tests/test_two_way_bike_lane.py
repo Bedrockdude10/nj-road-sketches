@@ -184,14 +184,12 @@ def _two_way_scene(site_models, site="broad_st_greenwood"):
     from src.geometry.treatments import DesignState
     from src.render.scene import SceneGeometry
     from src.site import load_site_scenarios, run_scenario
-    from src.sources.osm_context import fetch_crossings
 
     model = site_models[site]
     builder = load_site_scenarios(site).build_proposal_two_way_bike_lane
     with contextlib.redirect_stdout(io.StringIO()):
         state = run_scenario(builder, DesignState.from_model(model), model)
-        crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-        scene = SceneGeometry.resolve(model, state, crossings)
+        scene = SceneGeometry.resolve(model, state)
         return model, state, scene.build_paint()
 
 
@@ -534,7 +532,6 @@ def test_a_lane_that_ends_early_takes_its_posts_and_its_stripes_with_it(site_mod
     from src.geometry.treatments import DesignState
     from src.geometry.treatments.bikeways import AddBikeLaneBollards, AddTwoWayBikeLane
     from src.render.scene import SceneGeometry
-    from src.sources.osm_context import fetch_crossings
 
     LEG, SIDE = "w_broad_st_northeast", "left"
     model = site_models["wbroad_louellen"]
@@ -549,8 +546,7 @@ def test_a_lane_that_ends_early_takes_its_posts_and_its_stripes_with_it(site_mod
                                               constrained=True, to_ft=to_ft))
         state = state.apply(AddBikeLaneBollards(LegSide(LEG, SIDE)))
         with contextlib.redirect_stdout(io.StringIO()):
-            crossings = fetch_crossings(model.center_wgs84, radius_m=130)
-            scene = SceneGeometry.resolve(model, state, crossings)
+            scene = SceneGeometry.resolve(model, state)
             return scene.build_paint()
 
     full = {p.kind.name for p in paint_ending_at(None) if p.leg == LEG and p.side == SIDE}
