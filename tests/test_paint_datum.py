@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString, Point
 
-from src.geometry.paint.datum import (Centre, Kerb, KerbToKerb, Narrowest, centre_profile,
-                                      kerb_profile, place, resolve)
+from src.geometry.paint.datum import (Across, Along, At, Centre, Glyph, Kerb, KerbToKerb, Narrowest,
+                                      Taper, centre_profile, kerb_profile, place, resolve)
 from src.geometry.model.leg_frame import Leg
 from src.geometry.model import station_offset_many
 from src.geometry.markings import BUFFER_EDGE_LINE
@@ -24,6 +24,8 @@ def trace(leg, side, coords):
 
 
 S = np.arange(0.0, 201.0, 10.0)  # 21 stations
+SPAN = (0.0, 200.0)              # S, as the span an Along shape is placed over
+STEP = 10.0
 
 
 class TestKerbProfile:
@@ -157,8 +159,8 @@ class TestPlace:
         trace(leg, "left", [(x, y) for x, y in zip(x_vals, y_vals)])
         trace(leg, "right", [(0, -20), (200, -20)])
 
-        placed_c0 = place(leg, "left", S, Centre(0))
-        placed_c11 = place(leg, "left", S, Centre(11))
+        placed_c0 = place(leg, "left", Along(SPAN, Centre(0), step_ft=STEP))
+        placed_c11 = place(leg, "left", Along(SPAN, Centre(11), step_ft=STEP))
 
         # Sample both lines and compare offsets at matching stations
         line_c0 = placed_c0.geometry
@@ -189,7 +191,7 @@ class TestPlace:
         trace(leg, "left", [(x, y) for x, y in zip(x_vals, y_vals)])
         trace(leg, "right", [(0, -20), (200, -20)])
 
-        placed = place(leg, "left", S, Kerb(0), Centre(11))
+        placed = place(leg, "left", Along(SPAN, Kerb(0), Centre(11), step_ft=STEP))
 
         assert len(placed.pinched_stations) == 0
         assert placed.geometry is not None
@@ -214,7 +216,7 @@ class TestPlace:
         trace(leg, "left", [(0, 10), (100, 10), (120, 14), (200, 14)])
         # No right kerb, no state: use nominal for right
 
-        placed = place(leg, "left", S, Kerb(0), Centre(11))
+        placed = place(leg, "left", Along(SPAN, Kerb(0), Centre(11), step_ft=STEP))
 
         # Pinched stations should be the first 11 (0-100)
         np.testing.assert_array_equal(placed.pinched_stations, S[:11])
@@ -232,8 +234,7 @@ class TestPlace:
         trace(leg, "left", [(0, 20), (200, 20)])
         trace(leg, "right", [(0, -20), (200, -20)])
 
-        S_short = np.array([90.0, 100.0, 110.0])
-        placed = place(leg, "left", S_short, KerbToKerb())
+        placed = place(leg, "left", Along((90.0, 110.0), KerbToKerb(), step_ft=STEP))
 
         assert placed.geometry is not None
         bounds = placed.geometry.bounds
@@ -256,7 +257,7 @@ class TestPlace:
         trace(leg, "right", [(0, -16), (200, -16)])
         leg.state_centreline = LineString([(0, 1), (200, 1)])
 
-        placed = place(leg, "left", S, Kerb(0), Centre(11))
+        placed = place(leg, "left", Along(SPAN, Kerb(0), Centre(11), step_ft=STEP))
 
         # Check datum keys
         expected_keys = {"traced", "mirrored", "kerbs", "state"}
@@ -282,7 +283,7 @@ class TestPlace:
         ctx = PaintContext(state=state, crosswalk_offsets={}, center_ft=None)
 
         # Call paint with any PaintKind from test_paint.py (using BUFFER_EDGE_LINE as example)
-        result = ctx.paint(BUFFER_EDGE_LINE, "test", "left", (20, 60), Kerb(0), Centre(11))
+        result = ctx.paint(BUFFER_EDGE_LINE, "test", "left", Along((20.0, 60.0), Kerb(0), Centre(11)))
 
         assert len(result) > 0
         assert all(isinstance(p, PaintPiece) for p in result)
@@ -324,7 +325,85 @@ class TestNarrowest:
         leg = straight()
         trace(leg, "left", self.PINCH_LEFT)
         trace(leg, "right", [(s, -o) for s, o in self.PINCH_LEFT])
-        placed = place(leg, "left", S, Narrowest(8.0))
+        placed = place(leg, "left", Along(SPAN, Narrowest(8.0), step_ft=STEP))
         _, offsets = station_offset_many(leg.centerline, np.asarray(placed.geometry.coords))
         np.testing.assert_allclose(offsets, 12.0, atol=0.01)
         assert placed.datum == {"traced": 1.0}
+
+
+def kerbs_at_20():
+    leg = straight()
+    trace(leg, "left", [(0, 20), (200, 20)])
+    trace(leg, "right", [(0, -20), (200, -20)])
+    return leg
+
+
+def frame(geometry, leg):
+    return station_offset_many(leg.centerline, np.asarray(geometry.coords))
+
+
+class TestShapes:
+    """D21-D28: every shape paint() draws, placed off references. Kerbs traced at +/-20."""
+
+    def test_D21_across_runs_from_the_outer_reference_to_the_inner_at_one_station(self):
+        placed = place(kerbs_at_20(), "left", Across(100.0, Kerb(0), Kerb(8)))
+        np.testing.assert_allclose(np.asarray(placed.geometry.coords), [(100, 20), (100, 12)], atol=0.01)
+        assert placed.datum == {"traced": 1.0}
+
+    def test_D22_a_skewed_across_puts_its_outer_end_downstream(self):
+        placed = place(kerbs_at_20(), "left", Across(100.0, Kerb(0), Kerb(8), skew_ft=3.0))
+        np.testing.assert_allclose(np.asarray(placed.geometry.coords), [(103, 20), (100, 12)], atol=0.01)
+
+    def test_D23_across_on_the_right_is_signed(self):
+        placed = place(kerbs_at_20(), "right", Across(100.0, Kerb(0), Kerb(8)))
+        np.testing.assert_allclose(np.asarray(placed.geometry.coords), [(100, -20), (100, -12)], atol=0.01)
+
+    def test_D24_a_taper_leaves_the_edge_tangent_at_its_anchor_and_meets_the_kerb_at_its_target(self):
+        """The arc is src/geometry/model/stripes.py:_taper_arc_points, fed the edge's offset at the
+        anchor: 16 points, (60, 15) tangent to the edge, out to (30, 20) on the kerb."""
+        leg = kerbs_at_20()
+        placed = place(leg, "left", Taper(60.0, 30.0, Narrowest(5.0)))
+        s, o = frame(placed.geometry, leg)
+        assert len(s) == 16
+        np.testing.assert_allclose([s[0], o[0], s[-1], o[-1]], [60, 15, 30, 20], atol=0.01)
+        np.testing.assert_allclose([s[1], o[1]], [57.963, 15.022], atol=0.01)
+        assert placed.datum == {"traced": 1.0}
+
+    def test_D25_a_taper_fill_is_the_zone_between_the_kerb_and_the_arc(self):
+        leg = kerbs_at_20()
+        placed = place(leg, "left", Taper(60.0, 30.0, Narrowest(5.0), fill=True))
+        assert placed.geometry.geom_type == "Polygon"
+        assert placed.geometry.contains(Point(45.0, 19.0))
+        minx, miny, maxx, maxy = placed.geometry.bounds
+        assert miny >= 15.0 - 0.01 and maxy <= 20.0 + 0.01
+        assert minx >= 30.0 - 0.01 and maxx <= 60.0 + 0.01
+
+    def test_D26_at_puts_one_point_per_station_on_the_reference(self):
+        placed = place(kerbs_at_20(), "left", At((50.0, 60.0, 70.0), Kerb(2.5)))
+        assert placed.geometry.geom_type == "MultiPoint"
+        np.testing.assert_allclose([(p.x, p.y) for p in placed.geometry.geoms],
+                                   [(50, 17.5), (60, 17.5), (70, 17.5)], atol=0.01)
+        assert placed.datum == {"traced": 1.0}
+
+    def test_D27_a_glyph_is_drawn_where_its_reference_resolves(self):
+        """`draw(leg, side, station_ft, offset_ft)` builds the symbol; place() only decides where."""
+        def draw(leg, side, station_ft, offset_ft):
+            return Point(station_ft, offset_ft).buffer(1.0)
+
+        placed = place(kerbs_at_20(), "left", Glyph(80.0, Centre(5.0), draw))
+        assert placed.geometry.centroid.x == pytest.approx(80.0, abs=0.01)
+        assert placed.geometry.centroid.y == pytest.approx(5.0, abs=0.01)
+        assert placed.datum == {"kerbs": 1.0}
+
+    def test_D28_posts_painted_through_the_context_carry_their_datum(self):
+        from src.geometry.markings import BOLLARD
+        from src.geometry.treatments.state import DesignState as DS
+
+        leg = kerbs_at_20()
+        ctx = PaintContext(state=DS(legs={"t": leg}, corner_fillets={}), crosswalk_offsets={},
+                           center_ft=None)
+        posts = ctx.paint(BOLLARD, "t", "left", At((50.0, 60.0, 70.0), Kerb(2.5)))
+        assert len(posts) == 3
+        for post, station in zip(posts, (50.0, 60.0, 70.0)):
+            assert post.kind is BOLLARD and post.datum == {"traced": 1.0}
+            assert (post.geometry.centroid.x, post.geometry.centroid.y) == pytest.approx((station, 17.5), abs=0.01)

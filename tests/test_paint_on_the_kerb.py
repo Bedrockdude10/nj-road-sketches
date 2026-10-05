@@ -24,6 +24,8 @@ SKILLS.md 0a on rebuilding a section from the constants you think it used.
 """
 import contextlib
 import io
+import re
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -148,8 +150,8 @@ def same_paint(a: list[PaintPiece], b: list[PaintPiece]) -> bool:
 
 
 def sources(paint: list[PaintPiece]) -> set[str]:
-    """Every datum source any line or fill was placed off."""
-    return {source for p in paint if not p.kind.is_object for source in p.datum}
+    """Every datum source any piece was placed off."""
+    return {source for p in paint for source in p.datum}
 
 
 # --------------------------------------------------------------------------
@@ -196,16 +198,39 @@ def test_where_the_nominal_width_agrees_the_paint_is_what_it_was(case: str) -> N
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("case", sorted(CASES))
-def test_every_line_and_fill_carries_the_datum_paint_stamps(case: str) -> None:
-    """Placed through PaintContext.paint(), which records where each piece's stations came from.
-    Posts and symbols are objects at a point; the nominal-blind test covers where they go."""
+def test_every_piece_carries_the_datum_paint_stamps(case: str) -> None:
+    """Placed through PaintContext.paint(), which records where each piece's stations came from -
+    lines, fills, posts and symbols alike."""
     _, paint = build(street(AGREEING_NOMINAL_FT), CASES[case])
-    placed = [p for p in paint if p.leg == LEG and not p.kind.is_object]
+    placed = [p for p in paint if p.leg == LEG]
     assert placed
     missing = sorted({p.kind.name for p in placed if not p.datum})
     assert not missing, f"{case}: placed without paint(): {missing}"
     for p in placed:
         assert sum(p.datum.values()) == pytest.approx(1.0, abs=1e-9)
+
+
+#: Paint that enters the list any way but PaintContext.paint(). Corner paint (hatching, aprons)
+#: hangs off a corner fillet rather than one leg, and waits on a CornerZone shape - this set may
+#: only shrink.
+ENTERS_WITHOUT_PAINT_ALLOWED = {"src/geometry/treatments/corners.py"}
+SIDE_DOORS = re.compile(r"\bctx\.add\(|\bctx\.emit\(|\bPaintPiece\(")
+
+
+def test_nothing_enters_the_paint_list_except_through_paint() -> None:
+    """ctx.paint() is the one door: it resolves the references and stamps the datum, so a piece
+    added any other way has geometry nobody checked came off the kerb. PaintContext's own module
+    and the PaintPiece type are where the door is, so they are not scanned."""
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in sorted((root / "src").rglob("*.py")):
+        rel = str(path.relative_to(root))
+        if rel in {"src/geometry/paint/context.py", "src/geometry/paint/pieces.py"} | ENTERS_WITHOUT_PAINT_ALLOWED:
+            continue
+        for number, line in enumerate(path.read_text().splitlines(), start=1):
+            if SIDE_DOORS.search(line.split("#", 1)[0]):
+                offenders.append(f"{rel}:{number}: {line.strip()}")
+    assert not offenders, f"{len(offenders)} piece(s) added without ctx.paint():\n  " + "\n  ".join(offenders)
 
 
 @pytest.mark.parametrize("case", sorted(CASES))
