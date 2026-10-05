@@ -105,34 +105,22 @@ def _approaches(line: LineString, nodes: list[Point]) -> list[LineString]:
     by crosswalk cuts landing at different stations, and the scene check crashed on the
     multi-part geometry. One piece of asphalt gets one answer.
 
-    A STRETCH WITH A JUNCTION AT EACH END IS SPLIT AT ITS MIDDLE, and each half starts at its
-    own junction. OSM gives a street a start and a stop, and the junction at the stop is as much
-    a junction for it as the one at the start: given one station 0 per stretch, Broad St's
-    approach to Greenwood from Mercer belonged to Mercer only, so Broad & Greenwood was built
-    without its two southwest corners, and every far-end stop line, signal and centre stripe
-    needed a second, end-of-leg rule. Halves still tile the street, so nothing is emitted twice.
+    The cost is real and worth naming: a middle segment has a junction at each end but only one
+    station 0, so it is an approach for that end only. Junction-relative furniture on the other
+    end comes from the NEXT segment out, which does start there.
     """
     on_line = sorted({line.project(node) for node in nodes if line.distance(node) <= ON_STREET_FT})
     cuts = [0.0, *(at for at in on_line if MIN_APPROACH_FT < at < line.length - MIN_APPROACH_FT),
             line.length]
-
-    def at_junction(station: float) -> bool:
-        point = line.interpolate(station)
-        return any(node.distance(point) <= ON_STREET_FT for node in nodes)
-
     pieces = []
-    for a, b in pairwise(cuts):
-        if b - a <= MIN_APPROACH_FT:
+    for index, (a, b) in enumerate(pairwise(cuts)):
+        segment = substring(line, a, b)
+        if not isinstance(segment, LineString) or segment.length <= MIN_APPROACH_FT:
             continue
-        starts, stops = at_junction(a), at_junction(b)
-        if starts and stops and b - a >= 2 * MIN_APPROACH_FT:
-            middle = (a + b) / 2
-            pieces += [substring(line, a, middle), reverse(substring(line, middle, b))]
-        elif stops and not starts:
-            pieces.append(reverse(substring(line, a, b)))
-        else:
-            pieces.append(substring(line, a, b))
-    return [piece for piece in pieces if isinstance(piece, LineString)]
+        # Reversed only where the junction is at the FAR end - the first segment, whose near end
+        # is just where the crop fell. Every other segment already starts at one.
+        pieces.append(reverse(segment) if index == 0 and len(cuts) > 2 else segment)
+    return pieces
 
 
 def _traced_widths(streets: gpd.GeoDataFrame, paved: gpd.GeoDataFrame) -> dict[int, float]:

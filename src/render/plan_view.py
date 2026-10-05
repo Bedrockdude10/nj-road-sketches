@@ -1026,7 +1026,8 @@ def _draw_centerlines(ax, scene: SceneGeometry):
         # 1.2 pt strokes is one stripe on any sheet wider than ~500 ft.
         bodies.setdefault(colour, []).extend(
             line.buffer(CENTERLINE_STRIPE_WIDTH_FT / 2, cap_style=2, join_style=2)
-            for line in centerline_paint_ft(leg, start_ft, style, shift_ft, shift_side))
+            for line in centerline_paint_ft(leg, start_ft, style, shift_ft, shift_side,
+                                            end_ft=scene.centre_stripe_end_ft(leg_name)))
     for colour, painted in bodies.items():
         _draw(ax, painted, color=colour, zorder=4)
 
