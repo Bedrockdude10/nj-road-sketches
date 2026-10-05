@@ -1152,7 +1152,8 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict,
         + _osm_crossing_hardware_props(state, model.osm["crossings"], control_ft,
                                         model.osm["kerbs"], pavement)
         + _hydrant_props(furniture_ft)
-        + _traffic_signal_props(model, state, pavement)
+        # No signal poles or heads: OSM records a signal as one node per junction, not where its
+        # hardware stands, and every placement of ours was a guess.
         + _no_turn_on_red_props(model, state, offsets_ft, pavement)
         + _extra_props_from_config(model, state, offsets_ft, pavement)
         + _extra_props_from_state(state, offsets_ft, pavement)

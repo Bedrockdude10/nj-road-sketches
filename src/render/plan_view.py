@@ -22,9 +22,9 @@ from src.geometry.markings import require_every_kind
 # The 3D render's own figures, read rather than re-stated: how wide it builds a footway, and the
 # spacing, angle and phase its hatch strokes are laid on. src/render/export.py is where a 2D/3D
 # disagreement about any of them would otherwise start.
-from src.render.export import (HATCH_ANGLE_DEG, PAINT_HATCH_SPACING_FT, SIDEWALK_WIDTH_FT,
+from src.render.export import (HATCH_ANGLE_DEG, PAINT_HATCH_SPACING_FT, sidewalk_bands_ft, sidewalk_lines_ft,
                                _leg_heading_deg)
-from src.render.props import (BIKE_WARNING_PLATE_RADIUS_FT, BOLLARD_RADIUS_FT, DRAWN_BY_PAINT,
+from src.render.props import (signals_config, BIKE_WARNING_PLATE_RADIUS_FT, BOLLARD_RADIUS_FT, DRAWN_BY_PAINT,
                                HYDRANT_RADIUS_FT, MAST_ARM_RADIUS_FT, PED_SIGNAL_HEAD_WIDTH_FT,
                                PUSHBUTTON_HOUSING_DEPTH_FT, PUSHBUTTON_HOUSING_WIDTH_FT,
                                PUSHBUTTON_POST_RADIUS_FT, RECTANGULAR_PLATE_THICKNESS_FT,
@@ -36,7 +36,7 @@ from src.render.props import (BIKE_WARNING_PLATE_RADIUS_FT, BOLLARD_RADIUS_FT, D
                                TRAFFIC_SIGNAL_POLE_RADIUS_FT, VEHICLE_SIGNAL_HEAD_WIDTH_FT,
                                YIELD_SIGN_PLATE_RADIUS_FT, build_props, pad_polygon,
                                signalization_conflicts)
-from src.render.coords import FT_TO_M, wgs84_to_state_plane
+from src.render.coords import FT_TO_M
 from src.render.crosswalks import (CENTERLINE_STRIPE_WIDTH_FT,
                                    TRANSVERSE_LINE_WIDTH_FT, centerline_paint_ft,
                                    centerline_start_ft)
@@ -51,16 +51,6 @@ from src.render.scene import SceneGeometry
 # rather than changed in passing - it moves every plan view and is a decision, not a typo - but
 # recorded as the disagreement it is rather than as the agreement it was written up as.
 TACTILE_PAD_COLOR = "#8c1f14"
-
-
-def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
-    """Fetched OSM sidewalk ways -> state-plane LineStrings."""
-    lines = []
-    for walk in sidewalks or []:
-        coords = walk["coords_wgs84"]
-        xs, ys = wgs84_to_state_plane.transform([c[0] for c in coords], [c[1] for c in coords])
-        lines.append(LineString(zip(xs, ys)))
-    return lines
 
 
 def _leg_heading(leg, along_ft: float | None = None) -> tuple[float, float]:
@@ -562,7 +552,6 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     footprints_by_style: dict[tuple, list] = {}
     marker_points: dict[tuple, list] = {}
     pads, arms, heads = [], [], []
-    signal_count = 0
     for prop in props:
         kind = prop["type"]
         if kind == "bollard" and prop.get(DRAWN_BY_PAINT):
@@ -577,7 +566,6 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
                                       width_ft=prop.get("pad_width_ft", TACTILE_PAD_WIDTH_FT)))
             continue
         if kind == "traffic_signal_pole":
-            signal_count += 1
             # The mast arm is the part that reaches out over the roadway, and its length
             # is derived from a real leg width - worth seeing in plan, since it's the
             # most visually dominant thing in the 3D render. AT ITS REAL THICKNESS too: the
@@ -617,10 +605,11 @@ def _draw_props(ax, model: IntersectionModel, state: DesignState, crosswalk_offs
     _scatter_groups(ax, marker_points)
 
     if dimension_labels:
-        control = (f"SIGNALIZED - {signal_count} signal pole(s)" if signal_count
-                    else "NOT signalized - stop/yield control")
+        # From the signal record, not a count of poles: poles are not drawn (props.py).
+        signalized = bool(signals_config(model, state))
+        control = ("SIGNALIZED" if signalized else "NOT signalized - stop/yield control")
         labels.caption(control, (0.5, 0.005), fontsize=8, fontweight="bold",
-                       color="black" if signal_count else "dimgrey",
+                       color="black" if signalized else "dimgrey",
                        bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="0.7", alpha=0.9))
     # Handed to the invariant pass rather than rebuilt there: build_props is the most
     # expensive thing in the plan view, and checking a DIFFERENT set of props from the one
@@ -805,17 +794,8 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     # (src/geometry/model/context.py:sidewalk_span_ft) - so having them on the plot is what makes
     # an over-wide leg visible instead of merely arguable.
     #
-    # AS A BAND, SIDEWALK_WIDTH_FT wide, because a footway is a strip of ground and a 1.0 pt line
-    # was a strip whose width was the window's. TWO CAVEATS, both live:
-    #   * OSM maps a footway as a CENTRELINE and almost never tags a width, so the 6 ft is
-    #     assumed. Hence the dashed edge - the same thing this sheet already says about a
-    #     driveway widened from a centreline (PAVED_EDGE_ASSUMED).
-    #   * It is NOT the band the 3D render builds. That one is build_sidewalk_pieces, widened
-    #     from the traced KERB rather than from the footway layer, so where OSM's footway does not
-    #     run parallel to the kerb the two are in different places. Both are real; neither is a
-    #     copy of the other, and conflating them would draw one and label it the other.
-    _draw(ax, [line.buffer(SIDEWALK_WIDTH_FT / 2, cap_style=2, join_style=2)
-               for line in sidewalk_lines_ft(model.osm["sidewalks"])],
+    # The same bands the 3D render builds: src/render/export.py:sidewalk_bands_ft.
+    _draw(ax, sidewalk_bands_ft(model.osm["sidewalks"]),
           color="steelblue", alpha=0.16, zorder=2,
           boundary=dict(color="steelblue", linewidth=0.8, linestyle=(0, (4, 2)), alpha=0.65,
                         zorder=2))

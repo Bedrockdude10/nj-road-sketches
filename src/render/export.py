@@ -8,11 +8,11 @@ in src/render/props.py."""
 import math
 from pathlib import Path
 
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 
 from src.render.coords import (FT_TO_M, building_footprint_ft, dumps_for_export, pt_to_local_m,
-                                ring_to_local_m, wgs84_ring_to_local_m)
+                                ring_to_local_m, wgs84_ring_to_local_m, wgs84_to_state_plane)
 from src.render.crosswalks import (CROSSWALK_DEPTH_M, STOP_BAR_CURB_CLEARANCE_M,
                                    centerline_paint_ft, continental_bar_count, crosswalk_axes,
                                    centerline_start_ft,
@@ -30,10 +30,28 @@ from src.render.scene import SceneGeometry
 from src.sources.assessor import (BuildingHeight, assessor_path, describe_building_heights,
                                    height_of, parcels_near_buildings, storeys_by_pin)
 from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
-from src.geometry.treatments import (DesignState, RaiseCrossing, RefugeIsland,
-                                      build_sidewalk_pieces)
+from src.geometry.treatments import DesignState, RaiseCrossing, RefugeIsland
 
 SIDEWALK_WIDTH_FT = 6
+
+
+def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
+    """Fetched OSM sidewalk ways -> state-plane LineStrings."""
+    lines = []
+    for walk in sidewalks or []:
+        coords = walk["coords_wgs84"]
+        xs, ys = wgs84_to_state_plane.transform([c[0] for c in coords], [c[1] for c in coords])
+        lines.append(LineString(zip(xs, ys)))
+    return lines
+
+
+def sidewalk_bands_ft(sidewalks: list[dict] | None) -> list[Polygon]:
+    """OSM's footway=sidewalk ways as SIDEWALK_WIDTH_FT bands - the one sidewalk BOTH views draw.
+
+    OSM maps a footway as a centreline and almost never tags a width, so the 6 ft is assumed.
+    """
+    return [line.buffer(SIDEWALK_WIDTH_FT / 2, cap_style="flat", join_style="mitre")
+            for line in sidewalk_lines_ft(sidewalks)]
 HATCH_ANGLE_DEG = 45.0  # for a corner treatment, which belongs to no single leg's heading
 # How tall each kind of kerb is built, measured from z=0 like the pavement slab - so the REVEAL
 # above the road is this minus the pavement's own 0.05 m. A raised kerb gets a 0.15 m reveal, the
@@ -237,7 +255,6 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     # enough out - a skewed crossing reaches further along one kerb than its centre offset
     # implies. Stop bars are resolved only at a signalized junction, the same gate
     # src/render/props.py's _traffic_signal_props/_no_turn_on_red_props use.
-    supplied_pavement = pavement
     scene = SceneGeometry.resolve(model, state, pavement=pavement)
     pavement = scene.pavement
     if pavement is None:
@@ -251,14 +268,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     crosswalk_reaches = scene.crosswalk_reaches
     stop_bar_offsets = scene.stop_bar_offsets
     marked_crosswalks = scene.marked_crosswalks
-    # Only where the caller supplied the roadway: a junction's band is built off its own corner
-    # ring, and the traced kerbs are a wider set than that ring - passing them there would lay
-    # footway along every kerb in the world. A crop has no ring, so the kerb OSM traced is the
-    # kerb, and `scene.drawn_kerbs` is that set resolved once for the whole scene.
-    sidewalk_pieces = build_sidewalk_pieces(state, sidewalk_width_ft=SIDEWALK_WIDTH_FT,
-                                             pavement=supplied_pavement,
-                                             edges=list(scene.drawn_kerbs) if supplied_pavement
-                                             is not None else None)
+    sidewalk_pieces = sidewalk_bands_ft(model.osm.get("sidewalks"))
 
     # OSM building footprints are independent of (and coarser than) our SLD/field-measured
     # curb geometry - a few end up drawn overlapping the actual pavement. Drop those rather

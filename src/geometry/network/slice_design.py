@@ -26,6 +26,7 @@ from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.fitting import (_centre_legs_on_traced_kerbs, _fit_legs_to_traced_kerbs,
                                                 _join_through_legs, _widths_from_traced_kerbs)
 from src.geometry.intersection.junction import IntersectionModel
+from src.geometry.intersection.kerb_sources import KERB_NEAR_JUNCTION_FT
 from src.geometry.intersection.load import _build_corners
 from src.geometry.intersection.osm_roads import _match_legs_to_osm_roads
 from src.geometry.intersection.state_centreline import attach_state_centrelines
@@ -256,11 +257,19 @@ def _corners_of(groups: list[dict[str, Leg]], kerb_lines: list[LineString]) -> d
     a junction and wrong for a window: handed all six legs of Broad x Greenwood and Broad x
     Blackwell at once it pairs a Greenwood approach with a Blackwell one and rounds a corner
     between two streets that never meet.
+
+    ONLY THE KERBS NEAR EACH JUNCTION, the site path's own `near` test: `assign_kerbs_to_corners`
+    files every kerb it is handed under its two nearest legs however far away it is, so handed the
+    whole borough it put a kerb on N Greenwood under Lafayette & Hamilton, 1,000 ft off, and drew
+    that junction's corner arc across Greenwood's roadway.
     """
     corners: dict = {}
     for group in groups:
-        radii, _notes = corner_radii_from_kerbs(group, kerb_lines, FALLBACK_CORNER_RADIUS_FT)
-        corners.update(_build_corners(group, FALLBACK_CORNER_RADIUS_FT, radii, kerb_lines))
+        # Every leg of a group starts at its node (see _grouped_by_junction).
+        node = Point(next(iter(group.values())).centerline.coords[0])
+        near = [line for line in kerb_lines if line.distance(node) <= KERB_NEAR_JUNCTION_FT]
+        radii, _notes = corner_radii_from_kerbs(group, near, FALLBACK_CORNER_RADIUS_FT)
+        corners.update(_build_corners(group, FALLBACK_CORNER_RADIUS_FT, radii, near))
     return corners
 
 

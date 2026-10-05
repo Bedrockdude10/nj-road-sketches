@@ -93,6 +93,22 @@ class FacilityRefusal:
         return self.end_ft - self.start_ft
 
 
+def _centerline_style_from_osm(tags: dict) -> str:
+    """What OSM says is painted down a leg without overtaking=no: a dashed centreline where it
+    maps two or more lanes, unless it also says lane_markings=no, and nothing otherwise.
+
+    OSM's `lanes` counts marked lanes; an unmarked street is `lane_markings=no`. A leg OSM says
+    nothing about gets no stripe - a centreline drawn there is ours, not the street's.
+    """
+    if tags.get("lane_markings") == "no":
+        return "none"
+    try:
+        lanes = int(str(tags.get("lanes", "")).split(";")[0])
+    except ValueError:
+        return "none"
+    return DEFAULT_CENTERLINE_STYLE if lanes >= 2 else "none"
+
+
 @dataclass
 class DesignState:
     """A mutable-by-copy snapshot of intersection geometry. Treatments clone the
@@ -211,7 +227,7 @@ class DesignState:
                           f"Set a non-default centerline_style there if you've observed "
                           f"otherwise.")
             else:
-                centerline_styles[name] = DEFAULT_CENTERLINE_STYLE
+                centerline_styles[name] = _centerline_style_from_osm(osm_tags.get(name, {}))
         # SAME SHAPE, DIFFERENT FRAME. maxspeed is a direct per-leg statutory fact, same standing
         # as overtaking=no above, and it wins whenever it parses. But there is no repo-default
         # placeholder to catch here the way DEFAULT_CENTERLINE_STYLE does: config.yaml's
