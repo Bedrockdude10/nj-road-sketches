@@ -254,7 +254,17 @@ class FurnitureOffRoadway(SceneCheck):
                 if pad.is_empty or pad.area <= 0:
                     continue
                 overlap = pad.intersection(pavement).area / pad.area
-                if overlap > MAX_PAD_ROADWAY_OVERLAP:
+                if overlap > MAX_PAD_ROADWAY_OVERLAP and prop.get("surveyed_position"):
+                    # Same standing as any surveyed node below: the pad is at OSM's kerb vertex,
+                    # so the conflict is between OSM's kerb and our pavement, and it is reported.
+                    violations.append(Violation(
+                        "surveyed_furniture_in_roadway",
+                        f"tactile paving pad at OSM's kerb vertex has {overlap * 100:.0f}% of its area "
+                        f"inside our modelled roadway - OSM's kerb there (a kerb node, or a kerb way "
+                        f"that does not reach the street's pavement edge) is narrower than the "
+                        f"pavement we draw. Check the two sources",
+                        position, fatal=False))
+                elif overlap > MAX_PAD_ROADWAY_OVERLAP:
                     violations.append(Violation(
                         "furniture_in_roadway",
                         f"tactile paving pad has {overlap * 100:.0f}% of its area in the roadway - a "
@@ -296,11 +306,16 @@ class PadsAgainstACurb(SceneCheck):
             point = Point(*prop["position_ft"])
             distance = min(curb.distance(point) for curb in curbs)
             if distance > PAD_MAX_DISTANCE_FROM_CURB_FT:
+                # A pad at OSM's kerb vertex IS against a kerb - OSM's - so distance from our
+                # modelled curb lines is a disagreement between the two, reported, not a failure.
+                surveyed = bool(prop.get("surveyed_position"))
                 violations.append(Violation(
-                    "pad_off_the_kerb",
-                    f"tactile paving pad sits {distance:.1f} ft from the nearest curb line (limit "
-                    f"{PAD_MAX_DISTANCE_FROM_CURB_FT:.0f} ft) - it marks a ramp, so it belongs against one",
-                    prop["position_ft"]))
+                    "surveyed_pad_off_modelled_kerb" if surveyed else "pad_off_the_kerb",
+                    f"tactile paving pad sits {distance:.1f} ft from the nearest modelled curb line "
+                    f"(limit {PAD_MAX_DISTANCE_FROM_CURB_FT:.0f} ft)"
+                    + (" - it stands at OSM's kerb vertex, so our curb line is what is off"
+                       if surveyed else " - it marks a ramp, so it belongs against one"),
+                    prop["position_ft"], fatal=not surveyed))
         return violations
 
 
