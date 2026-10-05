@@ -369,8 +369,11 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         # near, so the texture resolution of a piece is the renderer's call, not a split made here.
         "pavement": [ring_to_local_m(p.exterior.coords, center_ft)
                      for whole in _simple_polygons([pavement]) for p in _hole_free(whole)],
+        # Hole-free for the same reason as the pavement: a sidewalk way that loops a block is a
+        # band with the block as its hole, and Blender extrudes an exterior only - drawn whole it
+        # paved 140,000-300,000 sq ft of block solid.
         "sidewalks": [ring_to_local_m(p.exterior.coords, center_ft)
-                      for p in _simple_polygons(sidewalk_pieces)],
+                      for whole in _simple_polygons(sidewalk_pieces) for p in _hole_free(whole)],
         "tree_points": [pt_to_local_m(x, y, center_ft) for x, y in tree_points_ft],
         # Every marking channel, in the order src/geometry/markings.py declares them. Splatted
         # rather than listed key by key: a channel Blender reads and this file forgot to write
