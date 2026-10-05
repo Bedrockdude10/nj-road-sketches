@@ -54,7 +54,33 @@ def stands_at_mouth(leg, node: dict) -> bool:
     {"lon", "lat", "tags"}, not the {"coords_wgs84"} a WAY carries.
     """
     point = Point(*wgs84_to_state_plane.transform(node["lon"], node["lat"]))
-    return leg.centerline.interpolate(0.0).distance(point) <= CONTROL_NEAR_NODE_FT
+    # EITHER END: a borough leg runs junction to junction, so its far end meets a junction too.
+    return min(leg.centerline.interpolate(0.0).distance(point),
+               leg.centerline.interpolate(1.0, normalized=True).distance(point)) <= CONTROL_NEAR_NODE_FT
+
+
+def signals_config(model, state) -> dict | None:
+    """The junction's signal hardware, as a `signals` block: the site config's where it states one
+    (an eyes-on observation, so it stands either way), else OSM's.
+
+    WHAT OSM MAPS IS DRAWN. A highway=traffic_signals node at a junction is a signalized junction;
+    OSM does not map where each pole stands, so every corner within CONTROL_NEAR_NODE_FT of one of
+    those nodes gets one. Waiting for a config block threw the borough's signals away - a world
+    has no site config to declare them.
+    """
+    config = getattr(model, "config", {}) or {}
+    if "signals" in config:
+        return config["signals"] or None
+    nodes = [Point(*wgs84_to_state_plane.transform(n["lon"], n["lat"]))
+             for n in controls_at_junction(model, model.osm["traffic_control"])
+             if n["tags"].get("highway") == "traffic_signals"]
+    if not nodes:
+        return None
+    corners = [{"legs": [leg_a, leg_b]}
+               for (leg_a, leg_b), pieces in state.corner_fillets.items()
+               if "error" not in pieces
+               and min(pieces["arc"].distance(n) for n in nodes) <= CONTROL_NEAR_NODE_FT]
+    return {"corners": corners, "source": "OSM highway=traffic_signals"} if corners else None
 
 
 def _osm_streetlight_props(nodes_ft: list[dict]) -> list[dict]:
@@ -730,7 +756,7 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState,
     approach's signal phase it represents isn't modeled, only the physical
     mast/head geometry.
     """
-    signals_cfg = model.config.get("signals")
+    signals_cfg = signals_config(model, state)
     if not signals_cfg:
         return []
     corner_cfg = {frozenset(c["legs"]): c for c in signals_cfg.get("corners", [])}
@@ -754,10 +780,12 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState,
         placed = _step_outward_clear(np.array([mid.x, mid.y]), outward,
                                       STREETLIGHT_SIDEWALK_SETBACK_FT, pavement)
         if placed is None:
-            print(f"  NOTE: the signal pole for corner {leg_a}/{leg_b} can't be placed clear of the "
-                  f"modelled roadway - the modelled pavement covers the real corner footway here. "
-                  f"Not drawn.")
-            continue
+            # DRAWN ANYWAY: OSM says this junction is signalized, so the pole is a fact; where the
+            # modelled pavement swallows the corner footway, it stands the usual setback behind the
+            # kerb and the disagreement is reported rather than the signal deleted.
+            placed = np.array([mid.x, mid.y]) + outward * STREETLIGHT_SIDEWALK_SETBACK_FT
+            print(f"  NOTE: the signal pole for corner {leg_a}/{leg_b} stands inside the modelled "
+                  f"roadway - the modelled pavement covers the real corner footway here.")
         pole_pos = tuple(placed)
         pole_heading = np.degrees(np.arctan2(outward[1], outward[0]))
 
@@ -824,7 +852,7 @@ def _no_turn_on_red_props(model: IntersectionModel, state: DesignState, offsets_
     `signals.no_turn_on_red_legs` (confirmed via street-view photo review, not
     a signage-inventory survey). Positioned the same way as the automatic
     per-approach stop sign (_stop_sign_props) - same placement approximation."""
-    signals_cfg = model.config.get("signals")
+    signals_cfg = signals_config(model, state)
     if not signals_cfg:
         return []
     props = []
@@ -1142,7 +1170,8 @@ def data_gaps(model: IntersectionModel) -> list[str]:
     """
     street_furniture = model.osm["street_furniture"]
     traffic_control = controls_at_junction(model, model.osm["traffic_control"])
-    signalized = bool(model.config.get("signals"))
+    signalized = (bool(model.config["signals"]) if "signals" in model.config else
+                  any(n["tags"].get("highway") == "traffic_signals" for n in traffic_control))
     gaps = []
     if not any(n["tags"].get("highway") == "street_lamp" for n in (street_furniture or [])):
         gaps.append("no highway=street_lamp nodes mapped - NO streetlights are drawn. Map them in OSM "
@@ -1222,6 +1251,5 @@ def signalization_conflicts(model: IntersectionModel) -> list[str]:
         return ["config declares a `signals` block but OSM maps no traffic_signals node here. "
                 "The observation stands; consider adding the signal to OSM."]
     if osm_signalled and not configured:
-        return ["OSM maps a traffic_signals node here but the site config has no `signals` block, "
-                "so no signal hardware will be drawn. Confirm by street view and add the block."]
+        return []       # drawn from OSM - see signals_config
     return []

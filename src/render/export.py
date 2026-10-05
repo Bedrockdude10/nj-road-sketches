@@ -553,6 +553,12 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
              "bars": [ring_to_local_m(bar.exterior.coords, center_ft) for bar in bars],
              "lines": [ring_to_local_m(line.coords, center_ft) for line in lines]}
             for crossing, bars, lines in scene.surveyed_crossing_markings()
+        ] + [
+            # Stop lines no approach claims, drawn as their own traced bars - see
+            # SceneGeometry.unmodelled_stop_bars.
+            {"markings": "stop_line", "distance_m": 0.0,
+             "bars": [ring_to_local_m(bar.exterior.coords, center_ft)], "lines": []}
+            for bar in scene.unmodelled_stop_bars
         ],
         "corner_parcels": [
             {"name": str(row["quadrant"]), "coords": ring_to_local_m(row.geometry.exterior.coords, center_ft)}

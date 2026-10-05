@@ -243,6 +243,34 @@ class SceneGeometry:
         return out
 
     @property
+    def unmodelled_stop_bars(self) -> tuple:
+        """Every stop line OSM traces that no approach claims, drawn as itself.
+
+        A road_marking=stop_line way IS the painted bar, so it is drawn wherever it is painted:
+        the per-leg bars above can hold one bar per leg, measured from a leg's start, and a
+        borough leg runs junction to junction - Broad St's approach into Greenwood ends 1,053 ft
+        down its leg and was thrown away. Its own line at the bar's depth, trimmed to the road.
+        """
+        from shapely.geometry import LineString
+
+        from src.geometry.intersection.paved import to_state_plane
+        from src.render.crosswalks import STOP_BAR_PLAN_DEPTH_FT, match_stop_lines_to_legs
+
+        lines = self.model.osm.get("stop_lines") or []
+        claimed = list(match_stop_lines_to_legs(self.state.legs, lines).values())
+        out = []
+        for entry in lines:
+            line = LineString(to_state_plane(entry["coords_wgs84"]))
+            if any(line.equals_exact(c, 0.01) for c in claimed):
+                continue
+            bar = line.buffer(STOP_BAR_PLAN_DEPTH_FT / 2, cap_style="flat")
+            if self.pavement is not None:
+                bar = bar.intersection(self.pavement)
+            out += [g for g in getattr(bar, "geoms", [bar])
+                    if g.geom_type == "Polygon" and not g.is_empty]
+        return tuple(out)
+
+    @property
     def unmodelled_crossing_bands(self) -> tuple:
         """The footprints of the MARKED crossings at junctions this site does not model.
 

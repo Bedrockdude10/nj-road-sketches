@@ -730,7 +730,8 @@ def _draw_crosswalks(ax, scene: SceneGeometry, labels: LabelPlacer, dimension_la
     # leaves scene.stop_bar_bands empty everywhere else. A bar covers only the ENTERING half
     # of the roadway - a driver stops in their own lanes, never across the opposing ones -
     # and inherits the crossing's surveyed skew, being painted parallel to it.
-    _draw(ax, scene.stop_bar_bands.values(), color="dimgrey", alpha=0.9, zorder=4)
+    _draw(ax, [*scene.stop_bar_bands.values(), *scene.unmodelled_stop_bars], color="dimgrey",
+          alpha=0.9, zorder=4)
 
 
 @dataclass(frozen=True)
