@@ -29,8 +29,7 @@ import matplotlib.pyplot as plt   # after matplotlib.use: the backend must be se
 
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.network.slice_design import slice_design, slice_pavement
-from src.geometry.treatments import (existing_conditions, osm_derived_baseline,
-                                     route_decision_for)
+from src.geometry.treatments import (existing_conditions, route_decision_for)
 from src.sources.osm_context import (height_from_tags, is_kerb, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
@@ -194,11 +193,8 @@ def _route_decisions(state, model, features: gpd.GeoDataFrame):
 #: `sites/*/scenarios.py` builds the same three out of hand-written leg tuples; these do not.
 SCENARIOS = {
     "existing": lambda state, model, features: state,
-    "proposed": lambda state, model, features: osm_derived_baseline(state, model),
-    # NOT on top of `proposed`: osm_derived_baseline paints the kerbs the way OSM says they are
-    # used, and that parking competes with the facility for the same width - stacked, the section
-    # lands 14.6 ft wide and leaves a 10.3 ft travel lane, which travel_lane_too_narrow refuses.
-    # The route decision IS the proposal here; what the kerbs do under it is the decision's own.
+    # THE BOROUGH PROPOSAL: the route decisions, and only those. There is no generic "proposed"
+    # scenario - a restriping of every kerb is not anything put to the borough.
     "two_way_bikeway": _route_decisions,
 }
 

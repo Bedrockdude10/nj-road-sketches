@@ -227,7 +227,7 @@ def main() -> None:
     parser.add_argument("--factor", type=float, default=2.0, help="how much bigger the other is")
     parser.add_argument("--margin-ft", type=float, default=DEFAULT_MARGIN_FT)
     parser.add_argument("--scenario", default="existing",
-                        choices=("existing", "proposed", "two_way_bikeway"))
+                        choices=("existing", "two_way_bikeway"))
     args = parser.parse_args()
 
     network = load_network(args.area)
