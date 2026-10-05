@@ -3,7 +3,8 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString, Point
 
-from src.geometry.paint.datum import Kerb, Centre, KerbToKerb, kerb_profile, centre_profile, place
+from src.geometry.paint.datum import (Centre, Kerb, KerbToKerb, Narrowest, centre_profile,
+                                      kerb_profile, place, resolve)
 from src.geometry.model.leg_frame import Leg
 from src.geometry.model import station_offset_many
 from src.geometry.markings import BUFFER_EDGE_LINE
@@ -287,3 +288,43 @@ class TestPlace:
         assert all(isinstance(p, PaintPiece) for p in result)
         assert all(p.datum for p in result)  # non-empty datum
         assert all(abs(sum(p.datum.values()) - 1.0) < 1e-9 for p in result)
+
+
+class TestNarrowest:
+    """D17-D20: Narrowest(inset) - a kerbside zone of declared depth, held straight at the kerb's
+    narrowest over the stations asked for, measured from the centre line."""
+
+    PINCH_LEFT = [(0, 22), (100, 20), (200, 22)]
+
+    def test_D17_symmetric_pinch_gives_a_straight_line_at_the_narrowest_less_the_inset(self):
+        leg = straight()
+        trace(leg, "left", self.PINCH_LEFT)
+        trace(leg, "right", [(s, -o) for s, o in self.PINCH_LEFT])
+        result = resolve(leg, "left", Narrowest(8.0), S)
+        np.testing.assert_allclose(result.offsets_ft, [12.0] * 21, atol=0.01)
+        assert all(s == "traced" for s in result.source)
+
+    def test_D18_it_is_held_off_the_centre_not_the_alignment(self):
+        """Right kerb straight at -22: the centre is (left - 22) / 2, so left - centre is
+        21 + |s - 100| / 100, narrowest 21 at s = 100, and the line is centre + 13."""
+        leg = straight()
+        trace(leg, "left", self.PINCH_LEFT)
+        trace(leg, "right", [(0, -22), (200, -22)])
+        result = resolve(leg, "left", Narrowest(8.0), S)
+        np.testing.assert_allclose(result.offsets_ft, 12.0 + np.abs(S - 100.0) / 100.0, atol=0.01)
+
+    def test_D19_the_right_side_is_signed(self):
+        leg = straight()
+        trace(leg, "left", self.PINCH_LEFT)
+        trace(leg, "right", [(s, -o) for s, o in self.PINCH_LEFT])
+        result = resolve(leg, "right", Narrowest(8.0), S)
+        np.testing.assert_allclose(result.offsets_ft, [-12.0] * 21, atol=0.01)
+
+    def test_D20_a_placed_narrowest_line_is_straight_and_says_it_came_off_the_traced_kerb(self):
+        leg = straight()
+        trace(leg, "left", self.PINCH_LEFT)
+        trace(leg, "right", [(s, -o) for s, o in self.PINCH_LEFT])
+        placed = place(leg, "left", S, Narrowest(8.0))
+        _, offsets = station_offset_many(leg.centerline, np.asarray(placed.geometry.coords))
+        np.testing.assert_allclose(offsets, 12.0, atol=0.01)
+        assert placed.datum == {"traced": 1.0}

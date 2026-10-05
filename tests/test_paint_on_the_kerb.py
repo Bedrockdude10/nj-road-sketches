@@ -58,7 +58,8 @@ TOL_FT = 0.02
 KERB_FT = 22.0
 STRAIGHT: KerbVertices = [(0.0, KERB_FT), (LENGTH_FT, KERB_FT)]
 #: Pinched to 20 ft at stations 75 and 225 and bulging to 24 ft at 150. Every slope is 0.08, under
-#: MAX_KERB_FOLLOW_TAPER, so kerb-follow smoothing leaves it exactly as traced.
+#: MAX_KERB_FOLLOW_TAPER, so kerb-follow smoothing leaves it exactly as traced. Used on BOTH sides,
+#: so the centre between the kerbs stays on the alignment and only the kerbside zones see the wobble.
 WOBBLE: KerbVertices = [(0.0, 22.0), (50.0, 22.0), (75.0, 20.0), (100.0, 22.0), (150.0, 24.0),
                         (200.0, 22.0), (225.0, 20.0), (250.0, 22.0), (LENGTH_FT, 22.0)]
 PINCH_FT = KERB_FT - min(offset for _, offset in WOBBLE)
@@ -169,6 +170,27 @@ def test_paint_does_not_depend_on_the_nominal_width_where_both_kerbs_are_traced(
         f"{len(wrong)} with {nominal_ft:.0f} ft - the paint moved with a fallback figure")
 
 
+#: What each family paints today on the street whose nominal width AGREES with its kerbs - piece
+#: count and the travel-lane edge's offset - measured off the code before Phase 2. Where nominal
+#: and traced agree the old placement was right, so moving onto the kerb must not change it.
+TODAY: dict[str, tuple[int, float | None]] = {
+    "bike": (7, 11.41), "bike_bollards": (36, None), "bike_kerbside": (8, 11.41),
+    "bike_two_way": (42, None), "narrowing": (4, 17.41), "narrowing_bollards": (64, None),
+    "narrowing_line": (2, 17.41), "parking": (16, 14.41), "parking_bollards": (44, None),
+    "parking_buffered": (18, 11.41),
+}
+
+
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_where_the_nominal_width_agrees_the_paint_is_what_it_was(case: str) -> None:
+    pieces, edge_ft = TODAY[case]
+    _, paint = build(street(AGREEING_NOMINAL_FT), CASES[case])
+    assert len(paint) == pieces
+    if edge_ft is not None:
+        assert float(np.mean(lane_edge_offsets(case, street(AGREEING_NOMINAL_FT)))) == pytest.approx(
+            edge_ft, abs=TOL_FT)
+
+
 # --------------------------------------------------------------------------
 # Through paint()
 # --------------------------------------------------------------------------
@@ -188,7 +210,7 @@ def test_every_line_and_fill_carries_the_datum_paint_stamps(case: str) -> None:
 
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_with_both_kerbs_traced_only_the_traced_kerbs_place_paint(case: str) -> None:
-    _, paint = build(street(68.0, left=WOBBLE), CASES[case])
+    _, paint = build(street(68.0, left=WOBBLE, right=WOBBLE), CASES[case])
     used = sources(paint)
     assert used, f"{case}: no datum recorded at all"
     assert used <= TRACED_SOURCES, f"{case}: placed off {sorted(used - TRACED_SOURCES)}"
@@ -203,7 +225,7 @@ def test_the_travel_lane_edge_is_straight_and_rigid_at_the_narrowest_kerb(case: 
     """On a kerb pinching from 22 ft to 20 ft, the lane edge is the line a straight 22 ft kerb
     gets, moved in by what its family's rule says - at every station, not just at the pinch."""
     straight = lane_edge_offsets(case, street(AGREEING_NOMINAL_FT))
-    wobbling = lane_edge_offsets(case, street(AGREEING_NOMINAL_FT, left=WOBBLE))
+    wobbling = lane_edge_offsets(case, street(AGREEING_NOMINAL_FT, left=WOBBLE, right=WOBBLE))
     expected = float(np.mean(straight)) - LANE_EDGE[case][1]
     assert np.ptp(wobbling) <= TOL_FT, f"{case}: the lane edge wobbles {np.ptp(wobbling):.2f} ft"
     assert np.allclose(wobbling, expected, atol=TOL_FT), (
@@ -214,7 +236,7 @@ def test_the_travel_lane_edge_is_straight_and_rigid_at_the_narrowest_kerb(case: 
 def test_on_a_wobbling_kerb_no_paint_crosses_it_and_a_fill_at_the_kerb_stays_there(case: str) -> None:
     """The kerbside zone absorbs the kerb's wobble: a fill that reaches the kerb anywhere reaches
     it all along its own span, rather than standing off it where the kerb bulges."""
-    leg = street(AGREEING_NOMINAL_FT, left=WOBBLE)
+    leg = street(AGREEING_NOMINAL_FT, left=WOBBLE, right=WOBBLE)
     state, paint = build(leg, CASES[case])
     assert not PaintInsideTheCurb().run(SceneContext(state=state, paint=tuple(paint)))
     kerb = leg.left_curb
