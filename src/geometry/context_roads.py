@@ -17,6 +17,8 @@ without that, Broad St claims Railroad Place's kerbs across the back of a lot.
 The modelled pavement is subtracted from every surface this builds, so measured geometry always
 wins where the two overlap.
 """
+import re
+
 import numpy as np
 from shapely.geometry import LineString, Polygon
 
@@ -72,8 +74,8 @@ def is_carriageway(tags: dict) -> bool:
 def osm_width_ft(raw) -> float | None:
     """An OSM width value in FEET, or None where it is absent or not a plain number.
 
-    OSM widths are metres unless the value carries a unit, and the only unit worth handling is
-    the bare "m" a mapper sometimes writes anyway. Anything else - a range, feet, an inch mark -
+    OSM widths are metres unless the value carries a unit: a bare number or "<n> m" is metres,
+    and OSM's feet-and-inches form - `8'`, `10'6"` - is feet. Anything else (a range, a word)
     returns None rather than a guess, because a width invented from a value nobody could parse
     is worse than the class default. One home so a second caller cannot come to disagree about
     what "5" means; the SANITY BOUNDS stay with each caller, because what is a plausible
@@ -81,10 +83,18 @@ def osm_width_ft(raw) -> float | None:
     """
     if raw is None:
         return None
+    text = str(raw).strip()
+    feet = _OSM_FEET_INCHES.fullmatch(text)
+    if feet is not None:
+        return float(feet["feet"]) + float(feet["inches"] or 0) / 12.0
     try:
-        return float(str(raw).replace("m", "").strip()) * 3.28084
+        return float(text.removesuffix("m").strip()) * 3.28084
     except ValueError:
         return None
+
+
+#: OSM's feet-and-inches width notation (wiki: Key:width), e.g. `8'` or `10'6"`.
+_OSM_FEET_INCHES = re.compile(r"(?P<feet>\d+(?:\.\d+)?)'(?:\s*(?P<inches>\d+(?:\.\d+)?)\")?")
 
 
 KMH_TO_MPH = 0.62137119

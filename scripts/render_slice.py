@@ -6,8 +6,8 @@
 
 A "site" here is a window onto the borough document, so a drawing is a crop plus a decision:
 `slice_design` turns the crop into the (model, state) pair this project's renderers already
-take, `route_decision_for` says what is proposed along each street in it, and `plot_design_state`
-and `export_scenario` draw it. Nothing about the geometry is computed here - if a marking is
+take, a scenario's proposal is OSM tags merged onto the ways it changes
+(src/sources/proposals.py), and `plot_design_state` and `export_scenario` draw it. Nothing about the geometry is computed here - if a marking is
 missing from the picture it is missing from the document or from the treatment, which is the
 property that makes the two impossible to disagree.
 """
@@ -29,10 +29,11 @@ import matplotlib.pyplot as plt   # after matplotlib.use: the backend must be se
 
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.network.slice_design import slice_design, slice_pavement
-from src.geometry.treatments import (existing_conditions, route_decision_for)
+from src.geometry.treatments import apply_osm_two_way_tracks, existing_conditions
 from src.sources.osm_context import (height_from_tags, is_kerb, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
+from src.sources.proposals import load_proposal, with_proposal
 from src.render.frame import Frame
 from src.render.plan_view import plot_design_state
 
@@ -168,34 +169,16 @@ def window_frame(features: gpd.GeoDataFrame) -> Frame:
                  max(maxx - minx, maxy - miny) / 2)
 
 
-def _route_decisions(state, model, features: gpd.GeoDataFrame):
-    """Whatever `route_decision_for` proposes along each street in the window.
-
-    EVERY street is offered its decision, not one named street: that is what makes this a
-    network drawing rather than a site. A street with no decision simply gets none back, and the
-    side a facility takes is the route's own (Broad St's two-way bikeway is on the north kerb -
-    see CORRIDOR_SIDE), not something the crop chooses.
-    """
-    town = features["municipality"].dropna().iloc[0]
-    # The street name off the CONFIG, not off `Leg.name` - a Leg is named for its own key, as at
-    # a site, and `config["legs"][key]["street_name"]` is the one place the street is recorded.
-    # See `legs_on_road`, which reads the same field for the same reason.
-    streets = {cfg.get("street_name") for cfg in model.config.get("legs", {}).values()}
-    for street in sorted(s for s in streets if s):
-        decision = route_decision_for(street, town)
-        if decision is not None:
-            state = decision.apply_to(state, model)
-    return state
-
-
 #: The scenarios a window can be drawn in, each composed from treatments that take a (state,
 #: model) and no leg names - so there is nothing per-site here and nothing to add for a new crop.
 #: `sites/*/scenarios.py` builds the same three out of hand-written leg tuples; these do not.
 SCENARIOS = {
     "existing": lambda state, model, features: state,
-    # THE BOROUGH PROPOSAL: the route decisions, and only those. There is no generic "proposed"
-    # scenario - a restriping of every kerb is not anything put to the borough.
-    "two_way_bikeway": _route_decisions,
+    # THE BOROUGH PROPOSAL, as OSM tags: proposals/<area>/two_way_bikeway.yaml tags each way
+    # the bikeway runs along (scripts/propose_bikeway_tags.py wrote it from the route's ladder),
+    # and what is drawn is what those tags say. There is no generic "proposed" scenario - a
+    # restriping of every kerb is not anything put to the borough.
+    "two_way_bikeway": lambda state, model, features: apply_osm_two_way_tracks(state, model),
 }
 
 
@@ -209,7 +192,10 @@ def design_for(features: gpd.GeoDataFrame, area: str, scenario: str = "two_way_b
     The baseline is `existing_conditions`, the same state every site pipeline labels "Existing
     Conditions", so "existing" here means what it means everywhere else in this repo.
     """
-    model, _ = slice_design(features, osm=slice_context(features), osm_area=area)
+    # A PROPOSAL IS OSM TAGS (src/sources/proposals.py), merged in before the model is built, so
+    # the street it proposes is drawn by the code that draws the street OSM records.
+    osm = with_proposal(slice_context(features), load_proposal(area, scenario))
+    model, _ = slice_design(features, osm=osm, osm_area=area)
     state = SCENARIOS[scenario](existing_conditions(model), model, features)
     return model, state, slice_pavement(features, state.corner_fillets, state.legs, model.osm)
 

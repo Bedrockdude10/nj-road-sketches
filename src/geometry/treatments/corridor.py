@@ -713,3 +713,61 @@ def route_decision_for(road: str, municipality: str):
                                                                       municipality):
             return decision
     return None
+
+
+#: OSM's inline schema for a two-way bike track on one side of a road way, the keys
+#: `apply_osm_two_way_tracks` reads and scripts/propose_bikeway_tags.py writes. Sides are the
+#: WAY's, as OSM's always are; the leg's frame is reached through `leg_osm_aligned`.
+TWO_WAY_TRACK = "track"
+
+
+def osm_two_way_tracks(model: "IntersectionModel", leg_name: str) -> dict[str, Section]:
+    """{leg side: Section} for each side of `leg_name` OSM tags with a two-way track:
+    `cycleway:<side>=track`, `cycleway:<side>:oneway=no`, `cycleway:<side>:width`, and
+    `cycleway:<side>:buffer` (absent is no buffer). Widths are OSM's - metres unless a unit says
+    otherwise - read by the same parser as every other width here."""
+    from src.geometry.context_roads import osm_width_ft
+
+    tags = (getattr(model, "leg_osm_tags", {}) or {}).get(leg_name) or {}
+    aligned = (getattr(model, "leg_osm_aligned", {}) or {}).get(leg_name, True)
+    out = {}
+    for osm_side in ("left", "right"):
+        key = f"cycleway:{osm_side}"
+        if tags.get(key) != TWO_WAY_TRACK or tags.get(f"{key}:oneway") != "no":
+            continue
+        width_ft = osm_width_ft(tags.get(f"{key}:width"))
+        if width_ft is None:
+            continue    # a track with no width is not a section; nothing is invented for it
+        buffer_ft = osm_width_ft(tags.get(f"{key}:buffer")) or 0.0
+        side = osm_side if aligned else str(Side(osm_side).other)
+        # Under NACTO's minimum is the constrained width, stated rather than refused - the same
+        # concession the ladder's own constrained rung makes.
+        out[side] = Section(width_ft, buffer_ft,
+                            constrained=width_ft < MIN_TWO_WAY_BIKE_LANE_FT - 1e-6)
+    return out
+
+
+def apply_osm_two_way_tracks(state: DesignState, model: "IntersectionModel",
+                             quiet: bool = True) -> DesignState:
+    """Draw every two-way bike track OSM tags inline on a road way - existing or proposed alike.
+
+    A proposal is OSM tags (proposals/<area>/<scenario>.yaml, merged in before the model is
+    built), so the bikeway is placed from the tags on each leg and from nothing else: the same
+    per-approach placement a CorridorFacility does, with its one section fixed by the tags rather
+    than chosen from a ladder, then joined across each junction and ended at the town line.
+    """
+    town = municipality_of(model) or ""
+    carrying: list = []
+    facility = None
+    for leg_name in list(state.legs):
+        for side, section in sorted(osm_two_way_tracks(model, leg_name).items()):
+            road = _street_name(model.config["legs"].get(leg_name, {}).get("street_name", ""))
+            facility = CorridorFacility(road=road, municipality=town, side=side,
+                                        sections=(section,))
+            state = facility._place_on(state, leg_name, side, quiet)
+            if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:
+                carrying.append((leg_name, side))
+    if facility is None:
+        return state
+    state = facility._carry_through_the_junction(state, carrying, quiet)
+    return facility._end_where_it_leaves_town(state, model, carrying, quiet)
