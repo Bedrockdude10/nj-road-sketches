@@ -61,18 +61,15 @@ class LaneNarrowing(Treatment):
         boundary lines without the fill."""
         from src.geometry.markings import (LANE_EDGE_LINE, LANE_NARROWING_FILL, TAPER_FILL,
                                            TAPER_LINE, ZONE_END_LINE)
-        from src.geometry.model import (lane_narrowing_edge_lines_ft, lane_narrowing_polygons_ft,
-                                        lane_narrowing_taper_ft, lane_narrowing_taper_polygons_ft)
-        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, _one, end_against_crossing,
-                                        lane_edge_stripes, tapers_cleanly, zone_end_line_ft)
+        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, end_against_crossing, tapers_cleanly)
+        from src.geometry.paint.datum import Along, Across, Taper, Kerb, Narrowest
 
         leg_name = self.target.leg
         leg = ctx.state.legs[leg_name]
         stripe_width_ft = self.stripe_width_ft
         fill = not self.line_only
         for side in (str(s) for s in self.sides):
-            at = ctx.anchors(leg_name, side,
-                              inner_offset_ft=leg.curb_to_curb_ft / 2 - stripe_width_ft)
+            at = ctx.anchors(leg_name, side, inner_offset_ft=-stripe_width_ft)
             # A crossing is something to end against: run into it and let it cut the end. Only
             # where there is none does the paint have to resolve itself back to the kerb, and
             # only then is a taper the right way to do it.
@@ -89,39 +86,44 @@ class LaneNarrowing(Treatment):
             else:
                 curved = tapers_cleanly(stripe_width_ft, at)
                 start_ft, beyond_ft = (at.anchor_ft if curved else at.target_ft), None
-            line_ft, fill_ft = lane_edge_stripes(stripe_width_ft)
-            ctx.add(LANE_EDGE_LINE, _one(lane_narrowing_edge_lines_ft(
-                leg, line_ft, start_left_ft=start_ft, start_right_ft=start_ft, sides=(side,),
-                keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2, end_ft=self.end_ft,
-                beyond_the_tracing=True)), leg_name, side, beyond_ft)
+
+            end_station = self.end_ft if self.end_ft is not None else leg.centerline.length
+
+            # Edge line: centre half a stroke inside the zone
+            edge_line_inset_ft = stripe_width_ft - LANE_EDGE_LINE_WIDTH_FT / 2
+            ctx.paint(LANE_EDGE_LINE, leg_name, side,
+                      Along((start_ft, end_station), Narrowest(edge_line_inset_ft)),
+                      beyond_ft=beyond_ft)
+
             if curved:
-                ctx.add(TAPER_LINE, _one(lane_narrowing_taper_ft(
-                    leg, line_ft, at.anchor_ft, at.target_ft, sides=(side,))), leg_name, side)
+                ctx.paint(TAPER_LINE, leg_name, side,
+                          Taper(at.anchor_ft, at.target_ft, Narrowest(edge_line_inset_ft), fill=False))
+
             if fill:
-                ctx.rim(ctx.add(LANE_NARROWING_FILL, _one(lane_narrowing_polygons_ft(
-                    leg, fill_ft, start_left_ft=start_ft, start_right_ft=start_ft,
-                    sides=(side,), end_ft=self.end_ft, beyond_the_tracing=True)),
-                    leg_name, side, beyond_ft,
-                    shares_a_kerb=(leg_name, side) in ctx.straight_through), LANE_EDGE_LINE)
+                # Hatch fill
+                ctx.rim(ctx.paint(LANE_NARROWING_FILL, leg_name, side,
+                                  Along((start_ft, end_station), Kerb(0), Narrowest(stripe_width_ft)),
+                                  beyond_ft=beyond_ft,
+                                  shares_a_kerb=(leg_name, side) in ctx.straight_through), LANE_EDGE_LINE)
+
                 if curved:
-                    ctx.add(TAPER_FILL, _one(lane_narrowing_taper_polygons_ft(
-                        leg, fill_ft, at.anchor_ft, at.target_ft, sides=(side,))),
-                        leg_name, side)
+                    ctx.paint(TAPER_FILL, leg_name, side,
+                              Taper(at.anchor_ft, at.target_ft, Narrowest(stripe_width_ft), fill=True))
+
                 elif leg_name not in ctx.marked and (leg_name, side) not in ctx.straight_through:
                     # Only where the kerb does NOT run straight through. On one that does, the
                     # zone continues into the adjoining leg's zone rather than ending at the
                     # node, and closing it off draws a line across the hatching mid-intersection.
-                    ctx.add(ZONE_END_LINE, zone_end_line_ft(
-                        leg, side, start_ft, leg.curb_to_curb_ft / 2 - fill_ft),
-                        leg_name, side)
+                    ctx.paint(ZONE_END_LINE, leg_name, side,
+                              Across(start_ft, Kerb(0), Narrowest(stripe_width_ft)))
+
                 if self.end_ft is not None:
                     # The OTHER end: not the junction, the station where the room this buffer
                     # was sized on ran out - see LaneNarrowing.end_ft. Same closing line, cut at
                     # the far station instead of the near one, independent of whether the near
                     # end tapers, ends at a crossing, or runs into the intersection.
-                    ctx.add(ZONE_END_LINE, zone_end_line_ft(
-                        leg, side, self.end_ft, leg.curb_to_curb_ft / 2 - fill_ft),
-                        leg_name, side)
+                    ctx.paint(ZONE_END_LINE, leg_name, side,
+                              Across(self.end_ft, Kerb(0), Narrowest(stripe_width_ft)))
 
 
 @dataclass(frozen=True)
@@ -152,16 +154,24 @@ class LaneNarrowingBollards(Treatment):
         offset comes from that buffer's own stripe_width_ft - a post placed off a separately
         guessed offset stands somewhere the buffer is not."""
         from src.geometry.markings import BOLLARD
-        from src.geometry.model import bollard_points_ft, leg_clearance_ft
-        from src.geometry.paint import PaintPiece, _dot
+        from src.geometry.model import leg_clearance_ft
+        from src.geometry.paint.datum import At, Kerb
 
         leg_name = self.target.leg
         leg = ctx.state.legs[leg_name]
         narrowing = ctx.state.treatment_for(LaneNarrowing, self.target)
         stripe_width_ft = narrowing.stripe_width_ft
-        sides = tuple(str(s) for s in narrowing.sides)
-        for point in bollard_points_ft(
-                leg, stripe_width_ft,
-                leg_clearance_ft(leg_name, ctx.state.legs, ctx.state.corner_fillets),
-                self.spacing_ft, sides=sides):
-            ctx.emit(PaintPiece(BOLLARD, _dot(point), leg_name, None))
+
+        clearance_ft = leg_clearance_ft(leg_name, ctx.state.legs, ctx.state.corner_fillets)
+
+        # Build stations list for bollards on each side
+        for side in (str(s) for s in narrowing.sides):
+            stations = []
+            station = clearance_ft
+            while station <= leg.centerline.length - clearance_ft:
+                stations.append(station)
+                station += self.spacing_ft
+
+            if stations:
+                ctx.paint(BOLLARD, leg_name, side,
+                          At(tuple(stations), Kerb(stripe_width_ft / 2)))
