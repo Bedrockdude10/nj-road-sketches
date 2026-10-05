@@ -109,6 +109,16 @@ def stop_bar_band_geometry_ft(outer_ft: float, inner_ft: float = 0.0,
     return span_ft, (inner_ft + span_ft / 2) * stretch
 
 
+def kerb_at_stop_bar_ft(state: DesignState, leg_name: str, side: Side | str) -> float:
+    """This side's kerb, unsigned, at the station an approach's stop bar stands at (the leg's
+    clearance) - off the kerb chain, so the bar and every lane edge measured for it agree."""
+    from src.geometry.paint.datum import kerb_profile
+
+    station_ft = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
+    profile = kerb_profile(state.legs[leg_name], Side(side), np.asarray([station_ft], dtype=float))
+    return abs(float(profile.offsets_ft[0]))
+
+
 def travel_lane_edge_ft(state: DesignState, leg_name: str, side: str) -> float | None:
     """How far from the centerline the MOTOR travel lane reaches on `side`, or None for the
     full curb-to-curb half where no treatment has narrowed it.
@@ -137,7 +147,7 @@ def travel_lane_edge_ft(state: DesignState, leg_name: str, side: str) -> float |
     """
     side = Side(side)
     kerb = LegSide(leg_name, side)
-    half_ft = state.legs[leg_name].curb_to_curb_ft / 2
+    half_ft = kerb_at_stop_bar_ft(state, leg_name, side)
     bike_lane = state.treatment_for(AddBikeLane, kerb)
     if bike_lane is not None:
         return bike_lane.section(state).offsets_from_centerline_ft()["travel_lane_edge_ft"]
@@ -180,34 +190,11 @@ def stop_bar_ends_ft(state: DesignState, leg_name: str) -> tuple[float, float]:
     two-way, which every site here was until Lavallette. Asked of the design and not of a site,
     for the reason treatments.carriageway_is_one_way gives.
     """
-    from src.geometry.paint.datum import kerb_profile
-    import numpy as np
-
     clearance_ft = STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
-    leg = state.legs[leg_name]
-
-    # Get the actual kerb offset at the stop bar station (leg clearance)
-    stop_bar_station = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
-    stations = np.asarray([stop_bar_station], float)
-
-    left_kerb = kerb_profile(leg, Side.LEFT, stations)
-    right_kerb = kerb_profile(leg, Side.RIGHT, stations)
-
-    left_kerb_offset = abs(float(left_kerb.offsets_ft[0]))
-    right_kerb_offset = abs(float(right_kerb.offsets_ft[0]))
 
     def edge_ft(side: Side) -> float:
-        kerb_offset = left_kerb_offset if side == Side.LEFT else right_kerb_offset
-        bike_lane = state.treatment_for(AddBikeLane, LegSide(leg_name, side))
-        if bike_lane is not None:
-            return bike_lane.section(state).offsets_from_centerline_ft()["travel_lane_edge_ft"]
-        narrowing = state.treatment_for(LaneNarrowing, LegSide(leg_name, side).leg_target)
-        if narrowing is not None and side in narrowing.sides:
-            return kerb_offset - narrowing.stripe_width_ft
-        parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
-        if parking is not None:
-            return kerb_offset - parking.curb_offset_ft - parking.depth_ft
-        return kerb_offset - clearance_ft
+        painted = travel_lane_edge_ft(state, leg_name, side)
+        return kerb_at_stop_bar_ft(state, leg_name, side) - clearance_ft if painted is None else painted
 
     outer_ft = edge_ft(Side.LEFT)
     if carriageway_is_one_way(state, state.legs[leg_name]):
@@ -228,39 +215,10 @@ def stop_bar_width_ft(state: DesignState, leg_name: str) -> float:
     runs where the JSON carries no resolved span, and export.py writes one for every leg that has
     a bar, so both renderers take the resolved figure and this describes the roadway.
     """
-    from src.geometry.paint.datum import kerb_profile
-    import numpy as np
-
-    leg = state.legs[leg_name]
-    stop_bar_station = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
-    stations = np.asarray([stop_bar_station], float)
-
-    left_kerb = kerb_profile(leg, Side.LEFT, stations)
-    right_kerb = kerb_profile(leg, Side.RIGHT, stations)
-
-    left_kerb_offset = abs(float(left_kerb.offsets_ft[0]))
-    right_kerb_offset = abs(float(right_kerb.offsets_ft[0]))
-
-    # Check if the entering lane is narrowed by any treatment
-    bike_lane_left = state.treatment_for(AddBikeLane, LegSide(leg_name, Side.LEFT))
-    if bike_lane_left is not None:
-        # For bike lanes, use the section's edge
-        left_edge = bike_lane_left.section(state).offsets_from_centerline_ft()["travel_lane_edge_ft"]
-    else:
-        narrowing = state.treatment_for(LaneNarrowing, LegSide(leg_name, Side.LEFT).leg_target)
-        if narrowing is not None and Side.LEFT in narrowing.sides:
-            left_edge = left_kerb_offset - narrowing.stripe_width_ft
-        else:
-            parking = state.treatment_for(MarkedParking, LegSide(leg_name, Side.LEFT))
-            if parking is not None:
-                left_edge = left_kerb_offset - parking.curb_offset_ft - parking.depth_ft
-            else:
-                left_edge = None
-
-    if left_edge is not None:
-        return 2 * left_edge
-
-    return left_kerb_offset + right_kerb_offset
+    entering_ft = entering_lane_width_ft(state, leg_name)
+    if entering_ft is not None:
+        return 2 * entering_ft
+    return kerb_at_stop_bar_ft(state, leg_name, Side.LEFT) + kerb_at_stop_bar_ft(state, leg_name, Side.RIGHT)
 
 
 # Minimum angle between a crossing way and a leg centerline for the crossing to be
