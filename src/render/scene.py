@@ -242,6 +242,35 @@ class SceneGeometry:
                          crossing_lines_ft(crossing, kerbs, style)))
         return out
 
+    def centre_stripe_end_ft(self, leg_name: str) -> float:
+        """Where a leg's centre stripe stops at its FAR end: where its centreline first meets a
+        crossing or stop bar in the far half of the leg, or the leg's end where none is painted.
+
+        A borough leg runs junction to junction, and the stripe's start is cut back from the
+        junction at station 0 only - so Broad St's approach into Greenwood, whose junction is at
+        its END, ran its double yellow straight into the intersection.
+        """
+        from shapely.geometry import Point
+
+        from src.render.crosswalks import STOP_LINE_MAX_ALONG_FT
+
+        line = self.state.legs[leg_name].centerline
+        length = line.length
+        bands = [*self.crosswalk_bands.values(), *self.stop_bar_bands.values(),
+                 *self.unmodelled_crossing_bands, *self.unmodelled_stop_bars]
+        cut = length
+        for band in bands:
+            if band is None or band.is_empty:
+                continue
+            hit = line.intersection(band)
+            if hit.is_empty:
+                continue
+            entry = min(line.project(Point(xy)) for part in getattr(hit, "geoms", [hit])
+                        for xy in getattr(part, "coords", []) or part.exterior.coords)
+            if entry > max(length - STOP_LINE_MAX_ALONG_FT, length / 2):
+                cut = min(cut, entry)
+        return cut
+
     @property
     def unmodelled_stop_bars(self) -> tuple:
         """Every stop line OSM traces that no approach claims, drawn as itself.

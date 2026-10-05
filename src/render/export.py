@@ -466,7 +466,8 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                         # Same shift the plan view applies, off the same DesignState - a two-way
                         # bike lane on one side moves this line, and the two views must move it
                         # together or the render's lanes come out unequal.
-                        *(state.travel_lane_divider_shift(leg_name) or (0.0, None)))
+                        *(state.travel_lane_divider_shift(leg_name) or (0.0, None)),
+                        end_ft=scene.centre_stripe_end_ft(leg_name))
                 ],
             }
             for leg_name, leg in state.legs.items()

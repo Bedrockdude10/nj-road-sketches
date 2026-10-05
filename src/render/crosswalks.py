@@ -662,8 +662,10 @@ CENTERLINE_GAP_FT = 1.0 / FT_TO_M
 
 
 def centerline_paint_ft(leg, start_ft: float, style: str,
-                         shift_ft: float = 0.0, shift_side: str | None = None) -> list[LineString]:
-    """The stripes actually painted down this leg's middle, from `start_ft` to its far end.
+                         shift_ft: float = 0.0, shift_side: str | None = None,
+                         end_ft: float | None = None) -> list[LineString]:
+    """The stripes actually painted down this leg's middle, from `start_ft` to `end_ft` (its far
+    end where None - see SceneGeometry.centre_stripe_end_ft for a leg with a junction there).
 
     ONE definition for both views, because they had two and only one of them followed the
     road. The plan view offset the leg's real centerline; the 3D render was handed the
@@ -673,7 +675,8 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
     from src.geometry.paint.datum import Along, Centre, place
     from src.geometry.model import STRIP_SAMPLE_FT
 
-    if style == "none" or start_ft >= leg.centerline.length:
+    end_ft = leg.centerline.length if end_ft is None else min(end_ft, leg.centerline.length)
+    if style == "none" or start_ft >= end_ft:
         return []
 
     if style == "double_yellow":
@@ -684,10 +687,10 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
         half = DOUBLE_YELLOW_SEPARATION_FT / 2
         side = shift_side or str(Side.LEFT)
         offset_sign = 1.0 if Side(side) == Side.LEFT else -1.0
-        placed1 = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+        placed1 = place(leg, Side.LEFT, Along((start_ft, end_ft),
                                               Centre(offset_sign * (shift_ft + half)),
                                               step_ft=STRIP_SAMPLE_FT))
-        placed2 = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+        placed2 = place(leg, Side.LEFT, Along((start_ft, end_ft),
                                               Centre(offset_sign * (shift_ft - half)),
                                               step_ft=STRIP_SAMPLE_FT))
         lines = []
@@ -701,12 +704,12 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
         # Shifted single stripe (for special cases like two-way bikeways)
         side = shift_side
         offset_sign = 1.0 if Side(side) == Side.LEFT else -1.0
-        placed = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+        placed = place(leg, Side.LEFT, Along((start_ft, end_ft),
                                             Centre(offset_sign * shift_ft),
                                             step_ft=STRIP_SAMPLE_FT))
     else:
         # Standard centred stripe off the centre between the traced kerbs
-        placed = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+        placed = place(leg, Side.LEFT, Along((start_ft, end_ft),
                                             Centre(0.0),
                                             step_ft=STRIP_SAMPLE_FT))
 
