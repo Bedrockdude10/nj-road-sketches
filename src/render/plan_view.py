@@ -950,13 +950,13 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
 
     _draw_centerlines(ax, scene)
 
-    violations = _mark_violations(ax, scene, props, paint, labels)
-
-    ax.set_title(title, fontsize=11)
-    ax.set_aspect("equal")
     # The frame the 3D render is pointed at as well, measured from the model rather than from
     # this DesignState so a before/after pair shares one frame - see src/render/frame.py.
     xmin, xmax, ymin, ymax = (frame if frame is not None else junction_frame(model)).bounds_ft()
+    violations = _mark_violations(ax, scene, props, paint, labels, (xmin, xmax, ymin, ymax))
+
+    ax.set_title(title, fontsize=11)
+    ax.set_aspect("equal")
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
     # Only now: a label's size in feet is a fact about the limits on the line above, and what it
@@ -1209,7 +1209,8 @@ def _label_paint(labels: LabelPlacer, state: DesignState, paint, openings=None):
                          bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.75))
 
 
-def _mark_violations(ax, scene: SceneGeometry, props, paint, labels: LabelPlacer):
+def _mark_violations(ax, scene: SceneGeometry, props, paint, labels: LabelPlacer,
+                     bounds_ft: tuple[float, float, float, float]):
     """Run the scene invariants and draw whatever failed, right where it failed.
 
     The plan view reports rather than raises, and the phase script asserts after saving -
@@ -1220,7 +1221,11 @@ def _mark_violations(ax, scene: SceneGeometry, props, paint, labels: LabelPlacer
     Checked against `scene`, so this validates the geometry the figure above actually drew and
     not a third set neither view uses.
     """
-    violations = scene.check(props, paint)
+    # RENDER DISTANCE: the scene is the whole world, so its checks are; this sheet reports the
+    # ones that stand inside it, and a violation with no location belongs to no one sheet.
+    xmin, xmax, ymin, ymax = bounds_ft
+    violations = [v for v in scene.check(props, paint)
+                  if v.where is not None and xmin <= v.where[0] <= xmax and ymin <= v.where[1] <= ymax]
 
     located = [v for v in violations if v.where]
     if located:

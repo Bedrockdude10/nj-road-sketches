@@ -8,7 +8,7 @@ in src/render/props.py."""
 import math
 from pathlib import Path
 
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
 from src.render.coords import (FT_TO_M, building_footprint_ft, dumps_for_export, pt_to_local_m,
@@ -115,6 +115,28 @@ def _simple_polygons(polygons) -> list[Polygon]:
     for poly in polygons:
         out += list(poly.geoms) if poly.geom_type == "MultiPolygon" else [poly]
     return [poly for poly in out if not poly.is_empty]
+
+
+def _hole_free(poly: Polygon) -> list[Polygon]:
+    """`poly` as pieces with no interior rings, covering exactly the same ground.
+
+    The 3D builder extrudes each exported ring as a solid, so a ring with holes - the borough's
+    road surface, whose holes are the blocks between its streets - came out as one slab of
+    asphalt over everything. Cut through each hole, top to bottom, until no piece has one.
+    """
+    if poly.is_empty:
+        return []
+    if not poly.interiors:
+        return [poly]
+    minx, miny, maxx, maxy = poly.bounds
+    x = Polygon(poly.interiors[0]).centroid.x
+    out = []
+    for half in (box(minx - 1, miny - 1, x, maxy + 1), box(x, miny - 1, maxx + 1, maxy + 1)):
+        piece = poly.intersection(half)
+        for part in getattr(piece, "geoms", [piece]):
+            if part.geom_type == "Polygon" and part.area > 1e-6:
+                out += _hole_free(part)
+    return out
 
 
 def paint_channels_local_m(paint, center_ft, leg_heading_deg=None) -> dict[str, list]:
@@ -335,7 +357,7 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         # ALL OF THE PAVEMENT AND ALL OF THE SIDEWALK, one list each. A world has no centre to be
         # near, so the texture resolution of a piece is the renderer's call, not a split made here.
         "pavement": [ring_to_local_m(p.exterior.coords, center_ft)
-                     for p in _simple_polygons([pavement])],
+                     for whole in _simple_polygons([pavement]) for p in _hole_free(whole)],
         "sidewalks": [ring_to_local_m(p.exterior.coords, center_ft)
                       for p in _simple_polygons(sidewalk_pieces)],
         "tree_points": [pt_to_local_m(x, y, center_ft) for x, y in tree_points_ft],

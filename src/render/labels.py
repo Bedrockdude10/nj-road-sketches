@@ -220,6 +220,15 @@ class LabelPlacer:
         self.violations = []
         if ft_per_point(ax) <= 0:
             return self.violations
+        # RENDER DISTANCE: a view labels only what stands inside it. The model is the whole world,
+        # so every leg's kerb note is queued; one anchored off this sheet is not this sheet's.
+        (xmin, xmax), (ymin, ymax) = ax.get_xlim(), ax.get_ylim()
+
+        def in_view(xy) -> bool:
+            return xmin <= xy[0] <= xmax and ymin <= xy[1] <= ymax
+
+        self.dimensions = [d for d in self.dimensions if in_view(d.xy)]
+        self.notes = [n for n in self.notes if in_view(n.xy)]
         # Captions first: they are pinned, so everything else has to work around them.
         for caption in self.captions:
             self._draw_caption(ax, caption)
