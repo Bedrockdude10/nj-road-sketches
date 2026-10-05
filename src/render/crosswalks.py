@@ -12,7 +12,7 @@ from shapely.ops import unary_union
 from shapely.geometry import LineString, Polygon
 
 from src.render.coords import FT_TO_M, wgs84_to_state_plane
-from src.geometry.model import (crosswalk_estimate_ft, inset_line_ft, leg_clearance_ft,
+from src.geometry.model import (crosswalk_estimate_ft, leg_clearance_ft,
                                 station_offset_many)
 from src.geometry.markings import EDGE_LINE_WIDTH_M, NARROW_LINE_WIDTH_M
 from src.geometry.targets import Everywhere, LegSide, LegTarget, Side
@@ -180,12 +180,34 @@ def stop_bar_ends_ft(state: DesignState, leg_name: str) -> tuple[float, float]:
     two-way, which every site here was until Lavallette. Asked of the design and not of a site,
     for the reason treatments.carriageway_is_one_way gives.
     """
+    from src.geometry.paint.datum import kerb_profile
+    import numpy as np
+
     clearance_ft = STOP_BAR_CURB_CLEARANCE_M / FT_TO_M
-    half_ft = state.legs[leg_name].curb_to_curb_ft / 2
+    leg = state.legs[leg_name]
+
+    # Get the actual kerb offset at the stop bar station (leg clearance)
+    stop_bar_station = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
+    stations = np.asarray([stop_bar_station], float)
+
+    left_kerb = kerb_profile(leg, Side.LEFT, stations)
+    right_kerb = kerb_profile(leg, Side.RIGHT, stations)
+
+    left_kerb_offset = abs(float(left_kerb.offsets_ft[0]))
+    right_kerb_offset = abs(float(right_kerb.offsets_ft[0]))
 
     def edge_ft(side: Side) -> float:
-        painted = travel_lane_edge_ft(state, leg_name, side)
-        return half_ft - clearance_ft if painted is None else painted
+        kerb_offset = left_kerb_offset if side == Side.LEFT else right_kerb_offset
+        bike_lane = state.treatment_for(AddBikeLane, LegSide(leg_name, side))
+        if bike_lane is not None:
+            return bike_lane.section(state).offsets_from_centerline_ft()["travel_lane_edge_ft"]
+        narrowing = state.treatment_for(LaneNarrowing, LegSide(leg_name, side).leg_target)
+        if narrowing is not None and side in narrowing.sides:
+            return kerb_offset - narrowing.stripe_width_ft
+        parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
+        if parking is not None:
+            return kerb_offset - parking.curb_offset_ft - parking.depth_ft
+        return kerb_offset - clearance_ft
 
     outer_ft = edge_ft(Side.LEFT)
     if carriageway_is_one_way(state, state.legs[leg_name]):
@@ -199,15 +221,46 @@ def stop_bar_ends_ft(state: DesignState, leg_name: str) -> tuple[float, float]:
 
 def stop_bar_width_ft(state: DesignState, leg_name: str) -> float:
     """Full roadway width the stop bar is sized against - twice the entering lane width where a
-    treatment narrowed it, else the leg's own curb-to-curb width.
+    treatment narrowed it, else the actual traced kerb-to-kerb width.
 
     NOT WHERE THE BAR IS DRAWN; stop_bar_ends_ft is. This is exported as `stop_bar_width_m` for
     blender_crosswalks.add_stop_bar's fallback arithmetic, which halves it - the fallback only
     runs where the JSON carries no resolved span, and export.py writes one for every leg that has
     a bar, so both renderers take the resolved figure and this describes the roadway.
     """
-    entering_ft = entering_lane_width_ft(state, leg_name)
-    return 2 * entering_ft if entering_ft is not None else state.legs[leg_name].curb_to_curb_ft
+    from src.geometry.paint.datum import kerb_profile
+    import numpy as np
+
+    leg = state.legs[leg_name]
+    stop_bar_station = leg_clearance_ft(leg_name, state.legs, state.corner_fillets)
+    stations = np.asarray([stop_bar_station], float)
+
+    left_kerb = kerb_profile(leg, Side.LEFT, stations)
+    right_kerb = kerb_profile(leg, Side.RIGHT, stations)
+
+    left_kerb_offset = abs(float(left_kerb.offsets_ft[0]))
+    right_kerb_offset = abs(float(right_kerb.offsets_ft[0]))
+
+    # Check if the entering lane is narrowed by any treatment
+    bike_lane_left = state.treatment_for(AddBikeLane, LegSide(leg_name, Side.LEFT))
+    if bike_lane_left is not None:
+        # For bike lanes, use the section's edge
+        left_edge = bike_lane_left.section(state).offsets_from_centerline_ft()["travel_lane_edge_ft"]
+    else:
+        narrowing = state.treatment_for(LaneNarrowing, LegSide(leg_name, Side.LEFT).leg_target)
+        if narrowing is not None and Side.LEFT in narrowing.sides:
+            left_edge = left_kerb_offset - narrowing.stripe_width_ft
+        else:
+            parking = state.treatment_for(MarkedParking, LegSide(leg_name, Side.LEFT))
+            if parking is not None:
+                left_edge = left_kerb_offset - parking.curb_offset_ft - parking.depth_ft
+            else:
+                left_edge = None
+
+    if left_edge is not None:
+        return 2 * left_edge
+
+    return left_kerb_offset + right_kerb_offset
 
 
 # Minimum angle between a crossing way and a leg centerline for the crossing to be
@@ -659,40 +712,11 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
     leg's near and far points and drew a straight stripe between them - the CHORD. Same
     on a straight leg, but off by several feet on a curving one.
     """
+    from src.geometry.paint.datum import Along, Centre, place
+    from src.geometry.model import STRIP_SAMPLE_FT
+
     if style == "none" or start_ft >= leg.centerline.length:
         return []
-
-    def stripe(offset_ft: float) -> LineString | None:
-        """One stripe, `offset_ft` from the alignment - positive toward `shift_side`.
-
-        Through inset_line_ft rather than offset_curve, for the reason this function exists at
-        all: it is the same lateral-offset machinery the bike lane's own stripes use, on the
-        same station grid, with the same clamping inside the traced kerb. An offset curve's arc
-        length differs from the centerline's, so stationing along it is not stationing along
-        the road - exactly the divergence the single-definition rule forbids. It also RETURNS
-        THE WRONG TYPE on a bending leg: greenwood_avenue_1 comes back as a two-part
-        MultiLineString on one side, which the caller could only throw away, and a leg that
-        silently loses one of its two stripes is a single yellow again.
-
-        keep_inside_ft is half the stripe, so a road narrower than the offset asks for gets its
-        paint laid INSIDE the kerb rather than straddling it - the same datum rule as
-        everywhere else (SKILLS.md section 2), now that the stripes are far enough apart to
-        reach one.
-
-        beyond_the_tracing because a centerline runs the whole leg. Without it the station grid
-        stops where the kerb tracing does and the paint stops with it - 16 ft short on
-        greenwood_avenue, measured - and an EXTENT that moves with the survey is the trap in
-        SKILLS.md section 0b. A width may give; the length may not.
-
-        A NEGATIVE offset means the other side, not the same distance on this one. The sign is
-        resolved here rather than assumed away.
-        """
-        side = shift_side or str(Side.LEFT)
-        if offset_ft < 0:
-            side, offset_ft = str(Side(side).other), -offset_ft
-        return inset_line_ft(leg, side, offset_ft, start_ft,
-                              keep_inside_ft=CENTERLINE_STRIPE_WIDTH_FT / 2,
-                              beyond_the_tracing=True)
 
     if style == "double_yellow":
         # A TWO-WAY BIKE LANE ON ONE SIDE PUSHES THE TRAVEL LANES OFF THE ALIGNMENT, so the pair
@@ -700,16 +724,40 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
         # treatments.travel_lane_divider_shift_ft for where the distance comes from and why the
         # two lanes come out equal. Zero shift is the ordinary case and needs no branch.
         half = DOUBLE_YELLOW_SEPARATION_FT / 2
-        return [line for line in (stripe(shift_ft + half), stripe(shift_ft - half))
-                if line is not None and not line.is_empty and line.geom_type == "LineString"]
+        side = shift_side or str(Side.LEFT)
+        offset_sign = 1.0 if Side(side) == Side.LEFT else -1.0
+        placed1 = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+                                              Centre(offset_sign * (shift_ft + half)),
+                                              step_ft=STRIP_SAMPLE_FT))
+        placed2 = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+                                              Centre(offset_sign * (shift_ft - half)),
+                                              step_ft=STRIP_SAMPLE_FT))
+        lines = []
+        for placed in [placed1, placed2]:
+            if (placed.geometry is not None and not placed.geometry.is_empty
+                    and placed.geometry.geom_type == "LineString"):
+                lines.append(placed.geometry)
+        return lines
+
     if shift_ft and shift_side is not None:
-        painted = stripe(shift_ft)
-        if painted is None or painted.is_empty or painted.geom_type != "LineString":
-            return []
+        # Shifted single stripe (for special cases like two-way bikeways)
+        side = shift_side
+        offset_sign = 1.0 if Side(side) == Side.LEFT else -1.0
+        placed = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+                                            Centre(offset_sign * shift_ft),
+                                            step_ft=STRIP_SAMPLE_FT))
     else:
-        painted = shapely.ops.substring(leg.centerline, start_ft, leg.centerline.length)
-    if painted.is_empty or painted.geom_type != "LineString":
+        # Standard centred stripe off the centre between the traced kerbs
+        placed = place(leg, Side.LEFT, Along((start_ft, leg.centerline.length),
+                                            Centre(0.0),
+                                            step_ft=STRIP_SAMPLE_FT))
+
+    if placed.geometry is None or placed.geometry.is_empty:
         return []
+
+    if placed.geometry.geom_type != "LineString":
+        return []
+
     if style not in CENTERLINE_IS_DASHED:
         # THE FALLTHROUGH USED TO BE THE DASHED BRANCH, so a style this function had never heard
         # of was drawn as a yellow dashed centre line - the most confident wrong answer available,
@@ -717,9 +765,11 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
         # style, so an unknown one has no colour either.
         raise ValueError(f"unknown centerline style {style!r} - expected one of "
                          f"{sorted(VALID_CENTERLINE_STYLES)}")
+
     # ONE PATTERN FOR BOTH DASHED STYLES. A broken white lane line and a broken yellow centre line
     # differ in what they mean and in their colour, not in how they are cut - MUTCD 11th ed.
     # 3A.04 P6 gives one broken-line ratio for both. See STANDARDS.md for the ratio drawn here.
+    painted = placed.geometry
     period_ft = CENTERLINE_DASH_FT + CENTERLINE_GAP_FT
     dashes = []
     at_ft = 0.0

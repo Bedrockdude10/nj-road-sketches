@@ -92,6 +92,11 @@ class RaiseCrossing(Treatment):
         AddCurbExtension re-cuts them. Frozen, a table applied before an extension on the same
         leg keeps the corner it was measured against while every other marking follows the kerb.
         """
+        import numpy as np
+        from src.geometry.paint.datum import Along, KerbToKerb, place
+        from src.geometry.model import STRIP_SAMPLE_FT
+        from src.geometry.targets import Side
+
         leg = state.legs[self.target.leg]
         if leg.left_curb is None or leg.right_curb is None:
             raise ValueError(f"Leg {self.target.leg!r} has no curb lines (width unknown) - "
@@ -100,9 +105,28 @@ class RaiseCrossing(Treatment):
         # the corner point lands inside the curb-return curve rather than on the straight
         # roadway where a real crosswalk sits.
         start = leg_clearance_ft(self.target.leg, state.legs, state.corner_fillets)
-        return _band_across_the_road(
-            leg.centerline, start, start + self.crossing_width_ft, leg.curb_to_curb_ft / 2,
-            f"{self.crossing_width_ft:.0f} ft raised crossing on {self.target.leg!r}")
+
+        # Check for zero-length span (corner return consumes the whole leg)
+        near = leg.centerline.interpolate(max(min(start, leg.centerline.length), 0.0))
+        far = leg.centerline.interpolate(max(min(start + self.crossing_width_ft, leg.centerline.length), 0.0))
+        dx, dy = far.x - near.x, far.y - near.y
+        length = np.hypot(dx, dy)
+        if length < 1e-9:
+            raise ValueError(
+                f"Can't place a {self.crossing_width_ft:.0f} ft raised crossing between "
+                f"{start:.1f} ft and {start + self.crossing_width_ft:.1f} ft along a "
+                f"{leg.centerline.length:.1f} ft leg - both ends land on the same point, so the shape "
+                f"has no extent along the road. The leg is too short for it (usually a corner "
+                f"return consuming the whole leg - see leg_clearance_ft).")
+
+        placed = place(leg, Side.LEFT, Along((start, start + self.crossing_width_ft),
+                                            KerbToKerb(), step_ft=STRIP_SAMPLE_FT))
+        if placed.geometry is None:
+            # Fallback to nominal width if datum resolution fails
+            return _band_across_the_road(
+                leg.centerline, start, start + self.crossing_width_ft, leg.curb_to_curb_ft / 2,
+                f"{self.crossing_width_ft:.0f} ft raised crossing on {self.target.leg!r}")
+        return placed.geometry
 
     def apply_to(self, state: "DesignState", model: "IntersectionModel" = None) -> None:
         # Built and discarded, for the refusals only - a leg with no traced kerbs, or one whose
