@@ -33,6 +33,11 @@ from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
 from src.geometry.treatments import DesignState, RaiseCrossing, RefugeIsland
 from src.geometry.model.approach import END_SUFFIX
 
+#: THE ONE INVENTED FIGURE in the ground plan: a sidewalk's width. OSM maps a footway as a
+#: centreline, and none of the borough's 81 carries a `width` tag.
+SIDEWALK_WIDTH_FT = 6
+
+
 def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
     """Fetched OSM sidewalk ways -> state-plane LineStrings."""
     lines = []
@@ -41,6 +46,12 @@ def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
         xs, ys = wgs84_to_state_plane.transform([c[0] for c in coords], [c[1] for c in coords])
         lines.append(LineString(zip(xs, ys)))
     return lines
+
+
+def sidewalk_bands_ft(sidewalks: list[dict] | None) -> list[Polygon]:
+    """OSM's footway=sidewalk ways as SIDEWALK_WIDTH_FT bands - the one sidewalk BOTH views draw."""
+    return [line.buffer(SIDEWALK_WIDTH_FT / 2, cap_style="flat", join_style="mitre")
+            for line in sidewalk_lines_ft(sidewalks)]
 
 
 HATCH_ANGLE_DEG = 45.0  # for a corner treatment, which belongs to no single leg's heading
@@ -354,11 +365,12 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         # near, so the texture resolution of a piece is the renderer's call, not a split made here.
         "pavement": [ring_to_local_m(p.exterior.coords, center_ft)
                      for whole in _simple_polygons([pavement]) for p in _hole_free(whole)],
-        # OSM's sidewalks AS OSM HAS THEM: footway centrelines, no width (none of the borough's
-        # carries a `width` tag). Blender draws each as a line, as the plan view does.
-        "sidewalks": [],
-        "sidewalk_lines": [ring_to_local_m(line.coords, center_ft)
-                           for line in sidewalk_lines_ft(model.osm.get("sidewalks"))],
+        # Hole-free for the same reason as the pavement: a sidewalk way that loops a block is a
+        # band with the block as its hole, and Blender extrudes an exterior only - drawn whole it
+        # paved 140,000-300,000 sq ft of block solid.
+        "sidewalks": [ring_to_local_m(p.exterior.coords, center_ft)
+                      for whole in _simple_polygons(sidewalk_bands_ft(model.osm.get("sidewalks")))
+                      for p in _hole_free(whole)],
         "tree_points": [pt_to_local_m(x, y, center_ft) for x, y in tree_points_ft],
         # Every marking channel, in the order src/geometry/markings.py declares them. Splatted
         # rather than listed key by key: a channel Blender reads and this file forgot to write
