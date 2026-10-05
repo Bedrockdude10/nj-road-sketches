@@ -181,85 +181,109 @@ class MarkedParking(Treatment):
 
     def paint(self, ctx) -> None:
         """The stalls, the hatched buffer between them and the kerb, and the daylight zones
-        where the law forbids parking at all."""
+        where the law forbids parking at all.
+
+        Every boundary is a kerb reference (src/geometry/paint/datum.py): the parking zone is a
+        zone of declared depth, so its lane-side edge is Narrowest - straight, at the kerb's
+        tightest - and its kerb side follows the kerb. Line centres sit half a stroke inside the
+        zone they bound (lane_edge_stripes), and the stalls sit a stroke in from the buffer."""
         import numpy as np
         from src.geometry.daylighting import merged_no_parking_spans_ft, no_parking_zones_ft
         from src.geometry.markings import (BUFFER_EDGE_LINE, BUFFER_FILL, DAYLIGHT_EDGE_LINE,
                                            DAYLIGHT_FILL, LEFT_EDGE_LINE, PARKING_EDGE_LINE,
-                                           STALL_DIVIDER)
-        from src.geometry.model import (stall_lane_runs_ft,
-                                        stall_leftover_runs_ft)
-        from src.geometry.paint import (MIN_LINE_LENGTH_FT,
-                                        lane_edge_stripes, parking_runs)
-        from src.geometry.paint.datum import Along, Across, Kerb, Narrowest, place
-        from src.geometry.paint.pieces import stroke_width_ft
+                                           STALL_DIVIDER, ZONE_END_LINE)
+        from src.geometry.model import (curb_station_span, stall_lane_runs_ft,
+                                        stall_leftover_runs_ft, whole_stalls_ft)
+        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, MIN_LINE_LENGTH_FT,
+                                        end_against_crossing, lane_edge_stripes, parking_runs)
+        from src.geometry.paint.datum import Across, Along, Kerb, Narrowest, place, resolve
 
         leg_name, side = self.target.leg, str(self.target.side)
         state = ctx.state
         leg = state.legs[leg_name]
         depth_ft, stall_length_ft = self.depth_ft, self.pitch_ft
         curb_offset_ft = self.curb_offset_ft
+        whole_leg = np.array([0.0, leg.centerline.length])
+        lane_edge_ft = abs(float(resolve(leg, side, Narrowest(depth_ft + curb_offset_ft),
+                                         whole_leg).offsets_ft[0]))
+        at = ctx.anchors(leg_name, side, inner_offset_ft=lane_edge_ft)
         runs = parking_runs(state, leg_name, side, ctx.crosswalk_offsets, ctx.props)
         if self.end_ft is not None:
             runs = [(s, min(e, self.end_ft)) for s, e in runs if s < self.end_ft]
 
-        # DAYLIGHTING: mark no-parking zones required by law
         daylight_line_ft, daylight_fill_ft = lane_edge_stripes(depth_ft + curb_offset_ft)
         daylight_spans = merged_no_parking_spans_ft(
             no_parking_zones_ft(state, leg_name, side, ctx.crosswalk_offsets, ctx.props))
         for zone_start_ft, zone_end_ft in daylight_spans:
             capped_end = zone_end_ft
+            capped = self.end_ft is not None and capped_end > self.end_ft
             if self.end_ft is not None:
                 if zone_start_ft >= self.end_ft:
                     continue
                 capped_end = min(capped_end, self.end_ft)
-
-            # Daylight zone: outer at traced kerb, inner at declared depth
-            daylight_edge_inset_ft = daylight_line_ft - stroke_width_ft(DAYLIGHT_EDGE_LINE) / 2
+            if leg_name in ctx.marked and (leg_name, side) in ctx.straight_through:
+                start_ft, beyond_ft = zone_start_ft, None
+            elif leg_name in ctx.marked:
+                start_ft, beyond_ft = end_against_crossing(at, zone_start_ft)
+            else:
+                start_ft, beyond_ft = max(zone_start_ft, at.target_ft), None
             ctx.paint(DAYLIGHT_EDGE_LINE, leg_name, side,
-                     Along((zone_start_ft, capped_end), Kerb(daylight_edge_inset_ft)))
-            ctx.paint(DAYLIGHT_FILL, leg_name, side,
-                     Along((zone_start_ft, capped_end), Kerb(0.0),
-                           Narrowest(daylight_fill_ft)))
+                      Along((start_ft, capped_end), Narrowest(daylight_line_ft)), beyond_ft=beyond_ft)
+            ctx.rim(ctx.paint(DAYLIGHT_FILL, leg_name, side,
+                              Along((start_ft, capped_end), Kerb(0.0), Narrowest(daylight_fill_ft)),
+                              beyond_ft=beyond_ft,
+                              shares_a_kerb=(leg_name, side) in ctx.straight_through),
+                    DAYLIGHT_EDGE_LINE)
+            if leg_name not in ctx.marked and (leg_name, side) not in ctx.straight_through:
+                ctx.paint(ZONE_END_LINE, leg_name, side,
+                          Across(start_ft, Kerb(0.0), Narrowest(daylight_fill_ft)))
+            if capped:
+                ctx.paint(ZONE_END_LINE, leg_name, side,
+                          Across(capped_end, Kerb(0.0), Narrowest(daylight_fill_ft)))
 
-        # PARKING STALLS: one per run
+        span = curb_station_span(leg, side)
         for start_ft, end_ft in runs:
-            # Parking edge line at inner edge of parking zone
-            edge_inset_ft = curb_offset_ft + depth_ft - stroke_width_ft(PARKING_EDGE_LINE) / 2
             edge_kind = (LEFT_EDGE_LINE if is_left_edge_of_the_roadway(ctx.state, leg, side)
-                        else PARKING_EDGE_LINE)
-            ctx.paint(edge_kind, leg_name, side,
-                     Along((start_ft, end_ft), Narrowest(edge_inset_ft)))
-
-            # Stall dividers: perpendicular ticks every pitch_ft, from outer to inner stall edge
-            stall_outer_inset_ft = curb_offset_ft
-            stall_inner_inset_ft = curb_offset_ft + self.stall_line_depth_ft
-            band = place(leg, side, Along((start_ft, end_ft), Kerb(stall_outer_inset_ft),
-                                         Narrowest(stall_inner_inset_ft))).geometry
+                         else PARKING_EDGE_LINE)
+            edge = ctx.paint(edge_kind, leg_name, side, Along(
+                (start_ft, end_ft),
+                Narrowest(curb_offset_ft + depth_ft - LANE_EDGE_LINE_WIDTH_FT / 2)))
+            if not edge:
+                continue  # the corner return consumes the whole leg - see plan_view's note
+            # A stroke in from the buffer, and never past the kerb: with no buffer this is the
+            # kerb itself, which the old divider clamp (min(outer, kerb)) also came to.
+            stall_kerb_ft = max(curb_offset_ft - LANE_EDGE_LINE_WIDTH_FT, 0.0)
+            stalls = Along((start_ft, end_ft), Kerb(stall_kerb_ft), Narrowest(stall_kerb_ft + depth_ft))
+            band = place(leg, side, stalls).geometry
             open_runs = ctx.open_runs(leg_name, side, STALL_DIVIDER, band) if band else []
             for lo, hi in stall_lane_runs_ft(open_runs, stall_length_ft,
                                               keep_inside_ft=MIN_LINE_LENGTH_FT):
-                # Dividers placed at computed stations
-                for station_ft in np.arange(lo, hi + stall_length_ft, stall_length_ft):
-                    if station_ft <= hi:
-                        ctx.paint(STALL_DIVIDER, leg_name, side,
-                                 Across(float(station_ft), Kerb(stall_outer_inset_ft),
-                                       Narrowest(stall_inner_inset_ft), skew_ft=self.skew_ft))
-
-            # Leftover hatching (too-narrow stalls)
+                if span is None:
+                    continue
+                run_end = min(span[1], hi)
+                n_stalls = whole_stalls_ft(run_end - lo - abs(self.skew_ft), stall_length_ft)
+                inner = lo + np.arange(n_stalls + 1) * stall_length_ft
+                if self.skew_ft < 0:
+                    inner = inner - self.skew_ft
+                outer = np.clip(inner + self.skew_ft, *span)
+                for inner_ft, outer_ft in zip(inner, outer):
+                    ctx.paint(STALL_DIVIDER, leg_name, side, Across(
+                        float(inner_ft), Kerb(stall_kerb_ft),
+                        Narrowest(stall_kerb_ft + self.stall_line_depth_ft),
+                        skew_ft=float(outer_ft - inner_ft)))
             for lo, hi in stall_leftover_runs_ft(open_runs, stall_length_ft,
                                                   keep_inside_ft=MIN_LINE_LENGTH_FT):
                 if hi - lo < MIN_HATCHED_ZONE_FT:
                     continue
-                ctx.paint(BUFFER_FILL, leg_name, side,
-                         Along((lo, hi), Kerb(curb_offset_ft),
-                               Narrowest(curb_offset_ft + depth_ft)))
-
-            # Kerb buffer: between stalls and kerb (if curb_offset_ft > 0)
-            if curb_offset_ft > 0.0:
-                buffer_edge_inset_ft = curb_offset_ft - stroke_width_ft(BUFFER_EDGE_LINE) / 2
-                ctx.paint(BUFFER_EDGE_LINE, leg_name, side,
-                         Along((start_ft, end_ft), Narrowest(buffer_edge_inset_ft)))
+                ctx.paint(BUFFER_FILL, leg_name, side, Along(
+                    (lo, hi), Kerb(stall_kerb_ft), Narrowest(stall_kerb_ft + depth_ft)))
+            if not curb_offset_ft:
+                continue
+            buffer_ft = max(curb_offset_ft - LANE_EDGE_LINE_WIDTH_FT, 0.0)
+            ctx.paint(BUFFER_EDGE_LINE, leg_name, side,
+                      Along((start_ft, end_ft), Narrowest(buffer_ft)))
+            ctx.paint(BUFFER_FILL, leg_name, side,
+                      Along((start_ft, end_ft), Kerb(0.0), Narrowest(buffer_ft)))
 
 
 @dataclass(frozen=True)
