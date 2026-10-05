@@ -187,11 +187,11 @@ class MarkedParking(Treatment):
         from src.geometry.markings import (BUFFER_EDGE_LINE, BUFFER_FILL, DAYLIGHT_EDGE_LINE,
                                            DAYLIGHT_FILL, LEFT_EDGE_LINE, PARKING_EDGE_LINE,
                                            STALL_DIVIDER)
-        from src.geometry.model import (offset_band_polygon, stall_lane_runs_ft,
+        from src.geometry.model import (stall_lane_runs_ft,
                                         stall_leftover_runs_ft)
         from src.geometry.paint import (MIN_LINE_LENGTH_FT,
                                         lane_edge_stripes, parking_runs)
-        from src.geometry.paint.datum import Along, Across, Kerb, Narrowest
+        from src.geometry.paint.datum import Along, Across, Kerb, Narrowest, place
         from src.geometry.paint.pieces import stroke_width_ft
 
         leg_name, side = self.target.leg, str(self.target.side)
@@ -231,18 +231,11 @@ class MarkedParking(Treatment):
             ctx.paint(edge_kind, leg_name, side,
                      Along((start_ft, end_ft), Narrowest(edge_inset_ft)))
 
-            # Parking stall zone: outer at kerb buffer, inner at lane edge
-            ctx.paint(BUFFER_FILL, leg_name, side,
-                     Along((start_ft, end_ft), Kerb(curb_offset_ft),
-                           Narrowest(curb_offset_ft + depth_ft)))
-
             # Stall dividers: perpendicular ticks every pitch_ft, from outer to inner stall edge
             stall_outer_inset_ft = curb_offset_ft
             stall_inner_inset_ft = curb_offset_ft + self.stall_line_depth_ft
-            band = offset_band_polygon(leg, side,
-                                      leg.curb_to_curb_ft / 2 - stall_inner_inset_ft,
-                                      leg.curb_to_curb_ft / 2 - stall_outer_inset_ft,
-                                      start_ft, end_ft)
+            band = place(leg, side, Along((start_ft, end_ft), Kerb(stall_outer_inset_ft),
+                                         Narrowest(stall_inner_inset_ft))).geometry
             open_runs = ctx.open_runs(leg_name, side, STALL_DIVIDER, band) if band else []
             for lo, hi in stall_lane_runs_ft(open_runs, stall_length_ft,
                                               keep_inside_ft=MIN_LINE_LENGTH_FT):
@@ -259,8 +252,8 @@ class MarkedParking(Treatment):
                 if hi - lo < MIN_HATCHED_ZONE_FT:
                     continue
                 ctx.paint(BUFFER_FILL, leg_name, side,
-                         Along((lo, hi), Kerb(stall_outer_inset_ft),
-                               Narrowest(stall_inner_inset_ft)))
+                         Along((lo, hi), Kerb(curb_offset_ft),
+                               Narrowest(curb_offset_ft + depth_ft)))
 
             # Kerb buffer: between stalls and kerb (if curb_offset_ft > 0)
             if curb_offset_ft > 0.0:
@@ -307,19 +300,23 @@ class ParkingBufferBollards(Treatment):
         """
         import numpy as np
         from src.geometry.markings import BOLLARD
-        from src.geometry.model import bollard_points_ft, station_offset_many
+        from src.geometry.model import curb_station_span
         from src.geometry.paint import parking_runs
         from src.geometry.paint.datum import At, Kerb
 
         leg_name, side = self.target.leg, str(self.target.side)
         curb_offset_ft = ctx.state.treatment_for(MarkedParking, self.target).curb_offset_ft
         leg = ctx.state.legs[leg_name]
-        for start_ft, _end_ft in parking_runs(ctx.state, leg_name, side, ctx.crosswalk_offsets,
+        span = curb_station_span(leg, side)
+        if span is None:
+            return
+        for start_ft, end_ft in parking_runs(ctx.state, leg_name, side, ctx.crosswalk_offsets,
                                                ctx.props):
-            points = bollard_points_ft(leg, curb_offset_ft, start_ft, self.spacing_ft,
-                                       sides=(side,))
-            if points:
-                stations, _ = station_offset_many(leg.centerline, np.asarray(points, dtype=float))
+            run_end = min(end_ft, span[1]) if span else end_ft
+            if run_end < start_ft:
+                continue
+            stations = np.arange(start_ft, run_end + 0.01, self.spacing_ft)
+            if len(stations) > 0:
                 ctx.paint(BOLLARD, leg_name, side, At(tuple(stations), Kerb(curb_offset_ft / 2)))
 
 
