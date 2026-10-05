@@ -38,6 +38,7 @@ from src.geometry.markings import (BIKE_LANE_EDGE_LINE, LANE_EDGE_LINE, PARKING_
                                    PaintKind)
 from src.geometry.model import CentreSource, KerbSource, Leg, station_offset_many
 from src.geometry.paint import PaintPiece, curbside_paint_ft
+from src.geometry.paint.datum import kerb_profile
 from src.geometry.targets import LegSide, LegTarget, Side
 from src.geometry.treatments import (DesignState, LaneNarrowing, LaneNarrowingBollards,
                                      MarkedParking)
@@ -59,12 +60,16 @@ TOL_FT = 0.02
 
 KERB_FT = 22.0
 STRAIGHT: KerbVertices = [(0.0, KERB_FT), (LENGTH_FT, KERB_FT)]
-#: Pinched to 20 ft at stations 75 and 225 and bulging to 24 ft at 150. Every slope is 0.08, under
-#: MAX_KERB_FOLLOW_TAPER, so kerb-follow smoothing leaves it exactly as traced. Used on BOTH sides,
-#: so the centre between the kerbs stays on the alignment and only the kerbside zones see the wobble.
+#: Pinched to 20 ft at stations 75 and 225 and bulging to 24 ft at 150. Used on BOTH sides, so the
+#: centre between the kerbs stays on the alignment and only the kerbside zones see the wobble.
 WOBBLE: KerbVertices = [(0.0, 22.0), (50.0, 22.0), (75.0, 20.0), (100.0, 22.0), (150.0, 24.0),
                         (200.0, 22.0), (225.0, 20.0), (250.0, 22.0), (LENGTH_FT, 22.0)]
-PINCH_FT = KERB_FT - min(offset for _, offset in WOBBLE)
+#: How far in the kerb paint FOLLOWS comes at its tightest - read off kerb_profile, which flattens
+#: the V of a traced pinch (20.08 ft here, not the 20.00 vertex), so the test asks the same kerb the
+#: paint is placed off rather than the raw tracing.
+PINCH_FT = KERB_FT - float(np.min(kerb_profile(
+    synthetic_leg("pinch", LENGTH_FT, 2 * KERB_FT, WOBBLE, WOBBLE), Side.LEFT,
+    np.arange(0.0, LENGTH_FT + 0.5, 0.5)).offsets_ft))
 #: The nominal width that agrees with STRAIGHT kerbs on both sides.
 AGREEING_NOMINAL_FT = 2 * KERB_FT
 

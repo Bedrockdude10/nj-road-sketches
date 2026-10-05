@@ -407,3 +407,15 @@ class TestShapes:
         for post, station in zip(posts, (50.0, 60.0, 70.0)):
             assert post.kind is BOLLARD and post.datum == {"traced": 1.0}
             assert (post.geometry.centroid.x, post.geometry.centroid.y) == pytest.approx((station, 17.5), abs=0.01)
+
+
+def test_D29_narrowest_finds_the_pinch_between_the_stations_asked_for():
+    """The pinch vertex at station 100 lies between the stations sampled (95, 105, ...): the
+    narrowest is still the kerb's own, 20 ft, not the 20.1 ft the samples happen to land on."""
+    leg = straight()
+    pinch = [(0, 22), (100, 20), (200, 22)]
+    trace(leg, "left", pinch)
+    trace(leg, "right", [(s, -o) for s, o in pinch])
+    stations = np.arange(5.0, 200.0, 10.0)
+    result = resolve(leg, "left", Narrowest(8.0), stations)
+    np.testing.assert_allclose(result.offsets_ft, 12.0, atol=0.01)
