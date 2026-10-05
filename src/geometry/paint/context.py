@@ -10,6 +10,7 @@ these pieces rather than rebuilding them, for the same reason.
 """
 from dataclasses import dataclass, field, replace
 import numpy as np
+import shapely
 from shapely.ops import unary_union
 from src.geometry.model import clip_paint_clear_of, station_offset_many, through_street_sides
 from src.geometry.markings import ZONE_END_LINE, lies_legitimately_on, yields_the_ground_to
@@ -97,6 +98,8 @@ class PaintContext:
         striper's gap around a crossing (PAINT_TO_CROSSWALK_GAP_FT) exists because both are paint.
         """
         self.surfaces = unary_union(self.surface_polygons) if self.surface_polygons else None
+        if self.surfaces is not None:
+            shapely.prepare(self.surfaces)
 
     def emit(self, piece: PaintPiece) -> PaintPiece:
         """Keep a piece as-is, without clipping. For the things that are not paint: an apron is
@@ -615,6 +618,8 @@ def curbside_paint_ft(state: "DesignState", crosswalk_offsets: dict, center_ft: 
                  if band is not None and not band.is_empty]
     all_bands = list(bands.values()) + elsewhere
     keep_clear = (unary_union(all_bands).buffer(PAINT_TO_CROSSWALK_GAP_FT) if all_bands else None)
+    if keep_clear is not None:
+        shapely.prepare(keep_clear)   # asked of every piece; see SceneGeometry.resolve
     # EVERY leg's band, not just the painted ones. What paint has to keep clear of is a fact
     # about paint, so `bands` above is filtered to the marked legs; where the JUNCTION ends is a
     # fact about the street, and a leg without a painted crossing still has one - see

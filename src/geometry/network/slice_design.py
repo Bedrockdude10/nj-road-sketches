@@ -305,8 +305,7 @@ def slice_design(features: gpd.GeoDataFrame, osm: dict | None = None,
         # only reason a route decision reaches a crop at all. The street's own OSM name, so the
         # document and the decision are keyed on one string.
         config={"intersection": {},
-                "legs": {slug: {"street_name": street_of[slug]} for slug in legs}
-                | {f"{slug}:end": {"street_name": street_of[slug]} for slug in legs}},
+                "legs": {slug: {"street_name": street_of[slug]} for slug in legs}},
         center_wgs84=center_wgs84,
         center_ft=center_ft,
         legs=legs,

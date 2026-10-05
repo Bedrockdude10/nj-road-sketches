@@ -120,6 +120,14 @@ class SceneGeometry:
                 pavement = build_pavement_polygon(state.corner_fillets)
             except ValueError:
                 pavement = None     # an unclosable ring is reported by check_pavement_ring
+        if pavement is not None:
+            # PREPARED ONCE, here, because every check and placement after this asks it a yes/no
+            # question - is this pad, sign or piece in the road - and an unprepared polygon builds
+            # its point-in-area index over the whole borough's outline for each one and throws it
+            # away. In place: everything handed this same object gets the index.
+            import shapely
+
+            shapely.prepare(pavement)
         # THE SURVEY AND THE FIELD OBSERVATION, reconciled rather than one chosen - which is what
         # SurveyedCrossing.is_marked's docstring asks any renderer to do. A config list is an
         # eyes-on observation and OSM's silence is a survey GAP, not a statement that a crossing

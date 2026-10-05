@@ -31,7 +31,7 @@ from src.sources.assessor import (BuildingHeight, assessor_path, describe_buildi
                                    height_of, parcels_near_buildings, storeys_by_pin)
 from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
 from src.geometry.treatments import DesignState, RaiseCrossing, RefugeIsland
-from src.geometry.model.approach import END_SUFFIX
+from src.geometry.model.approach import END_SUFFIX, split_approach_id
 
 #: THE ONE INVENTED FIGURE in the ground plan: a sidewalk's width. OSM maps a footway as a
 #: centreline, and none of the borough's 81 carries a `width` tag.
@@ -396,7 +396,9 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                 "far_m": [(leg.centerline.coords[-1][0] - center_ft.x) * FT_TO_M,
                           (leg.centerline.coords[-1][1] - center_ft.y) * FT_TO_M],
                 "width_m": leg.curb_to_curb_ft * FT_TO_M,
-                "confirmed": model.config["legs"][leg_name].get("confirmed", False),
+                # An approach's settings are its leg's: a `<leg>:end` row is that leg seen from its end.
+                "confirmed": model.config["legs"].get(split_approach_id(leg_name)[0], {})
+                .get("confirmed", False),
                 "crosswalk_offset_m": crosswalk_offsets[leg_name].offset_ft * FT_TO_M,
                 "crosswalk_offset_source": crosswalk_offsets[leg_name][1],
                 # How far the surveyed crossing is rotated off square to this leg

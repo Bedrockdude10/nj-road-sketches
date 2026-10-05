@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
+import shapely
 from shapely.geometry import Point
 
 from src.geometry.markings import (BAY_EDGE_LINES, STALL_DIVIDER,
@@ -299,12 +300,13 @@ class PadsAgainstACurb(SceneCheck):
         curbs = _all_curb_lines(legs, corner_fillets)
         if not curbs:
             return []
+        curb_array = np.asarray(curbs, dtype=object)   # one vectorised distance per pad
         violations = []
         for prop in props:
             if prop.get("type") != "tactile_paving_pad":
                 continue
             point = Point(*prop["position_ft"])
-            distance = min(curb.distance(point) for curb in curbs)
+            distance = float(shapely.distance(curb_array, point).min())
             if distance > PAD_MAX_DISTANCE_FROM_CURB_FT:
                 # A pad at OSM's kerb vertex IS against a kerb - OSM's - so distance from our
                 # modelled curb lines is a disagreement between the two, reported, not a failure.
@@ -792,23 +794,20 @@ class MarkingsDoNotCollide(SceneCheck):
         fills = [p for p in paint if p.covers_area]
         # Bounding boxes first: two markings can only share ground if their extents do, and an
         # envelope test is arithmetic against a GEOS overlay.
-        fill_bounds = [p.geometry.bounds for p in fills]
-        for i, a in enumerate(fills):
-            for j in range(i + 1, len(fills)):
-                if _boxes_apart(fill_bounds[i], fill_bounds[j]):
-                    continue
-                if lies_legitimately_on(a.kind, fills[j].kind):
-                    continue        # a layer, not a collision - see markings.MAY_LIE_ON
-                shared = a.geometry.intersection(fills[j].geometry)
-                if shared.area <= MARKING_OVERLAP_TOLERANCE_SQ_FT:
-                    continue
-                where = shared.centroid
-                violations.append(Violation(
-                    "markings_collide",
-                    f"{a.kind} and {fills[j].kind} overlap by {shared.area:.0f} sq ft"
-                    + (f" on {a.leg} {a.side}" if a.leg else "")
-                    + " - that ground would be painted twice",
-                    (where.x, where.y)))
+        for i, j in _envelope_pairs([p.geometry for p in fills]):
+            a = fills[i]
+            if lies_legitimately_on(a.kind, fills[j].kind):
+                continue        # a layer, not a collision - see markings.MAY_LIE_ON
+            shared = a.geometry.intersection(fills[j].geometry)
+            if shared.area <= MARKING_OVERLAP_TOLERANCE_SQ_FT:
+                continue
+            where = shared.centroid
+            violations.append(Violation(
+                "markings_collide",
+                f"{a.kind} and {fills[j].kind} overlap by {shared.area:.0f} sq ft"
+                + (f" on {a.leg} {a.side}" if a.leg else "")
+                + " - that ground would be painted twice",
+                (where.x, where.y)))
 
         # Lines too, and only where they run ALONG each other. Two lines that touch or cross are
         # ordinary - a stall divider meets the lane edge at right angles by design, and a hatch
@@ -818,20 +817,17 @@ class MarkingsDoNotCollide(SceneCheck):
         lines = [p for p in paint if p.kind.is_line]
         # Buffered once each, not once per comparison: buffering is the expensive half of this test.
         fattened = [p.geometry.buffer(COLLINEAR_PAINT_TOLERANCE_FT) for p in lines]
-        line_bounds = [g.bounds for g in fattened]
-        for i, a in enumerate(lines):
-            for j in range(i + 1, len(lines)):
-                if _boxes_apart(line_bounds[i], line_bounds[j]):
-                    continue
-                shared = fattened[i].intersection(lines[j].geometry)
-                if shared.length <= MIN_COLLINEAR_OVERLAP_FT:
-                    continue
-                violations.append(Violation(
-                    "markings_collide",
-                    f"{a.kind} and {lines[j].kind} run along each other for {shared.length:.1f} ft"
-                    + (f" on {a.leg} {a.side}" if a.leg else "")
-                    + " - two lines painted down the same stretch of road",
-                    (shared.centroid.x, shared.centroid.y)))
+        for i, j in _envelope_pairs(fattened):
+            a = lines[i]
+            shared = fattened[i].intersection(lines[j].geometry)
+            if shared.length <= MIN_COLLINEAR_OVERLAP_FT:
+                continue
+            violations.append(Violation(
+                "markings_collide",
+                f"{a.kind} and {lines[j].kind} run along each other for {shared.length:.1f} ft"
+                + (f" on {a.leg} {a.side}" if a.leg else "")
+                + " - two lines painted down the same stretch of road",
+                (shared.centroid.x, shared.centroid.y)))
 
         # AND LINES AGAINST GROUND, WHICH NEEDED A LINE TO HAVE A WIDTH. The two passes above
         # between them miss the whole class: the first compares only markings that cover area and
@@ -845,6 +841,8 @@ class MarkingsDoNotCollide(SceneCheck):
         #
         # paint.stroke_width_ft is what closed it - every stroked channel declares the width it is
         # laid at, so a line can be given the body it has and compared like anything else.
+        # One index over the fills, queried per stroke, instead of every stroke against every fill.
+        fill_tree = shapely.STRtree([f.geometry for f in fills])
         for line in lines:
             width_ft = stroke_width_ft(line.kind)
             if width_ft is None or line.geometry.is_empty:
@@ -866,9 +864,7 @@ class MarkingsDoNotCollide(SceneCheck):
             stroke = line.geometry.buffer(width_ft / 2, cap_style=2, join_style=2)
             if stroke.area <= 0:
                 continue
-            for fill in fills:
-                if _boxes_apart(stroke.bounds, fill.geometry.bounds):
-                    continue
+            for fill in (fills[k] for k in sorted(fill_tree.query(stroke).tolist())):
                 if lies_legitimately_on(line.kind, fill.kind):
                     continue
                 # THE ROLE DECIDES THE TOLERANCE, which is the whole content of this pass - see
@@ -903,6 +899,16 @@ class MarkingsDoNotCollide(SceneCheck):
                        "a bounding line lying inside the zone instead of along its edge"),
                     (shared.centroid.x, shared.centroid.y)))
         return violations
+
+
+def _envelope_pairs(geometries: list) -> list[tuple[int, int]]:
+    """(i, j), i < j, for every pair whose envelopes meet - one STRtree query in place of a Python
+    double loop over every pair, which on a borough's paint is tens of millions of comparisons.
+    Sorted, so the pairs come out in the order the double loop visited them."""
+    if len(geometries) < 2:
+        return []
+    found, tree_index = shapely.STRtree(geometries).query(geometries)
+    return sorted((int(a), int(b)) for a, b in zip(found, tree_index) if a < b)
 
 
 def _boxes_apart(a: tuple, b: tuple) -> bool:

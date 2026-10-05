@@ -107,8 +107,11 @@ def legs_on_road(model: "IntersectionModel", road: str) -> list[str]:
     than a method on either.
     """
     legs_cfg = model.config.get("legs", {})
+    # `dict.__contains__`, not `in`: model.legs also ANSWERS for a leg's `:end` approach
+    # (src/geometry/model/approach.py:LegTable), and a treatment laid on that view is the same
+    # street painted twice, once from each end.
     return sorted(name for name, cfg in legs_cfg.items()
-                  if name in model.legs
+                  if dict.__contains__(model.legs, name)
                   and _street_name(cfg.get("street_name", "")) == road)
 
 
