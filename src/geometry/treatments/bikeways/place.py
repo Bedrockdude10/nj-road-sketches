@@ -237,20 +237,17 @@ class AddBikeLane(Treatment):
                                            BIKE_LANE_UNCOLOURED_SURFACE, BUFFER_EDGE_LINE,
                                            BUFFER_FILL, DAYLIGHT_EDGE_LINE, DAYLIGHT_FILL,
                                            STALL_DIVIDER)
-        from src.geometry.model import (band_from_offsets, curbside_strip_polygon, inset_line_ft,
-                                        kerb_inset_offsets, kerb_parallel_line_ft,
-                                        kerb_referenced_band_polygon, lane_narrowing_polygons_ft,
-                                        offset_band_polygon, paint_stations,
-                                        parking_stall_lines_ft, stall_lane_runs_ft)
+        from src.geometry.model import (kerb_inset_offsets, paint_stations, stall_lane_runs_ft,
+                                        whole_stalls_ft)
+        from src.geometry.paint.datum import Across, Along, Centre, Glyph, Kerb, place
         from src.geometry.daylighting import merged_no_parking_spans_ft, no_parking_zones_ft
-        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, MIN_LINE_LENGTH_FT, _one,
-                                        end_against_crossing, parking_runs)
+        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, MIN_LINE_LENGTH_FT, end_against_crossing, parking_runs)
 
         leg_name, side = self.target.leg, str(self.target.side)
         leg = ctx.state.legs[leg_name]
         lane = self.section(ctx.state)
         at = ctx.anchors(leg_name, side, inner_offset_ft=(
-            lane.kerbside_inner_offset_ft(leg.curb_to_curb_ft / 2)))
+            lane.kerbside_inner_offset_ft(narrowest_half_width_ft(leg, side))))
         # A bike lane RUNS INTO its crossing and is cut by it, like every other kerbside zone
         # here - a real one carries on to the crossing and often across it. Stopping it at the
         # corner clearance instead left the buffer 5.5 ft short of the crossing, which
@@ -288,8 +285,6 @@ class AddBikeLane(Treatment):
         # station, and one that does not fit is a design decision for the rung ladder to take, not
         # a length for this method to trim. BikewayReachesTheEndOfItsKerb is the check that says so.
         room_ft = narrowest_half_width_ft(leg, side, max(start_ft, 0.0), self.to_ft)
-        floor = {key: None if offset_ft is None else min(offset_ft, room_ft)
-                 for key, offset_ft in bounds.items()}
         # Every stripe at its own CENTRE, which BikeLane has already offset half a stripe out
         # from the face it marks - so the travel lane keeps its 11 ft and the bike lane keeps
         # its own width, and the paint comes out of the buffer between them. Getting this wrong
@@ -301,25 +296,18 @@ class AddBikeLane(Treatment):
         # two edges come off the KERB where this section hugs it (see BikeLane.hugs_kerb) and off
         # the alignment where it does not - one branch, so a section cannot end up with its green
         # on one datum and its stripes on the other.
-        def lane_edge_line(key, from_ft, to_ft=None):
+        def lane_edge_ref(key):
+            """The reference one of the lane's own stripes is placed off, or None."""
             if lane.hugs_kerb:
-                # floor_ft is this stripe's own designed offset, so it follows the kerb OUTWARD
-                # and never comes in tighter than the section - see kerb_inset_offsets.
-                return (kerb_parallel_line_ft(leg, side, kerb[key], from_ft, to_ft,
-                                               floor_ft=floor[key])
-                        if kerb[key] is not None else None)
-            return (inset_line_ft(leg, side, bounds[key], from_ft, to_ft,
-                                   keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2)
-                    if bounds[key] is not None else None)
+                return Kerb(kerb[key]) if kerb[key] is not None else None
+            return Centre(bounds[key]) if bounds[key] is not None else None
 
-        def lane_surface(from_ft, to_ft=None):
-            if lane.hugs_kerb:
-                return kerb_referenced_band_polygon(leg, side, kerb["bike_outer_ft"],
-                                                     lane.width_ft, from_ft, to_ft,
-                                                     floor_ft=floor["bike_outer_ft"])
-            return offset_band_polygon(leg, side, bounds["bike_inner_ft"], bounds["bike_outer_ft"],
-                                        from_ft, to_ft,
-                                        keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2)
+        to_ft = self.to_ft if self.to_ft is not None else leg.centerline.length
+        span = (start_ft, to_ft)
+        surface_shape = (Along(span, Kerb(kerb["bike_outer_ft"]),
+                               Kerb(kerb["bike_outer_ft"] + lane.width_ft))
+                         if lane.hugs_kerb else
+                         Along(span, Centre(bounds["bike_outer_ft"]), Centre(bounds["bike_inner_ft"])))
 
         # THE LANE'S OWN FOOTPRINT, REGISTERED BEFORE ANYTHING ON THIS KERB IS PAINTED. Every
         # marking that crosses an entrance breaks at the stations this shape gives, so the green
@@ -331,20 +319,18 @@ class AddBikeLane(Treatment):
         # it sweeps away from the mouth instead. This method used to re-lay each of those marks
         # itself, in a loop that only the bikeways had - which is why a lane's markings were
         # carried across a driveway and nothing else's ever could be.
-        surface = lane_surface(start_ft, self.to_ft)
-        ctx.dash_phase(leg_name, side, surface)
-        ctx.add(BIKE_LANE_EDGE_LINE,
-                 inset_line_ft(leg, side, bounds["inner_line_ft"], start_ft, self.to_ft,
-                                keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2),
-                 leg_name, side, beyond_ft, shares_a_kerb=through)
+        ctx.dash_phase(leg_name, side, place(leg, side, surface_shape).geometry)
+        ctx.paint(BIKE_LANE_EDGE_LINE, leg_name, side, Along(span, Centre(bounds["inner_line_ft"])),
+                  beyond_ft=beyond_ft, shares_a_kerb=through)
         # buffer_inner_line_ft is None on BikeLane, whose buffer is against the travel lane and
         # so is already bounded by inner_line_ft above; KerbsideBikeLane's buffer sits out beside
         # the parking and needs its own stripe on that side. lane_edge_line returns None for a
         # None offset, so the loop is the same loop.
         for key in ("buffer_inner_line_ft", "buffer_outer_line_ft", "outer_line_ft"):
-            ctx.add(BIKE_LANE_EDGE_LINE, lane_edge_line(key, start_ft, self.to_ft), leg_name,
-                     side, beyond_ft,
-                     shares_a_kerb=through)
+            ref = lane_edge_ref(key)
+            if ref is not None:
+                ctx.paint(BIKE_LANE_EDGE_LINE, leg_name, side, Along(span, ref),
+                          beyond_ft=beyond_ft, shares_a_kerb=through)
         # THE LANE'S OWN ASPHALT, PAINTED GREEN - between the two edge stripes, i.e. exactly the
         # width a rider gets. Bounded by the stripes' faces rather than their centres, so the
         # green stops where the white starts instead of running under it; MarkingsDoNotCollide
@@ -363,8 +349,8 @@ class AddBikeLane(Treatment):
         # and claiming it on the Existing Conditions sheet both misstates the street and makes
         # the proposal's own green free. Same polygon either way, because that footprint is what
         # two invariants measure a facility by - see BIKE_LANE_SURFACE_KINDS.
-        ctx.add(BIKE_LANE_UNCOLOURED_SURFACE if self.observed else BIKE_LANE_SURFACE,
-                 surface, leg_name, side, beyond_ft, shares_a_kerb=through)
+        ctx.paint(BIKE_LANE_UNCOLOURED_SURFACE if self.observed else BIKE_LANE_SURFACE,
+                  leg_name, side, surface_shape, beyond_ft=beyond_ft, shares_a_kerb=through)
         # THE BIKE LANE SYMBOL (MUTCD Fig 9E-1). NACTO asks for one after every driveway and
         # intersection and at least every 500 ft; both halves of that rule live in
         # bike_symbol_stations_ft, so this leg, the corridor strip and the 3D export all call for
@@ -456,9 +442,10 @@ class AddBikeLane(Treatment):
                 # symbol lying inside it was subtracted to nothing and 0 of them reached either
                 # renderer. A symbol is a discrete mark at a station, not a run that two legs
                 # could each paint half of.
-                ctx.add(BIKE_LANE_SYMBOL,
-                        bike_symbol_polygon(leg, side, station_ft, across_ft, forward),
-                        leg_name, side, beyond_ft)
+                ctx.paint(BIKE_LANE_SYMBOL, leg_name, side, Glyph(
+                    station_ft, Centre(across_ft),
+                    lambda on, s, st, off, forward=forward: bike_symbol_polygon(
+                        on, s, st, Side(s).sign * off, forward)), beyond_ft=beyond_ft)
         if lane.buffer_ft:
             # The hatched buffer, between the two lines that bound it rather than under them.
             # lane_narrowing_polygons_ft measures its stripe inward from the kerb-to-kerb half,
@@ -471,35 +458,14 @@ class AddBikeLane(Treatment):
             # convergence at W Broad's junction throat - ends up here, widening the separation
             # exactly where the turning conflicts are, which is where a designer would want it.
             inner_face_ft = bounds["travel_lane_edge_ft"] + LANE_EDGE_LINE_WIDTH_FT
-            fill = None
-            if lane.hugs_kerb:
-                stations = paint_stations(leg, side, start_ft, self.to_ft)
-                if stations is not None:
-                    outer = kerb_inset_offsets(
-                        leg, side, stations, kerb["bike_inner_ft"] + LANE_EDGE_LINE_WIDTH_FT,
-                        floor_ft=bounds["bike_inner_ft"] - LANE_EDGE_LINE_WIDTH_FT)
-                    if outer is not None:
-                        # Never inside the travel lane's edge: where the kerb comes in far enough
-                        # that the buffer would have negative width it pinches to nothing, rather
-                        # than reaching back across the stripe that bounds it.
-                        fill = band_from_offsets(leg, side, stations,
-                                                  np.full(stations.shape, inner_face_ft),
-                                                  np.maximum(outer, inner_face_ft))
-            else:
-                fill = _one(lane_narrowing_polygons_ft(
-                    leg, leg.curb_to_curb_ft / 2 - inner_face_ft,
-                    start_left_ft=start_ft, start_right_ft=start_ft, sides=(side,),
-                    end_ft=self.to_ft))
-                beyond = curbside_strip_polygon(
-                    leg, side, bounds["bike_inner_ft"] - LANE_EDGE_LINE_WIDTH_FT, start_ft,
-                    self.to_ft)
-                if fill is not None and beyond is not None:
-                    fill = fill.difference(beyond)
+            outer_ref = (Kerb(kerb["bike_inner_ft"] + LANE_EDGE_LINE_WIDTH_FT) if lane.hugs_kerb
+                         else Centre(bounds["bike_inner_ft"] - LANE_EDGE_LINE_WIDTH_FT))
             # Deduped against the other half of the same kerb like the lane itself, or the two
             # legs' buffers overlap through the node now that both reach behind it - 18 sq ft of
             # it at Louellen, which markings_collide reported.
-            ctx.rim(ctx.add(BIKE_BUFFER_FILL, fill, leg_name, side, beyond_ft,
-                             shares_a_kerb=through), BIKE_LANE_EDGE_LINE)
+            ctx.rim(ctx.paint(BIKE_BUFFER_FILL, leg_name, side,
+                              Along(span, outer_ref, Centre(inner_face_ft)),
+                              beyond_ft=beyond_ft, shares_a_kerb=through), BIKE_LANE_EDGE_LINE)
         if lane.parking_ft:
             # Parking-protected: the stalls sit OUTSIDE the bike lane, between it and the kerb,
             # which is what shields the lane. Ticked at the standard stall length over the runs
@@ -519,7 +485,7 @@ class AddBikeLane(Treatment):
             # lane for KerbsideBikeLane - and a caller that derives one of them here is the
             # second derivation of a placed offset that SKILLS 0a is a list of. BikeLane's
             # method returns exactly the arithmetic that used to be on these three lines.
-            half = leg.curb_to_curb_ft / 2
+            half = narrowest_half_width_ft(leg, side)
             inner_off, outer_off = lane.parking_band_from_centerline_ft(half)
             # THE CORNER END OF THAT SAME BAND, hatched, because parking is forbidden there.
             # parking_runs below starts at the first station a stall may legally go, so without
@@ -546,15 +512,14 @@ class AddBikeLane(Treatment):
                     clipped_end = min(clipped_end, self.to_ft)
                 if clipped_end - clipped_start < MIN_LINE_LENGTH_FT:
                     continue
-                zone = offset_band_polygon(leg, side, inner_off, outer_off,
-                                           clipped_start, clipped_end)
-                ctx.rim(ctx.add(DAYLIGHT_FILL, zone, leg_name, side), DAYLIGHT_EDGE_LINE)
+                zone = Along((clipped_start, clipped_end), Centre(outer_off), Centre(inner_off))
+                ctx.rim(ctx.paint(DAYLIGHT_FILL, leg_name, side, zone), DAYLIGHT_EDGE_LINE)
             for run_start_ft, run_end_ft in parking_runs(ctx.state, leg_name, side,
                                                           ctx.crosswalk_offsets, ctx.props):
-                band = offset_band_polygon(leg, side, inner_off, outer_off,
-                                           max(run_start_ft, start_ft),
-                                           run_end_ft if self.to_ft is None
-                                           else min(run_end_ft, self.to_ft))
+                band = place(leg, side, Along(
+                    (max(run_start_ft, start_ft),
+                     run_end_ft if self.to_ft is None else min(run_end_ft, self.to_ft)),
+                    Centre(outer_off), Centre(inner_off))).geometry
                 open_runs = ctx.open_runs(leg_name, side, STALL_DIVIDER, band) if band else []
                 # THE PITCH, NOT THE STALL LENGTH, and asked of the section. They are the same
                 # number while the parking is parallel and they are not once it is angled: a 9 ft
@@ -566,14 +531,13 @@ class AddBikeLane(Treatment):
                     # THE LINE'S DEPTH, NOT THE BAY'S - see parking_line_depth_ft. Drawn to
                     # the full bay depth the divider meets this section's own outer edge line
                     # and the two read as one boundary painted across every stall opening.
-                    for divider in parking_stall_lines_ft(
-                            leg, side, lane.parking_line_depth_ft(), pitch_ft, lo, hi,
-                            curb_offset_ft=lane.parking_curb_offset_ft(half),
-                            # SIGNED BY WHICH WAY TRAFFIC RUNS - the same runs_outward the bike
-                            # symbol's heading comes off, because a bay leans the way a driver
-                            # turns into it and that is the direction of travel, not of the leg.
-                            skew_ft=lane.parking_skew_ft(self.runs_outward)):
-                        ctx.add(STALL_DIVIDER, divider, leg_name, side)
+                    kerb_end_ft = half - lane.parking_curb_offset_ft(half)
+                    skew_ft = lane.parking_skew_ft(self.runs_outward)
+                    n_stalls = whole_stalls_ft(hi - lo - abs(skew_ft), pitch_ft)
+                    for inner_ft in lo + np.arange(n_stalls + 1) * pitch_ft - min(skew_ft, 0.0):
+                        ctx.paint(STALL_DIVIDER, leg_name, side, Across(
+                            float(inner_ft), Centre(kerb_end_ft),
+                            Centre(kerb_end_ft - lane.parking_line_depth_ft()), skew_ft=skew_ft))
         # NOT `else`. The question is whether anything is LEFT OVER against the kerb, and that is
         # not the same as whether the section carried parking - KerbsideBikeLane carries parking
         # AND leaves the kerbside strip over, because its parking is inboard of the lane. Asked as
@@ -598,12 +562,8 @@ class AddBikeLane(Treatment):
             # whatever the street had spare, which is the whole visible fix: it used to be the
             # wedge - 0.87 ft of hatching at one end of W Broad's lane and 8.68 ft at the other.
             # With shy_ft at 0 there is nothing to hatch and the lane meets its own edge stripe.
-            hatch = (kerb_referenced_band_polygon(leg, side, 0.0, lane.shy_ft, start_ft,
-                                                   self.to_ft)
-                     if lane.shy_ft else None) if lane.hugs_kerb else _one(
-                lane_narrowing_polygons_ft(leg, leg.curb_to_curb_ft / 2 - bounds["outer_ft"],
-                                            start_left_ft=start_ft, start_right_ft=start_ft,
-                                            sides=(side,), end_ft=self.to_ft))
+            hatch = ((Along(span, Kerb(0.0), Kerb(lane.shy_ft)) if lane.shy_ft else None)
+                     if lane.hugs_kerb else Along(span, Kerb(0.0), Centre(bounds["outer_ft"])))
             # WHICH BUFFER IT IS. On a kerb with nothing outside the lane this leftover is the
             # bikeway's own separation from the kerb, so it is drawn in the BIKE buffer's channel
             # and reads as one protected corridor - lane with separation either side - instead of
@@ -620,8 +580,9 @@ class AddBikeLane(Treatment):
                 and ctx.state.treatment_for(MarkedParking, LegSide(leg_name, side)) is None)
             kind, edge = ((BIKE_BUFFER_FILL, BIKE_LANE_EDGE_LINE) if kerbside_is_the_bikeway_s
                           else (BUFFER_FILL, BUFFER_EDGE_LINE))
-            ctx.rim(ctx.add(kind, hatch, leg_name, side, beyond_ft,
-                             shares_a_kerb=through), edge)
+            if hatch is not None:
+                ctx.rim(ctx.paint(kind, leg_name, side, hatch, beyond_ft=beyond_ft,
+                                  shares_a_kerb=through), edge)
 
 
 
@@ -765,8 +726,9 @@ class AddTwoWayBikeLane(AddBikeLane):
 
     def paint(self, ctx) -> None:
         """The one-way section's markings, plus the yellow stripe down the middle of the lane."""
+        from src.geometry.model import station_offset_many
+        from src.geometry.paint.datum import Along, Centre, Kerb, place
         from src.geometry.markings import BIKE_CONTRAFLOW_DIVIDER
-        from src.geometry.model import inset_line_ft, kerb_parallel_line_ft
 
         # Everything AddBikeLane paints, at this section's own offsets. Reached through the
         # resolved lane, so the stripes land where the shifted section actually is.
@@ -812,10 +774,9 @@ class AddTwoWayBikeLane(AddBikeLane):
         # there. The green runs under the box; only this stripe gives way. Asked of the same
         # function the box is drawn from, never recomputed here.
         divider_to_ft = self._divider_end_ft(ctx, leg_name, side)
-        axis = (kerb_parallel_line_ft(leg, side, centre_from_kerb_ft, start_ft, divider_to_ft,
-                                       floor_ft=centre_ft)
-                 if section.hugs_kerb
-                 else inset_line_ft(leg, side, centre_ft, start_ft, divider_to_ft))
+        axis_ref = Kerb(centre_from_kerb_ft) if section.hugs_kerb else Centre(centre_ft)
+        axis_end_ft = divider_to_ft if divider_to_ft is not None else leg.centerline.length
+        axis = place(leg, side, Along((start_ft, axis_end_ft), axis_ref)).geometry
         if axis is None or axis.is_empty:
             return
         # AND IT CARRIES THROUGH EVERY DRIVEWAY, like the lane's other markings.
@@ -843,5 +804,8 @@ class AddTwoWayBikeLane(AddBikeLane):
         while at_ft + CONTRAFLOW_DASH_FT <= axis.length:
             dash = shapely.ops.substring(axis, at_ft, at_ft + CONTRAFLOW_DASH_FT)
             if dash.geom_type == "LineString" and dash.length > 0:
-                ctx.add(BIKE_CONTRAFLOW_DIVIDER, dash, leg_name, side, beyond_ft)
+                ends = station_offset_many(leg.centerline, np.asarray(dash.coords)[[0, -1]])[0]
+                ctx.paint(BIKE_CONTRAFLOW_DIVIDER, leg_name, side,
+                          Along((float(ends.min()), float(ends.max())), axis_ref),
+                          beyond_ft=beyond_ft)
             at_ft += period_ft

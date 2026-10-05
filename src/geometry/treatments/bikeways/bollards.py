@@ -102,8 +102,10 @@ class AddBikeLaneBollards(Treatment):
         design rather than restated - the same reason this treatment requires one.
         """
         from src.geometry.markings import BOLLARD
-        from src.geometry.model import points_at_offset_ft
-        from src.geometry.paint import PaintPiece, _dot, end_against_crossing
+        import numpy as np
+        from src.geometry.model import narrowest_half_width_ft, points_at_offset_ft, station_offset_many
+        from src.geometry.paint import end_against_crossing
+        from src.geometry.paint.datum import At, Centre
         # From its home rather than through paint, which only ever passed it along.
         from src.render.crosswalks import CROSSWALK_CLEARANCE_FT
 
@@ -123,7 +125,7 @@ class AddBikeLaneBollards(Treatment):
         bikeway = ctx.state.treatment_for(AddBikeLane, self.target)
         lane = bikeway.section(ctx.state)
         at = ctx.anchors(leg_name, side, inner_offset_ft=(
-            lane.kerbside_inner_offset_ft(leg.curb_to_curb_ft / 2)))
+            lane.kerbside_inner_offset_ft(narrowest_half_width_ft(leg, side))))
         if (leg_name, side) in ctx.straight_through:
             start_ft = clear_ft = 0.0
         elif leg_name in ctx.marked:
@@ -136,6 +138,10 @@ class AddBikeLaneBollards(Treatment):
         # open-code and which stood the whole row inside the parking stalls on the swapped one.
         inner_ft, outer_ft = lane.buffer_band_from_centerline_ft()
         centre_ft = (inner_ft + outer_ft) / 2
-        for point in points_at_offset_ft(leg, side, centre_ft, max(start_ft, clear_ft),
-                                          bikeway.to_ft, spacing_ft=self.spacing_ft):
-            ctx.emit(PaintPiece(BOLLARD, _dot(point), leg_name, side))
+        # The stations the posts stand at, as points_at_offset_ft spaces them; the offset is the
+        # buffer's centre, off the centre line like the section that defines it.
+        points = points_at_offset_ft(leg, side, centre_ft, max(start_ft, clear_ft),
+                                     bikeway.to_ft, spacing_ft=self.spacing_ft)
+        if points:
+            stations = station_offset_many(leg.centerline, np.asarray(points, dtype=float))[0]
+            ctx.paint(BOLLARD, leg_name, side, At(tuple(float(s) for s in stations), Centre(centre_ft)))
