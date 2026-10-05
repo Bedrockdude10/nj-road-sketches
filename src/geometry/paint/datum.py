@@ -154,9 +154,16 @@ def resolve(leg: "Leg", side: Side | str, ref: Ref, stations: np.ndarray) -> Pro
         p = centre_profile(leg, stations)
         return Profile(stations, p.offsets_ft + side.sign * ref.offset_ft, p.source)
     if isinstance(ref, Narrowest):
+        # Measured at the stations asked for AND at every kerb vertex between them: a pinch is a
+        # vertex, and samples that straddle it read the kerb wider than it is.
+        lo, hi = float(np.min(stations)), float(np.max(stations))
+        vertices = [station_offset_many(leg.centerline, np.asarray(curb.coords))[0]
+                    for curb in (leg.left_curb, leg.right_curb) if curb is not None]
+        probe = np.union1d(stations, [s for v in vertices for s in v if lo <= s <= hi])
+        reach = float(np.min(side.sign * (kerb_profile(leg, side, probe).offsets_ft
+                                          - centre_profile(leg, probe).offsets_ft)))
         k = kerb_profile(leg, side, stations)
         c = centre_profile(leg, stations)
-        reach = float(np.min(side.sign * (k.offsets_ft - c.offsets_ft)))
         return Profile(stations, c.offsets_ft + side.sign * (reach - ref.inset_ft), k.source)
     raise TypeError(f"not a paint reference: {ref!r}")
 
