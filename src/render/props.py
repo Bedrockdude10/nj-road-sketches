@@ -11,6 +11,7 @@ from src.geometry.intersection import IntersectionModel
 from src.checks import PAD_MAX_DISTANCE_FROM_CURB_FT, _all_curb_lines
 from src.geometry.coverage import CONTROL_NEAR_NODE_FT
 from src.geometry.model import bollard_points_ft, build_pavement_polygon, leg_clearance_ft
+from src.geometry.model.approach import at_every_junction
 from src.geometry.treatments import DesignState
 from src.render.coords import FT_TO_M, wgs84_to_state_plane
 
@@ -673,7 +674,9 @@ def _osm_control_props(state: DesignState, nodes_ft: list[dict], pavement=None) 
         for leg_name, leg in state.legs.items():
             along = leg.centerline.project(point)
             perp = leg.centerline.interpolate(along).distance(point)
-            if best is None or perp < best[0]:
+            # By offset, then by distance out: a leg and its END approach are one line, so they
+            # tie on offset and the approach the node is nearer the junction of governs.
+            if best is None or (round(perp, 3), along) < (round(best[0], 3), best[2]):
                 best = (perp, leg_name, along)
         perp, leg_name, along = best
         if along > STOP_NODE_MAX_ALONG_FT or perp > STOP_NODE_MAX_PERP_FT or along <= 0:
@@ -1146,10 +1149,11 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict,
     furniture_ft = control_nodes_ft(model.osm["street_furniture"])  # same lon/lat -> point_ft conversion
     control_ft = control_nodes_ft(model.osm["traffic_control"])
     pavement = pavement if pavement is not None else _modelled_pavement(state)
+    approaches = at_every_junction(state)     # junction-relative: placed from either end
     props = (
         _osm_streetlight_props(furniture_ft)
-        + _osm_control_props(state, control_ft, pavement)
-        + _osm_crossing_hardware_props(state, model.osm["crossings"], control_ft,
+        + _osm_control_props(approaches, control_ft, pavement)
+        + _osm_crossing_hardware_props(approaches, model.osm["crossings"], control_ft,
                                         model.osm["kerbs"], pavement)
         + _hydrant_props(furniture_ft)
         # No signal poles or heads: OSM records a signal as one node per junction, not where its

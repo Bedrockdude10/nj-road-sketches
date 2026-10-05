@@ -133,6 +133,13 @@ class SceneGeometry:
         # same junction as a site drew four solid bands.
         from src.geometry.surveyed import drawable_markings  # local: geometry<->render cycle
 
+        # JUNCTION-RELATIVE, SO OVER EVERY APPROACH: each leg from its start, and from its end
+        # where a junction is there too. The resolvers below measure out from a centreline's start;
+        # handed `at_every_junction` they place a crossing or stop bar at both ends of a leg that
+        # runs junction to junction, keyed by approach id (src/geometry/model/approach.py).
+        from src.geometry.model.approach import at_every_junction
+
+        state = at_every_junction(state)
         crossings = model.osm["crossings"]
         matched = _match_crossings_to_legs(state.legs, crossings)
         marked = frozenset(model.config["intersection"].get("existing_marked_crosswalks", [])) | {
@@ -221,33 +228,20 @@ class SceneGeometry:
         return out
 
     def centre_stripe_end_ft(self, leg_name: str) -> float:
-        """Where a leg's centre stripe stops at its FAR end: where its centreline first meets a
-        crossing or stop bar in the far half of the leg, or the leg's end where none is painted.
-
-        A borough leg runs junction to junction, and the stripe's start is cut back from the
-        junction at station 0 only - so Broad St's approach into Greenwood, whose junction is at
-        its END, ran its double yellow straight into the intersection.
+        """Where a leg's centre stripe stops at its FAR end: where the stripe seen from that end
+        would start (`centerline_start_ft` of its END approach), or the leg's end where no
+        junction is there. One rule, read from both ends.
         """
-        from shapely.geometry import Point
+        from src.geometry.model.approach import End, approach_id
+        from src.render.crosswalks import centerline_start_ft
 
-        from src.render.crosswalks import STOP_LINE_MAX_ALONG_FT
-
-        line = self.state.legs[leg_name].centerline
-        length = line.length
-        bands = [*self.crosswalk_bands.values(), *self.stop_bar_bands.values(),
-                 *self.unmodelled_crossing_bands, *self.unmodelled_stop_bars]
-        cut = length
-        for band in bands:
-            if band is None or band.is_empty:
-                continue
-            hit = line.intersection(band)
-            if hit.is_empty:
-                continue
-            entry = min(line.project(Point(xy)) for part in getattr(hit, "geoms", [hit])
-                        for xy in getattr(part, "coords", []) or part.exterior.coords)
-            if entry > max(length - STOP_LINE_MAX_ALONG_FT, length / 2):
-                cut = min(cut, entry)
-        return cut
+        leg = self.state.legs[leg_name]
+        far = approach_id(leg_name, End.END)
+        if leg.end_node is None or far not in self.crosswalk_offsets:
+            return leg.centerline.length
+        return leg.centerline.length - centerline_start_ft(
+            self.crosswalk_offsets[far].offset_ft, self.stop_bar_offsets.get(far),
+            far in self.marked_crosswalks)
 
     @property
     def unmodelled_stop_bars(self) -> tuple:

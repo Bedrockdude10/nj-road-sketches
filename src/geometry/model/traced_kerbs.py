@@ -666,12 +666,28 @@ def trimmed_curb_lines(legs: dict, corner_fillets: dict) -> dict[str, dict[str, 
     Sides whose corner failed to build keep the raw line, which is honest: that corner has
     no tangent point.
     """
+    from shapely.ops import substring
+
+    from src.geometry.model.approach import End, leg_side, split_approach_id
+
     out = {name: {"left": leg.left_curb, "right": leg.right_curb} for name, leg in legs.items()}
+    far = []
     for (name_a, name_b), pieces in corner_fillets.items():
         if "error" in pieces:
             continue
-        if name_a in out:
-            out[name_a]["left"] = pieces["trimmed_a"]
-        if name_b in out:
-            out[name_b]["right"] = pieces["trimmed_b"]
+        for approach, side, key in ((name_a, "left", "trimmed_a"), (name_b, "right", "trimmed_b")):
+            leg_name, end = split_approach_id(approach)
+            if approach in out:
+                out[approach][side] = pieces[key]
+            elif end is End.END and leg_name in out:
+                far.append((leg_name, leg_side(end, side), pieces[key]))
+    # A corner at a leg's FAR end trims the same kerb from the other end: cut it at that corner's
+    # tangent point, which is where the view seen from that end starts.
+    for leg_name, side, trimmed in far:
+        line = out[leg_name][side]
+        if line is None or trimmed is None or trimmed.is_empty:
+            continue
+        cut = substring(line, 0.0, line.project(Point(trimmed.coords[0])))
+        if isinstance(cut, LineString) and cut.length > 0:
+            out[leg_name][side] = cut
     return out

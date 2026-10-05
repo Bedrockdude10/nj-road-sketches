@@ -289,7 +289,8 @@ def _way_coords(snapshot: dict, way: dict) -> list[tuple[float, float]]:
 # junction as a site rendered 33. A layer a fetcher knows about and the document does not is a
 # layer the network path cannot draw.
 def is_building(tags: dict) -> bool:
-    return "building" in tags
+    """`building=no` is OSM saying a way is NOT a building - West Broad St carries it."""
+    return tags.get("building", "no") != "no"
 
 
 def is_crossing_way(tags: dict) -> bool:

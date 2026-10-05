@@ -31,6 +31,11 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
     from src.geometry.targets import Side
     from src.geometry.treatments.state import DesignState
 
+#: How far past a leg's half-width the far-junction cut reaches, so it takes paint laid against a
+#: kerb that wanders outside the nominal width.
+FAR_JUNCTION_CUT_MARGIN_FT = 30.0
+
+
 @dataclass
 class PaintContext:
     """The machinery every treatment paints through, and the pieces it has painted so far.
@@ -67,6 +72,7 @@ class PaintContext:
     # stations rather than each marking dashing along its own length.
     dash_phases: dict = field(default_factory=dict)
     last_pinched: np.ndarray = field(default_factory=lambda: np.array([]))
+    far_stops: dict = field(default_factory=dict)   # (leg, side) -> station; see far_stop_ft
 
     def add_surface(self, kind, polygon) -> None:
         """Ground that is BUILT rather than painted, which every marking then stops at.
@@ -130,6 +136,9 @@ class PaintContext:
         """
         added = []
         if geometry is None or geometry.is_empty:
+            return added
+        geometry = self._short_of_the_far_junction(leg, side, geometry)
+        if geometry.is_empty:
             return added
         if shares_a_kerb and self.through_painted:
             geometry = geometry.difference(unary_union(self.through_painted))
@@ -480,6 +489,43 @@ class PaintContext:
                             self.pieces.append(PaintPiece(kind, trimmed, piece.leg, piece.side,
                                                           rim=cause))
                             painted.append(trimmed)
+
+    def far_stop_ft(self, leg_name: str, side) -> float:
+        """The station on `leg_name` past which no paint goes: where the junction at its FAR end
+        begins on `side`, read as that end's approach would read its own start (`anchors`'
+        target), or the leg's whole length where no junction is there.
+        """
+        from src.geometry.model.approach import End, approach_id, leg_side
+
+        key = (leg_name, str(side))
+        if key not in self.far_stops:
+            leg = self.state.legs[leg_name]
+            far = approach_id(leg_name, End.END)
+            stop = leg.centerline.length
+            if leg.end_node is not None and far in self.crosswalk_offsets \
+                    and not leg_name.endswith(":end"):
+                sides = [leg_side(End.END, side)] if str(side) in ("left", "right") \
+                    else ["left", "right"]
+                stop -= max(self.anchors(far, s).target_ft for s in sides)
+            self.far_stops[key] = stop
+        return self.far_stops[key]
+
+    def _short_of_the_far_junction(self, leg_name, side, geometry):
+        """`geometry` with whatever lies past `far_stop_ft` removed. Treatments lay their paint
+        out from the junction at a leg's start; a leg that runs junction to junction has a second
+        one at its end, and this is the one place every marking passes on its way in.
+        """
+        if leg_name is None or self.state.legs.get(leg_name) is None:
+            return geometry
+        from shapely.ops import substring
+
+        leg = self.state.legs[leg_name]
+        stop = self.far_stop_ft(leg_name, side)
+        if stop >= leg.centerline.length:
+            return geometry
+        tail = substring(leg.centerline, max(stop, 0.0), leg.centerline.length)
+        reach = (leg.curb_to_curb_ft or 0.0) / 2 + FAR_JUNCTION_CUT_MARGIN_FT
+        return geometry.difference(tail.buffer(reach, cap_style="flat"))
 
     def anchors(self, leg_name: str, side: str, inner_offset_ft: float = 0.0):
         """This leg-side's measuring stations, with the shared crossing geometry filled in.

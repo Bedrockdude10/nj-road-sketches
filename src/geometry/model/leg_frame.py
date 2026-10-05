@@ -44,12 +44,16 @@ class Alignment:
         return cls(centerline, **{f"{side}_curb": curb})
 
 
+#: `Leg.start_node` for a leg measured outward from its junction with no OSM node id to name it.
+JUNCTION_AT_START = -1
+
+
 @dataclass
 class Leg:
     """One approach to an intersection: a centerline plus (if known) a curb-to-curb
     width, from which parallel curb lines are derived automatically."""
     name: str
-    centerline: LineString  # starts at the point nearest the intersection, extends outward
+    centerline: LineString  # in the OSM way's direction, start_node to end_node
     curb_to_curb_ft: float | None = None
     left_curb: LineString | None = None
     right_curb: LineString | None = None
@@ -64,12 +68,23 @@ class Leg:
     # surveyor's trace is the project's own principle stated backwards.
     width_provenance: str | None = None
     state_centreline: LineString | None = None
+    # OSM's own topology: the junction node at each end, None where that end is no junction (a
+    # dead end, or where the area stops). A site config's legs start at their junction and
+    # carry JUNCTION_AT_START. See src/geometry/model/approach.py.
+    start_node: int | None = JUNCTION_AT_START
+    end_node: int | None = None
+    osm_way_id: int | None = None
 
     def __post_init__(self):
         if self.curb_to_curb_ft is not None:
             half = self.curb_to_curb_ft / 2
             self.left_curb = offset_curb_line(self.centerline, half)
             self.right_curb = offset_curb_line(self.centerline, -half)
+
+
+def topology_of(leg: Leg) -> dict:
+    """The OSM topology fields of `leg`, for building a new Leg of the same street."""
+    return {"start_node": leg.start_node, "end_node": leg.end_node, "osm_way_id": leg.osm_way_id}
 
 
 def offset_curb_line(centerline: LineString, offset_ft: float) -> LineString:

@@ -37,6 +37,7 @@ from src.render.props import (signals_config, BIKE_WARNING_PLATE_RADIUS_FT, BOLL
                                YIELD_SIGN_PLATE_RADIUS_FT, build_props, pad_polygon,
                                signalization_conflicts)
 from src.render.coords import FT_TO_M
+from src.geometry.model.approach import END_SUFFIX
 from src.render.crosswalks import (CENTERLINE_STRIPE_WIDTH_FT,
                                    TRANSVERSE_LINE_WIDTH_FT, centerline_paint_ft,
                                    centerline_start_ft)
@@ -999,6 +1000,8 @@ def _draw_centerlines(ax, scene: SceneGeometry):
     state = scene.state
     bodies: dict[str, list] = {}
     for leg_name, leg in state.legs.items():
+        if leg_name.endswith(END_SUFFIX):
+            continue    # one stripe per leg; its far end is cut by centre_stripe_end_ft
         style = state.centerline_style(leg_name)
         painted = style != "none" and leg_name in scene.crosswalk_offsets
         start_ft = (centerline_start_ft(scene.crosswalk_offsets[leg_name].offset_ft,

@@ -31,6 +31,7 @@ from src.sources.assessor import (BuildingHeight, assessor_path, describe_buildi
                                    height_of, parcels_near_buildings, storeys_by_pin)
 from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
 from src.geometry.treatments import DesignState, RaiseCrossing, RefugeIsland
+from src.geometry.model.approach import END_SUFFIX
 
 SIDEWALK_WIDTH_FT = 6
 
@@ -478,9 +479,11 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
                         # together or the render's lanes come out unequal.
                         *(state.travel_lane_divider_shift(leg_name) or (0.0, None)),
                         end_ft=scene.centre_stripe_end_ft(leg_name))
-                ],
+                ] if not leg_name.endswith(END_SUFFIX) else [],
             }
-            for leg_name, leg in state.legs.items()
+            # EVERY APPROACH, so a leg's far-end crossing and stop bar reach Blender too; its
+            # centre stripe is drawn once, on the leg's own row.
+            for leg_name, leg in scene.state.legs.items()
         ],
         # Both of these are DERIVED GEOMETRY rather than parameters: the treatment builds the
         # polygon, against this design, at the moment it is asked (RefugeIsland.polygon /
