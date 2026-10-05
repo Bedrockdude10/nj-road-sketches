@@ -273,13 +273,13 @@ def test_a_render_is_a_slice_of_the_document(tmp_path) -> None:
     no IntersectionModel. If a marking is missing from the picture it is missing from the file.
     """
     from scripts.export_network import export_network
-    from scripts.render_slice import _center_ft, draw_2d, load_network, slice_around
+    from scripts.render_slice import center_ft, draw_2d, load_network, slice_around
 
     export_network(AREA, tmp_path)
     network = load_network(AREA, tmp_path)
 
     # Broad & Greenwood, the junction three site files describe between them.
-    around = slice_around(network, _center_ft("-74.7619598,40.389179"), 320.0)
+    around = slice_around(network, center_ft("-74.7619598,40.389179"), 320.0)
     kinds = set(around["kind"])
     assert {"street", "kerb", "bikeway", "bollard"} <= kinds, (
         f"a slice at the corridor's central junction should carry the facility; got {kinds}")
@@ -300,12 +300,12 @@ def test_a_3d_scene_is_a_slice_of_the_document(tmp_path) -> None:
     import math
 
     from scripts.export_network import export_network
-    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
+    from scripts.render_slice import center_ft, design_for, load_network, slice_around
     from src.render.export import export_scenario
 
     export_network(AREA, tmp_path)
     around = slice_around(load_network(AREA, tmp_path),
-                          _center_ft("-74.7619598,40.389179"), 320.0)
+                          center_ft("-74.7619598,40.389179"), 320.0)
     model, state, pavement = design_for(around, AREA)
     out = tmp_path / "slice_3d.json"
     export_scenario(model, state, "test", out, pavement=pavement)
@@ -351,9 +351,9 @@ def test_a_slice_reads_what_osm_says_about_each_leg() -> None:
     `overtaking=no` and every one of them drew dashed, because `slice_design` built a model with
     no `leg_osm_tags` and DesignState.from_model reads exactly that field.
     """
-    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
+    from scripts.render_slice import center_ft, design_for, load_network, slice_around
 
-    around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
+    around = slice_around(load_network(AREA), center_ft("-74.7619598,40.389179"), 300.0)
     model, state, _pavement = design_for(around, AREA, "existing")
     context = model.osm
 
@@ -376,10 +376,10 @@ def test_a_window_knows_its_junction_is_signalized_without_a_config() -> None:
     here: a highway=traffic_signals node on the junction, and crossing=traffic_signals on all
     four of the crossings matched to its legs.
     """
-    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
+    from scripts.render_slice import center_ft, design_for, load_network, slice_around
     from src.render.scene import SceneGeometry
 
-    around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
+    around = slice_around(load_network(AREA), center_ft("-74.7619598,40.389179"), 300.0)
     model, state, pavement = design_for(around, AREA, "existing")
     assert "signals" not in model.config, "a window has no site config; that is the premise"
     assert any(n["tags"].get("highway") == "traffic_signals"
@@ -442,12 +442,12 @@ def test_a_slice_lays_its_footway_against_the_traced_kerb() -> None:
     """
     from shapely.ops import unary_union
 
-    from scripts.render_slice import _center_ft, design_for, load_network, slice_around
+    from scripts.render_slice import center_ft, design_for, load_network, slice_around
     from src.geometry.intersection.paved import to_state_plane
     from src.geometry.treatments import build_sidewalk_pieces
     from src.render.scene import SceneGeometry
 
-    around = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), 300.0)
+    around = slice_around(load_network(AREA), center_ft("-74.7619598,40.389179"), 300.0)
     model, state, pavement = design_for(around, AREA, "existing")
     kerb_ways = model.osm["kerbs"]
     scene = SceneGeometry.resolve(model, state, pavement=pavement)
@@ -468,10 +468,10 @@ def test_a_slice_lays_its_footway_against_the_traced_kerb() -> None:
 def test_a_slice_clips_rather_than_dropping_what_overhangs_it() -> None:
     """A 1,050 ft bikeway run whose centre is outside the window still crosses it. Filtering by
     centroid instead of clipping would draw a hole where the longest run should be."""
-    from scripts.render_slice import load_network, slice_around, _center_ft
+    from scripts.render_slice import load_network, slice_around, center_ft
 
     network = load_network(AREA)
-    tight = slice_around(network, _center_ft("-74.7619598,40.389179"), 150.0)
+    tight = slice_around(network, center_ft("-74.7619598,40.389179"), 150.0)
     assert not tight[tight["kind"] == "bikeway"].empty
     assert tight.total_bounds[2] - tight.total_bounds[0] <= 301.0
 
@@ -483,9 +483,9 @@ WIDE_WINDOW_FT = 500.0
 
 
 def _window(radius_ft: float = WIDE_WINDOW_FT):
-    from scripts.render_slice import _center_ft, load_network, slice_around, slice_context
+    from scripts.render_slice import center_ft, load_network, slice_around, slice_context
 
-    features = slice_around(load_network(AREA), _center_ft("-74.7619598,40.389179"), radius_ft)
+    features = slice_around(load_network(AREA), center_ft("-74.7619598,40.389179"), radius_ft)
     return features, slice_context(features)
 
 

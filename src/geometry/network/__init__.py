@@ -20,7 +20,7 @@ deliberate: `_build_corridor` needs to know where the cross streets land before 
 traced kerb runs at them, and cross streets are resolved FROM a corridor. That import is
 function-level, with the reason written at the call site, so the module graph stays a DAG.
 
-EVERY NAME IS RE-EXPORTED HERE, including the underscored ones. `_complement_spans`, `_merged_spans`
+EVERY NAME IS RE-EXPORTED HERE, including the underscored ones. `complement_spans`, `merged_spans`
 and `_kerb_offset_at` are imported by scripts/corridor_render.py and src/geometry/corridor_paint.py,
 and `_street_name` by treatments/corridor.py - the underscore records "not a designed API", not
 "not used outside this file", so removing them from this list breaks four callers.

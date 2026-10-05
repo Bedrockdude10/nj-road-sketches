@@ -84,7 +84,7 @@ DEFAULT_PARCELS_PATH = DATA_DIR / "MercerCountyParcels.shp"
 # bbox saves almost nothing. An indexed format makes the same read orders of
 # magnitude cheaper.
 # scripts/convert_road_network.py writes that sibling; if it exists, it's used
-# automatically. See _resolve_indexed_path.
+# automatically. See resolve_indexed_path.
 INDEXED_SUFFIXES = (".fgb", ".gpkg")
 _announced_indexed: set[Path] = set()
 
@@ -401,7 +401,7 @@ def load_road_network(
     WGS84 bbox (minx, miny, maxx, maxy).
 
     Transparently prefers a spatially-indexed sibling of `path` if one has been
-    built (see _resolve_indexed_path / scripts/convert_road_network.py) - same data,
+    built (see resolve_indexed_path / scripts/convert_road_network.py) - same data,
     dramatically faster bbox reads.
     """
     resolved = require_source_data(resolve_indexed_path(resolve_data_path(path)), "the roadway network")

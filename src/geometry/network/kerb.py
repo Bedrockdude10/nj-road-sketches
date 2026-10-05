@@ -6,7 +6,7 @@ than from OSM. This module turns all of that into `KerbRun`s - station ranges on
 corridor, each labelled with where it came from - so a caller can ask "is the kerb known here?"
 without knowing which source answered.
 
-THE SPAN ARITHMETIC LIVES HERE, not in a neutral module of its own, because `_merged_spans` bakes
+THE SPAN ARITHMETIC LIVES HERE, not in a neutral module of its own, because `merged_spans` bakes
 in `KERB_RUN_JOIN_FT`: two ranges closer than one kerb-run join are one range, whatever they are
 ranges OF. A file called `spans.py` would read as pure interval arithmetic and would be wrong.
 """

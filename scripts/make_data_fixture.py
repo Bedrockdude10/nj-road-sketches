@@ -128,7 +128,7 @@ def _pad(bbox: tuple, pad_ft: float, degrees: bool) -> tuple:
 def verify_identical(source_path: Path, boxes: list, written: Path, columns: list[str] | None = None) -> bool:
     """Compare the written clip against the same boxes' reads of the source, exactly.
 
-    Attributes and geometry WKB, after _unpack_single_part on both sides - which is what the
+    Attributes and geometry WKB, after unpack_single_part on both sides - which is what the
     loaders apply on every read, so this checks the data as it will actually be consumed.
     """
     want = read_boxes(source_path, boxes, columns)

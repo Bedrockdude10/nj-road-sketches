@@ -10,7 +10,7 @@ same bbox read is orders of magnitude cheaper. Every phase script pays this cost
 and Phase 3/4 are separate processes that each pay it again.
 
 This is a one-off per data file. src/sources/data_loader.py picks the sibling up
-automatically once it exists (see _resolve_indexed_path) - no config change needed,
+automatically once it exists (see resolve_indexed_path) - no config change needed,
 and sites/*/config.yaml keeps pointing at the original as the canonical source.
 
 Usage:
@@ -33,7 +33,7 @@ DRIVERS = {"fgb": "FlatGeobuf", "gpkg": "GPKG"}
 def verify_identical(source: Path, converted: Path) -> bool:
     """Read both back and compare attributes and geometry WKB exactly.
 
-    The comparison applies _unpack_single_part to the converted side, because that
+    The comparison applies unpack_single_part to the converted side, because that
     is what load_road_network does on every read - so this checks the data as it
     will actually be consumed, not the raw file. Both are sorted by OBJECTID first,
     since neither format promises to preserve feature order.

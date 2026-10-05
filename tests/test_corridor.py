@@ -32,7 +32,7 @@ from src.geometry.corridor_paint import (far_kerb_lane_edge, hatch_bands,
                                          kerb_offset_ft, stall_footprints)
 from src.geometry.model.leg_frame import point_at
 from src.geometry.treatments.parking import MIN_HATCHED_ZONE_FT
-from src.geometry.network import (KERB_FROM_TRACING, _merged_spans, corridor_facts,
+from src.geometry.network import (KERB_FROM_TRACING, merged_spans, corridor_facts,
                                  corridors_from_models, marked_parking_capacity,
                                  osm_window_spans)
 from tests.conftest import WIDE_FRAME_SCALE, needs_source_data
@@ -581,7 +581,7 @@ def test_every_spare_foot_of_kerb_is_allocated(broad_st_paint, site_models):
     bands, _marks, _labels, hatch = kerbside_parking(corridor, facts, far, edge_at)
     drawn = unary_union([b for _lo, _hi, b in bands] + [h for _lo, _hi, h, _why in hatch])
 
-    mouths = _merged_spans([(o.start_ft, o.end_ft) for side, o in facts.openings if side == far])
+    mouths = merged_spans([(o.start_ft, o.end_ft) for side, o in facts.openings if side == far])
     skip = list(mouths) + list(paint.breaks)
     sign = 1.0 if far == "left" else -1.0
     bare_sqft, bare_ft, worst = 0.0, 0.0, (0.0, None)
