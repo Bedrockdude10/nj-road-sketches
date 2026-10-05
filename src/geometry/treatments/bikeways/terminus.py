@@ -25,11 +25,11 @@ from dataclasses import dataclass
 from typing import ClassVar, TYPE_CHECKING
 
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 
 from src.geometry.markings import (BIKE_LANE_SYMBOL, BIKE_THROUGH_ARROW, SHARED_LANE_MARKING,
                                    TURN_BOX_EDGE_LINE, TURN_BOX_SURFACE)
-from src.geometry.targets import LegSide, Side
+from src.geometry.targets import LegSide
 from src.geometry.treatments.base import Treatment
 from src.geometry.treatments.bikeways.symbols import (SYMBOL_LENGTH_FT, SYMBOL_WIDTH_FT,
                                                       bike_symbol_polygon)
@@ -275,7 +275,7 @@ class EndTheBikeway(Treatment):
                 f" ft off the kerb")
 
     def paint(self, ctx) -> None:
-        from src.geometry.paint.datum import Across, Along, Centre, Glyph, Narrowest, place
+        from src.geometry.model import place_in_measured_frame
 
         leg_name, side = self.target.leg, str(self.target.side)
         leg = ctx.state.legs[leg_name]
@@ -302,51 +302,71 @@ class EndTheBikeway(Treatment):
         # src/geometry/markings.py:MAY_LIE_ON declares - 9E.11(12) puts green under all of the box.
         limit_ft = ctx.state.municipal_limits_ft.get(leg_name)
         near_ft, far_ft = turn_box_span_ft(end_ft, limit_ft)
-        # The face offsets are signed left-positive; a Centre reference counts toward `side`.
-        sign = Side(side).sign
-        outer, inner = Centre(sign * outer_ft), Centre(sign * inner_ft)
-        box = Along((near_ft, far_ft), outer, inner)
-        footprint = place(leg, side, box).geometry
-        if footprint is None or not footprint.is_valid or footprint.area <= 0:
+        corners = [(near_ft, inner_ft), (far_ft, inner_ft), (far_ft, outer_ft), (near_ft, outer_ft)]
+        placed = place_in_measured_frame(leg.centerline,
+                                         np.array([s for s, _ in corners]),
+                                         np.array([o for _, o in corners]))
+        box = Polygon([tuple(point) for point in placed])
+        if not box.is_valid or box.area <= 0:
             return
-        ctx.paint(TURN_BOX_SURFACE, leg_name, side, box)
-        # 9E.11(07), "bounded on all sides by a solid white line": the box's four sides, off the
-        # same two references and two stations as the box itself.
-        for edge in (Along((near_ft, far_ft), outer), Along((near_ft, far_ft), inner),
-                     Across(near_ft, outer, inner), Across(far_ft, outer, inner)):
-            ctx.paint(TURN_BOX_EDGE_LINE, leg_name, side, edge)
+        ctx.add(TURN_BOX_SURFACE, box, leg_name, side)
+        # 9E.11(07), "bounded on all sides by a solid white line" - so the boundary is the box's
+        # own ring and not four separately-built stripes. One derivation, and it cannot come
+        # adrift from the shape it bounds.
+        ctx.add(TURN_BOX_EDGE_LINE, LineString(box.exterior.coords), leg_name, side)
 
-        # 9E.11(05): at least one bicycle symbol AND at least one arrow, both facing inward.
+        # 9E.11(05): at least one bicycle symbol AND at least one arrow. Both face INWARD - a
+        # rider in this box has finished crossing and is about to ride into the bikeway, so the
+        # direction they are pointed is toward the junction, which is decreasing station.
+        # ON THE KERB HALF OF THE BOX, NOT DOWN ITS MIDDLE. The box now sits inside the bikeway
+        # (see the clamp above), and the middle of a two-way bikeway is where its yellow divider
+        # runs - stencils centred there came out with dashes painted across a through arrow and a
+        # bicycle symbol, 1.5 sq ft of stripe on 100% of one dash, which MarkingsDoNotCollide
+        # reported and was right to. The half to move them into is not a guess: 9E.11(10)'s second
+        # factor for siting a box is keeping queued riders clear of moving traffic, and a rider who
+        # has just crossed the street arrives at the kerb. 2.4 ft of stencil centred in a 4 ft half
+        # clears the 0.49 ft divider by 0.8 ft.
         centre_ft = abs(inner_ft + 3 * outer_ft) / 4
         symbol_at = near_ft + TURN_BOX_LENGTH_FT * 0.72
         arrow_at = near_ft + TURN_BOX_LENGTH_FT * 0.26
-        ctx.paint(BIKE_LANE_SYMBOL, leg_name, side, Glyph(
-            symbol_at, Centre(centre_ft),
-            lambda on, s, st, off: bike_symbol_polygon(on, s, st, Side(s).sign * off, forward=False)))
-        ctx.paint(BIKE_THROUGH_ARROW, leg_name, side, Glyph(
-            arrow_at, Centre(centre_ft),
-            lambda on, s, st, off: _through_arrow_polygon(on, st, Side(s).sign * off, s,
-                                                          forward=False)))
+        ctx.add(BIKE_LANE_SYMBOL,
+                bike_symbol_polygon(leg, side, symbol_at, centre_ft, forward=False),
+                leg_name, side)
+        # DOWNSTREAM OF THE SYMBOL, which 9E.01(04) and 9E.07(11) both specify - and downstream
+        # for a rider facing inward is the LOWER station, which is why the arrow's station is the
+        # smaller of the two and not the larger.
+        ctx.add(BIKE_THROUGH_ARROW,
+                _through_arrow_polygon(leg, arrow_at, centre_ft, side, forward=False),
+                leg_name, side)
 
+        # THE SHARROWS, past the box, in the travelled way. Refused outright above 9E.09(03)'s
+        # ceiling and refused on an unknown speed, because a marking whose own guidance turns on
+        # a number nobody stated is a marking placed on an assumption.
         if self.speed_limit_mph is None or self.speed_limit_mph >= SHARROW_MAX_SPEED_MPH:
             return
         clear_ft = (SHARROW_CLEAR_OF_PARKING_FT if self.beside_parking
                     else SHARROW_CLEAR_OF_KERB_FT)
+        # Measured from the KERB FACE, which is what 9E.09(07)-(08) say and is not the alignment:
+        # the two differ by half the roadway and the manual's 4 ft would land in the opposite
+        # travel lane read off the wrong datum. narrowest_half_width_ft is the traced-kerb answer
+        # (.claude/SKILLS.md section 2) and falls back to the nominal where nothing is traced,
+        # which is exactly the right behaviour on a leg drawn past the end of the tracing.
         from src.geometry.model import narrowest_half_width_ft
+
         half_ft = narrowest_half_width_ft(leg, side)
         if half_ft is None or half_ft <= clear_ft:
             return
+        across_ft = half_ft - clear_ft
         station = far_ft + SHARROW_FIRST_FT
+        # AND THE SHARROWS STOP AT THE LINE TOO. They mark the travelled way a rider continues
+        # into past the facility's end, which at a jurisdictional terminus is somebody else's
+        # travelled way. The drawn leg alone does not bound them: at 2.5x it reaches 195 ft past
+        # the borough line, and that is exactly where the first one would land.
         reach_ft = leg.centerline.length if limit_ft is None else min(leg.centerline.length,
                                                                       limit_ft)
         while station + SYMBOL_LENGTH_FT <= reach_ft:
-            # A sharrow is several polygons; each is one glyph off the same reference.
-            n_parts = len(_sharrow_polygons(leg, station, half_ft - clear_ft, side, forward=True))
-            for i in range(n_parts):
-                ctx.paint(SHARED_LANE_MARKING, leg_name, side, Glyph(
-                    station, Narrowest(clear_ft),
-                    lambda on, s, st, off, i=i: _sharrow_polygons(
-                        on, st, Side(s).sign * off, s, forward=True)[i]))
+            for piece in _sharrow_polygons(leg, station, across_ft, side, forward=True):
+                ctx.add(SHARED_LANE_MARKING, piece, leg_name, side)
             station += SHARROW_INTERVAL_FT
 
 
