@@ -13,9 +13,16 @@ Two things make the suite reproducible and fast:
 Refresh the snapshot with:  cp output/.cache/*.json tests/fixtures/osm_cache/
 """
 import os
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_CACHE = REPO_ROOT / "tests" / "fixtures" / "osm_cache"
@@ -38,6 +45,29 @@ SITES = ("broad_st_greenwood", "ebroad_princeton", "columbia_princeton", "wbroad
 # run (every geometry golden among them) now run. Kept as a marker rather than deleted: it still
 # names the dependency at each test, and it still fires if the clip is missing - a checkout with
 # no LFS, a partial clone, or someone regenerating the fixture into the wrong directory.
+#: A traced kerb as (station, offset) vertices in a leg's own frame; offsets unsigned.
+KerbVertices = Sequence[tuple[float, float]]
+
+
+def synthetic_leg(name: str, length_ft: float, nominal_ft: float | None,
+                  left: KerbVertices | None, right: KerbVertices | None,
+                  state_line: "LineString | None" = None) -> "Leg":
+    """A straight leg along +x with the kerbs given traced on it, for tests that need a street
+    whose every dimension they chose. A side passed as None was never traced. ONE builder, so a
+    test cannot construct a leg the pipeline never would (a kerb set but not in traced_sides)."""
+    from shapely.geometry import LineString
+
+    from src.geometry.model import Leg
+
+    leg = Leg(name, LineString([(0.0, 0.0), (length_ft, 0.0)]), curb_to_curb_ft=nominal_ft)
+    for side, points, sign in (("left", left, 1.0), ("right", right, -1.0)):
+        if points is not None:
+            setattr(leg, f"{side}_curb", LineString([(s, sign * o) for s, o in points]))
+            leg.traced_sides.add(side)
+    leg.state_centreline = state_line
+    return leg
+
+
 needs_source_data = pytest.mark.skipif(
     not FIXTURE_DATA.exists() and not (REPO_ROOT / "data").exists(),
     reason=f"no GIS layers: neither {FIXTURE_DATA.relative_to(REPO_ROOT)} (scripts/"
