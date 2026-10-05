@@ -22,7 +22,7 @@ from src.geometry.markings import require_every_kind
 # The 3D render's own figures, read rather than re-stated: how wide it builds a footway, and the
 # spacing, angle and phase its hatch strokes are laid on. src/render/export.py is where a 2D/3D
 # disagreement about any of them would otherwise start.
-from src.render.export import (HATCH_ANGLE_DEG, PAINT_HATCH_SPACING_FT, sidewalk_bands_ft, sidewalk_lines_ft,
+from src.render.export import (HATCH_ANGLE_DEG, PAINT_HATCH_SPACING_FT, sidewalk_lines_ft,
                                _leg_heading_deg)
 from src.render.props import (signals_config, BIKE_WARNING_PLATE_RADIUS_FT, BOLLARD_RADIUS_FT, DRAWN_BY_PAINT,
                                HYDRANT_RADIUS_FT, MAST_ARM_RADIUS_FT, PED_SIGNAL_HEAD_WIDTH_FT,
@@ -795,11 +795,10 @@ def plot_design_state(ax, model: IntersectionModel, state: DesignState, title: s
     # (src/geometry/model/context.py:sidewalk_span_ft) - so having them on the plot is what makes
     # an over-wide leg visible instead of merely arguable.
     #
-    # The same bands the 3D render builds: src/render/export.py:sidewalk_bands_ft.
-    _draw(ax, sidewalk_bands_ft(model.osm["sidewalks"]),
-          color="steelblue", alpha=0.16, zorder=2,
-          boundary=dict(color="steelblue", linewidth=0.8, linestyle=(0, (4, 2)), alpha=0.65,
-                        zorder=2))
+    # AS LINES, as OSM maps them: a footway is a centreline with no width, and the 3D render
+    # draws the same lines (src/render/export.py: `sidewalk_lines`).
+    _draw(ax, sidewalk_lines_ft(model.osm["sidewalks"]), color="steelblue", linewidth=1.2,
+          zorder=2)
 
     # Curb lines as the corners trim them. The raw lines overshoot into the junction on
     # purpose (fillet material), so drawing them raw would draw curb across the middle of

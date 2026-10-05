@@ -224,6 +224,9 @@ CENTERLINE_WIDTH_M = 0.15
 # on the src/ side can be held against, and the plan view drew these at a cosmetic 1.6 pt for as
 # long as it went unnamed. Mirrors markings.EDGE_LINE_WIDTH_M.
 SURVEYED_CROSSING_LINE_WIDTH_M = 0.25
+# The stroke a sidewalk LINE is drawn with - OSM maps a footway as a centreline with no width, so
+# this is how thick the line is drawn, like the plan view's line weight, not a sidewalk width.
+SIDEWALK_LINE_WIDTH_M = 0.3
 
 # WHICH PAINT CHANNELS ARE SAMPLED POLYLINES, and which are honestly two-point segments. Declared
 # as data rather than left implicit in the loops below, because the distinction is load-bearing and a
@@ -569,6 +572,11 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
         for ring in rings:
             batch.add_prism(ring, height)
         batch.build(uv_tile_m=2.0)
+    sidewalk_lines = MeshBatch("sidewalk_lines", concrete_far)
+    for line in data.get("sidewalk_lines", []):
+        for ring in polyline_rings(line, SIDEWALK_LINE_WIDTH_M):
+            sidewalk_lines.add_prism(ring, SIDEWALK_HEIGHT_M)
+    sidewalk_lines.build(uv_tile_m=2.0)
 
     phase("pavement + sidewalks")
     # The paved ground beside the carriageway - driveways, parking aisles and parking lots - as

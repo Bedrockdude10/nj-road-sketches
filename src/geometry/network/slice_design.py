@@ -17,7 +17,7 @@ from collections import defaultdict
 
 import geopandas as gpd
 from shapely import reverse
-from shapely.geometry import LineString, Point, Polygon, box
+from shapely.geometry import LineString, Point, box
 
 from src.geometry.cross_streets import cross_streets_ft
 from src.geometry.intersection.fitting import (_centre_legs_on_traced_kerbs, _fit_legs_to_traced_kerbs,
@@ -38,19 +38,17 @@ MIN_APPROACH_FT: float = 20.0
 
 def slice_pavement(features: gpd.GeoDataFrame, corner_fillets: dict | None = None,
                    legs: dict | None = None, osm: dict | None = None):
-    """The asphalt in the window: the streets' traced pavement, with everything BEHIND a traced
-    OSM kerb taken out.
+    """The asphalt in the window: the streets' traced pavement, ended at OSM's kerbs.
 
-    The traced polygons are one rectangle per street, so where two cross the corner is square and
-    asphalt ran 1-6 ft behind the corner kerb OSM traced. A kerb way is where the road ends, so
-    the road is cut back to every one of them - the curved corner kerb included - and no corner
-    model decides it. OSM has no direction convention for barrier=kerb (here 138 ways have the
-    road on the right, 135 on the left), so each way's road side is the side facing the nearest
-    street centreline.
+    The pavement is split along every traced kerb way, and a piece is road if an OSM street
+    centreline runs through it. A piece a kerb cuts off - the square corner the street
+    rectangles leave behind a corner kerb, or a bulb-out OSM traced into the street - has no
+    street in it, so it is not road. No distance, depth or side rule decides it: the kerb is the
+    edge because OSM says it is.
 
     Without `legs` (a site, one junction) the corner ring is used, as it always was.
     """
-    from shapely.ops import unary_union
+    from shapely.ops import polygonize, unary_union
 
     paved = list(features[features["kind"] == "pavement"].geometry)
     base = unary_union(paved) if paved else None
@@ -61,71 +59,17 @@ def slice_pavement(features: gpd.GeoDataFrame, corner_fillets: dict | None = Non
             return base     # an unclosable ring is reported by check_pavement_ring, not here
     if base is None or not legs:
         return base
-    from src.geometry.kerb_points import kerb_points
-
-    streets = unary_union([leg.centerline for leg in legs.values()])
-    points = kerb_points((osm or {}).get("crossings") or [], (osm or {}).get("kerbs") or [],
-                         (osm or {}).get("roads") or [])
-    behind = [_behind_the_kerb(line, streets, points)
-              for line in features[features["kind"] == "kerb_way"].geometry
-              if isinstance(line, LineString) and line.length > 0]
-    behind = [strip for strip in behind if strip is not None]
-    # And at every kerb NODE on a crossing - a kerb OSM maps as a point on the footway, with no
-    # line to cut back to. Only the footprint of the ramp behind it, so a crossing whose
-    # direction off the road runs alongside the cross street cannot cut that street's lanes.
-    # A kerb vertex on a kerb WAY needs nothing: the line's own cut above is the edge.
-    if osm is not None:
-        for point in points:
-            if point.kerb_line is not None:
-                continue
-            (x, y), (ux, uy) = point.xy, point.outward
-            nx, ny, half, deep = -uy, ux, KERB_NODE_HALF_SPAN_FT, KERB_NODE_DEPTH_FT
-            behind.append(Polygon([(x + nx * half, y + ny * half), (x - nx * half, y - ny * half),
-                                   (x - nx * half + ux * deep, y - ny * half + uy * deep),
-                                   (x + nx * half + ux * deep, y + ny * half + uy * deep)]))
-    return base.difference(unary_union(behind)) if behind else base
-
-
-#: How deep behind a kerb the road is cleared: past the deepest square-corner pocket a corner
-#: kerb leaves in the street rectangles (R(sqrt 2 - 1) = 12 ft at R = 29 ft), short of a median.
-BEHIND_THE_KERB_FT: float = 15.0
-
-#: The ramp a kerb NODE on a crossing stands for: a tactile pad's footprint behind it, with a
-#: little to spare (src/render/props.py: TACTILE_PAD_DEPTH_FT x TACTILE_PAD_WIDTH_FT).
-KERB_NODE_HALF_SPAN_FT: float = 2.0
-KERB_NODE_DEPTH_FT: float = 3.0
-
-#: A kerb further than this from every street centreline belongs to no street here.
-KERB_ON_A_STREET_FT: float = 60.0
-
-
-def _behind_the_kerb(kerb: LineString, streets, points=()):
-    """The strip on the far side of `kerb` from the road it bounds, or None if it bounds none.
-
-    WHICH SIDE is OSM's own statement wherever a crossing meets this kerb: a crossing runs off
-    the road onto the footway, so its direction there points behind the kerb. A curved corner
-    kerb is near BOTH streets' centrelines, and the nearest-centreline test alone put two of
-    Broad & Greenwood's cuts on the road side. That test is only the fallback, for a kerb no
-    crossing meets.
-    """
-    middle = kerb.interpolate(0.5, normalized=True)
-    if streets.distance(middle) > KERB_ON_A_STREET_FT:
-        return None
-    left = kerb.buffer(BEHIND_THE_KERB_FT, single_sided=True)
-    right = kerb.buffer(-BEHIND_THE_KERB_FT, single_sided=True)
-    votes = 0
-    for point in points:
-        at = Point(point.xy)
-        if kerb.distance(at) > 0.05:
-            continue
-        along = kerb.project(at)
-        a, b = kerb.interpolate(max(along - 0.5, 0.0)), kerb.interpolate(min(along + 0.5, kerb.length))
-        # Positive where the crossing leaves the road to the kerb's LEFT, so behind is left.
-        votes += 1 if (b.x - a.x) * point.outward[1] - (b.y - a.y) * point.outward[0] > 0 else -1
-    if votes:
-        return left if votes > 0 else right
-    road_on_left = streets.distance(left.centroid) < streets.distance(right.centroid)
-    return right if road_on_left else left
+    kerbs = [line for line in features[features["kind"] == "kerb_way"].geometry
+             if isinstance(line, LineString) and line.length > 0]
+    if not kerbs:
+        return base
+    edges, _junctions, _xy = street_edges((osm or {}).get("roads") or [])
+    streets = unary_union([edge.line for edge in edges] or [leg.centerline for leg in legs.values()])
+    faces = polygonize(unary_union([base.boundary, *kerbs]))
+    road = [face for face in faces
+            if base.contains(face.representative_point()) and face.intersects(streets)
+            and face.intersection(streets).length > 0]
+    return unary_union(road) if road else base
 
 
 def _traced_widths(streets: gpd.GeoDataFrame, paved: gpd.GeoDataFrame) -> dict[int, float]:

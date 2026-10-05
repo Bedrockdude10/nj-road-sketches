@@ -33,9 +33,6 @@ from src.render.props import build_props, control_nodes_ft, osm_tree_points_ft
 from src.geometry.treatments import DesignState, RaiseCrossing, RefugeIsland
 from src.geometry.model.approach import END_SUFFIX
 
-SIDEWALK_WIDTH_FT = 6
-
-
 def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
     """Fetched OSM sidewalk ways -> state-plane LineStrings."""
     lines = []
@@ -46,23 +43,12 @@ def sidewalk_lines_ft(sidewalks: list[dict] | None) -> list[LineString]:
     return lines
 
 
-def sidewalk_bands_ft(sidewalks: list[dict] | None) -> list[Polygon]:
-    """OSM's footway=sidewalk ways as SIDEWALK_WIDTH_FT bands - the one sidewalk BOTH views draw.
-
-    OSM maps a footway as a centreline and almost never tags a width, so the 6 ft is assumed.
-    """
-    return [line.buffer(SIDEWALK_WIDTH_FT / 2, cap_style="flat", join_style="mitre")
-            for line in sidewalk_lines_ft(sidewalks)]
 HATCH_ANGLE_DEG = 45.0  # for a corner treatment, which belongs to no single leg's heading
 # How tall each kind of kerb is built, measured from z=0 like the pavement slab - so the REVEAL
 # above the road is this minus the pavement's own 0.05 m. A raised kerb gets a 0.15 m reveal, the
 # ordinary 6 in; a lowered one 0.02 m, which reads as a dropped kerb a car can cross rather than
 # as no kerb at all. UNKNOWN is built at the lowered height on purpose: an untagged kerb must not
 # render as a claim that a vehicle cannot cross it.
-#
-# NOTE the sidewalk band is extruded 0.03 m, i.e. BELOW the 0.05 m pavement, so a footway here
-# currently sits lower than the road it borders. That predates this and is left alone rather than
-# changed in passing - raising it is a visible change to every render and its own decision.
 KERB_HEIGHT_M = {KerbType.RAISED: 0.20, KerbType.LOWERED: 0.07,
                  KerbType.FLUSH: 0.055, KerbType.UNKNOWN: 0.07}
 PAINT_HATCH_SPACING_FT = 8.0  # spacing between rendered diagonal hatch lines - a rendering choice, not
@@ -269,7 +255,6 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
     crosswalk_reaches = scene.crosswalk_reaches
     stop_bar_offsets = scene.stop_bar_offsets
     marked_crosswalks = scene.marked_crosswalks
-    sidewalk_pieces = sidewalk_bands_ft(model.osm.get("sidewalks"))
 
     # OSM building footprints are independent of (and coarser than) our SLD/field-measured
     # curb geometry - a few end up drawn overlapping the actual pavement. Drop those rather
@@ -369,11 +354,11 @@ def export_scenario(model: IntersectionModel, state: DesignState, name: str, out
         # near, so the texture resolution of a piece is the renderer's call, not a split made here.
         "pavement": [ring_to_local_m(p.exterior.coords, center_ft)
                      for whole in _simple_polygons([pavement]) for p in _hole_free(whole)],
-        # Hole-free for the same reason as the pavement: a sidewalk way that loops a block is a
-        # band with the block as its hole, and Blender extrudes an exterior only - drawn whole it
-        # paved 140,000-300,000 sq ft of block solid.
-        "sidewalks": [ring_to_local_m(p.exterior.coords, center_ft)
-                      for whole in _simple_polygons(sidewalk_pieces) for p in _hole_free(whole)],
+        # OSM's sidewalks AS OSM HAS THEM: footway centrelines, no width (none of the borough's
+        # carries a `width` tag). Blender draws each as a line, as the plan view does.
+        "sidewalks": [],
+        "sidewalk_lines": [ring_to_local_m(line.coords, center_ft)
+                           for line in sidewalk_lines_ft(model.osm.get("sidewalks"))],
         "tree_points": [pt_to_local_m(x, y, center_ft) for x, y in tree_points_ft],
         # Every marking channel, in the order src/geometry/markings.py declares them. Splatted
         # rather than listed key by key: a channel Blender reads and this file forgot to write
