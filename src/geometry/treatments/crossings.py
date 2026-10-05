@@ -122,10 +122,8 @@ class RaiseCrossing(Treatment):
         placed = place(leg, Side.LEFT, Along((start, start + self.crossing_width_ft),
                                             KerbToKerb(), step_ft=STRIP_SAMPLE_FT))
         if placed.geometry is None:
-            # Fallback to nominal width if datum resolution fails
-            return _band_across_the_road(
-                leg.centerline, start, start + self.crossing_width_ft, leg.curb_to_curb_ft / 2,
-                f"{self.crossing_width_ft:.0f} ft raised crossing on {self.target.leg!r}")
+            raise ValueError(f"Can't place a {self.crossing_width_ft:.0f} ft raised crossing on "
+                             f"{self.target.leg!r} between its kerbs.")
         return placed.geometry
 
     def apply_to(self, state: "DesignState", model: "IntersectionModel" = None) -> None:

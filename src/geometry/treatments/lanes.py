@@ -5,6 +5,8 @@ the traffic-calming baseline the rest is layered onto."""
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
+import numpy as np
+
 
 from src.geometry.targets import BOTH_SIDES, Side
 
@@ -61,15 +63,19 @@ class LaneNarrowing(Treatment):
         boundary lines without the fill."""
         from src.geometry.markings import (LANE_EDGE_LINE, LANE_NARROWING_FILL, TAPER_FILL,
                                            TAPER_LINE, ZONE_END_LINE)
-        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, end_against_crossing, tapers_cleanly)
-        from src.geometry.paint.datum import Along, Across, Taper, Kerb, Narrowest
+        from src.geometry.paint import end_against_crossing, lane_edge_stripes, tapers_cleanly
+        from src.geometry.paint.datum import Across, Along, Kerb, Narrowest, Taper, resolve
 
         leg_name = self.target.leg
         leg = ctx.state.legs[leg_name]
         stripe_width_ft = self.stripe_width_ft
         fill = not self.line_only
         for side in (str(s) for s in self.sides):
-            at = ctx.anchors(leg_name, side, inner_offset_ft=-stripe_width_ft)
+            # The zone's inner edge, as the unsigned offset from the alignment anchors measure in.
+            whole_leg = np.array([0.0, leg.centerline.length])
+            inner_ft = abs(float(resolve(leg, side, Narrowest(stripe_width_ft), whole_leg).offsets_ft[0]))
+            at = ctx.anchors(leg_name, side, inner_offset_ft=inner_ft)
+            line_ft, fill_ft = lane_edge_stripes(stripe_width_ft)
             # A crossing is something to end against: run into it and let it cut the end. Only
             # where there is none does the paint have to resolve itself back to the kerb, and
             # only then is a taper the right way to do it.
@@ -90,32 +96,31 @@ class LaneNarrowing(Treatment):
             end_station = self.end_ft if self.end_ft is not None else leg.centerline.length
 
             # Edge line: centre half a stroke inside the zone
-            edge_line_inset_ft = stripe_width_ft - LANE_EDGE_LINE_WIDTH_FT / 2
             ctx.paint(LANE_EDGE_LINE, leg_name, side,
-                      Along((start_ft, end_station), Narrowest(edge_line_inset_ft)),
+                      Along((start_ft, end_station), Narrowest(line_ft)),
                       beyond_ft=beyond_ft)
 
             if curved:
                 ctx.paint(TAPER_LINE, leg_name, side,
-                          Taper(at.anchor_ft, at.target_ft, Narrowest(edge_line_inset_ft), fill=False))
+                          Taper(at.anchor_ft, at.target_ft, Narrowest(line_ft), fill=False))
 
             if fill:
                 # Hatch fill
                 ctx.rim(ctx.paint(LANE_NARROWING_FILL, leg_name, side,
-                                  Along((start_ft, end_station), Kerb(0), Narrowest(stripe_width_ft)),
+                                  Along((start_ft, end_station), Kerb(0), Narrowest(fill_ft)),
                                   beyond_ft=beyond_ft,
                                   shares_a_kerb=(leg_name, side) in ctx.straight_through), LANE_EDGE_LINE)
 
                 if curved:
                     ctx.paint(TAPER_FILL, leg_name, side,
-                              Taper(at.anchor_ft, at.target_ft, Narrowest(stripe_width_ft), fill=True))
+                              Taper(at.anchor_ft, at.target_ft, Narrowest(fill_ft), fill=True))
 
                 elif leg_name not in ctx.marked and (leg_name, side) not in ctx.straight_through:
                     # Only where the kerb does NOT run straight through. On one that does, the
                     # zone continues into the adjoining leg's zone rather than ending at the
                     # node, and closing it off draws a line across the hatching mid-intersection.
                     ctx.paint(ZONE_END_LINE, leg_name, side,
-                              Across(start_ft, Kerb(0), Narrowest(stripe_width_ft)))
+                              Across(start_ft, Kerb(0), Narrowest(fill_ft)))
 
                 if self.end_ft is not None:
                     # The OTHER end: not the junction, the station where the room this buffer
@@ -123,7 +128,7 @@ class LaneNarrowing(Treatment):
                     # the far station instead of the near one, independent of whether the near
                     # end tapers, ends at a crossing, or runs into the intersection.
                     ctx.paint(ZONE_END_LINE, leg_name, side,
-                              Across(self.end_ft, Kerb(0), Narrowest(stripe_width_ft)))
+                              Across(self.end_ft, Kerb(0), Narrowest(fill_ft)))
 
 
 @dataclass(frozen=True)
