@@ -770,8 +770,15 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState,
         if cfg is None:
             continue
         mid = pieces["arc"].interpolate(0.5, normalized=True)
-        outward = np.array([mid.x - model.center_ft.x, mid.y - model.center_ft.y])
+        # OUTWARD MEANS INTO THIS CORNER, not away from the model's centre: in a world model that
+        # centre is the borough's, which pushed Broad x Greenwood's poles along the street. A kerb
+        # return bulges toward the road, so its chord's midpoint lies on the footway side of it.
+        a, b = pieces["arc"].coords[0], pieces["arc"].coords[-1]
+        outward = np.array([(a[0] + b[0]) / 2 - mid.x, (a[1] + b[1]) / 2 - mid.y])
         norm = np.linalg.norm(outward)
+        if norm < 1e-6:     # a degenerate arc: fall back to away from the model's centre
+            outward = np.array([mid.x - model.center_ft.x, mid.y - model.center_ft.y])
+            norm = np.linalg.norm(outward)
         outward = outward / norm if norm > 1e-6 else np.array([1.0, 0.0])
         # A signal pole stands on the corner footway. The fillet arc midpoint is on the
         # kerb only when the corner is right; where a junction falls back to a fitted
@@ -780,12 +787,10 @@ def _traffic_signal_props(model: IntersectionModel, state: DesignState,
         placed = _step_outward_clear(np.array([mid.x, mid.y]), outward,
                                       STREETLIGHT_SIDEWALK_SETBACK_FT, pavement)
         if placed is None:
-            # DRAWN ANYWAY: OSM says this junction is signalized, so the pole is a fact; where the
-            # modelled pavement swallows the corner footway, it stands the usual setback behind the
-            # kerb and the disagreement is reported rather than the signal deleted.
-            placed = np.array([mid.x, mid.y]) + outward * STREETLIGHT_SIDEWALK_SETBACK_FT
-            print(f"  NOTE: the signal pole for corner {leg_a}/{leg_b} stands inside the modelled "
-                  f"roadway - the modelled pavement covers the real corner footway here.")
+            print(f"  NOTE: the signal pole for corner {leg_a}/{leg_b} can't be placed clear of the "
+                  f"modelled roadway - the modelled pavement covers the real corner footway here. "
+                  f"Not drawn.")
+            continue
         pole_pos = tuple(placed)
         pole_heading = np.degrees(np.arctan2(outward[1], outward[0]))
 
