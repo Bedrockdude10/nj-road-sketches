@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from shapely.geometry import Polygon
 
 from src.geometry.model import build_pavement_polygon
-from src.render.props import controls_at_junction, stands_at_mouth
+from src.render.props import controls_at_junction
 from src.render.crosswalks import (_match_crossings_to_legs, CROSSWALK_DEPTH_FT, crosswalk_bands_ft, crosswalk_reaches_ft,
                                    resolve_crosswalk_offsets, resolve_crosswalk_skews,
                                    resolve_stop_bar_offsets, stop_bar_bands_ft)
@@ -59,36 +59,14 @@ def junction_is_signalized(model, leg_crossing_tags=()) -> bool:
 
 
 def _legs_that_may_derive_a_bar(model, matched: dict) -> frozenset | None:
-    """The legs a bar may be INVENTED for, or None where every leg may.
-
-    ONE BOOLEAN CANNOT ANSWER THIS FOR A WINDOW. A site is one junction, so "is this junction
-    signalized" licenses the whole model; a crop of the network holds several, and the single
-    answer painted a derived stop bar across E Broad St at Broad x Blackwell - which OSM does not
-    signalize - because Broad x Greenwood, three legs away in the same model, does.
-
-    So the evidence is read PER LEG: this leg's own matched crossing tagged
-    `crossing=traffic_signals`, or a `highway=traffic_signals` node standing at this leg's
-    junction end. CONTROL_NEAR_NODE_FT is the measured "this node belongs to this junction"
-    distance (src/geometry/coverage.py - 15-43 ft for a node that does against 250 ft for one
-    that does not), rather than a third radius invented here.
-
-    None for a site, so a configured `signals` block keeps licensing the junction as a whole and
-    no site export moves: a config is an eyes-on observation of the junction, and asking it to be
-    re-evidenced leg by leg would discard it.
+    """The legs a bar may be INVENTED for: every leg of a site whose config records signals, and
+    none anywhere else. OSM traces stop lines as `road_marking=stop_line`, and an approach it
+    traced none across gets none - a signal node says the junction is signalized, not where a
+    bar is painted.
     """
-    if "signals" in getattr(model, "config", {}):
-        return None if model.config["signals"] else frozenset()
-    nodes = [node for node in model.osm["traffic_control"]
-             if node["tags"].get("highway") == "traffic_signals"]
-    out = set()
-    for leg_name, leg in model.legs.items():
-        entry = matched.get(leg_name)
-        if entry is not None and entry[4].get("crossing") == "traffic_signals":
-            out.add(leg_name)
-            continue
-        if any(stands_at_mouth(leg, node) for node in nodes):
-            out.add(leg_name)
-    return frozenset(out)
+    if model.config.get("signals"):
+        return None
+    return frozenset()
 
 
 @dataclass(frozen=True)
@@ -241,35 +219,6 @@ class SceneGeometry:
             out.append((crossing, crossing_bars_ft(crossing, kerbs, style),
                          crossing_lines_ft(crossing, kerbs, style)))
         return out
-
-    def centre_stripe_end_ft(self, leg_name: str) -> float:
-        """Where a leg's centre stripe stops at its FAR end: where its centreline first meets a
-        crossing or stop bar in the far half of the leg, or the leg's end where none is painted.
-
-        A borough leg runs junction to junction, and the stripe's start is cut back from the
-        junction at station 0 only - so Broad St's approach into Greenwood, whose junction is at
-        its END, ran its double yellow straight into the intersection.
-        """
-        from shapely.geometry import Point
-
-        from src.render.crosswalks import STOP_LINE_MAX_ALONG_FT
-
-        line = self.state.legs[leg_name].centerline
-        length = line.length
-        bands = [*self.crosswalk_bands.values(), *self.stop_bar_bands.values(),
-                 *self.unmodelled_crossing_bands, *self.unmodelled_stop_bars]
-        cut = length
-        for band in bands:
-            if band is None or band.is_empty:
-                continue
-            hit = line.intersection(band)
-            if hit.is_empty:
-                continue
-            entry = min(line.project(Point(xy)) for part in getattr(hit, "geoms", [hit])
-                        for xy in getattr(part, "coords", []) or part.exterior.coords)
-            if entry > max(length - STOP_LINE_MAX_ALONG_FT, length / 2):
-                cut = min(cut, entry)
-        return cut
 
     @property
     def unmodelled_stop_bars(self) -> tuple:

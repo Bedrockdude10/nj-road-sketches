@@ -662,10 +662,9 @@ CENTERLINE_GAP_FT = 1.0 / FT_TO_M
 
 
 def centerline_paint_ft(leg, start_ft: float, style: str,
-                         shift_ft: float = 0.0, shift_side: str | None = None,
-                         end_ft: float | None = None) -> list[LineString]:
-    """The stripes actually painted down this leg's middle, from `start_ft` to `end_ft` (its far
-    end where None - see SceneGeometry.centre_stripe_end_ft for a leg with a junction there).
+                         shift_ft: float = 0.0, shift_side: str | None = None) -> list[LineString]:
+    """The stripes actually painted down this leg's middle, from `start_ft` to its far end, which
+    is never a junction (src/geometry/network/slice_design.py:_approaches).
 
     ONE definition for both views, because they had two and only one of them followed the
     road. The plan view offset the leg's real centerline; the 3D render was handed the
@@ -675,7 +674,7 @@ def centerline_paint_ft(leg, start_ft: float, style: str,
     from src.geometry.paint.datum import Along, Centre, place
     from src.geometry.model import STRIP_SAMPLE_FT
 
-    end_ft = leg.centerline.length if end_ft is None else min(end_ft, leg.centerline.length)
+    end_ft = leg.centerline.length
     if style == "none" or start_ft >= end_ft:
         return []
 
