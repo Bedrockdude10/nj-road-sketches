@@ -8,7 +8,6 @@ import numpy as np
 from shapely.geometry import LineString, Point, Polygon
 
 from src.geometry.intersection import IntersectionModel
-from src.checks import PAD_MAX_DISTANCE_FROM_CURB_FT, _all_curb_lines
 from src.geometry.coverage import CONTROL_NEAR_NODE_FT
 from src.geometry.model import bollard_points_ft, build_pavement_polygon, leg_clearance_ft
 from src.geometry.model.approach import at_every_junction
@@ -238,8 +237,6 @@ def _crossing_endpoint_props(line: LineString, leg, tags: dict, leg_name: str, p
                           "flashing beacon, at the surveyed end of the crossing way.",
             })
 
-    if tags.get("tactile_paving") == "yes":
-        props += _tactile_pad_props(line, pavement, leg_name, heading)
     return props
 
 
@@ -293,176 +290,47 @@ def pad_polygon(x: float, y: float, heading_deg: float,
     ])
 
 
-def _kerb_tactile_pad_props(kerb_ways: list, crossings: list[dict], pavement,
-                             curbs: list | None = None):
-    """One tactile pad per ATTACH NODE - a node shared by a crossing way and a
-    tactile_paving kerb way - deduplicated by node id.
+def _osm_tactile_pad_props(crossings: list[dict], kerbs: list[dict],
+                           roads: list[dict] = ()) -> list[dict]:
+    """A tactile pad at every kerb vertex of a crossing (src/geometry/kerb_points.py) that OSM
+    tags `tactile_paving=yes` - on the kerb (its node's tag, else its way's) or, where the kerb
+    says nothing, on the crossing.
 
-    That single rule expresses both real-world cases, because the surveyor mapped the
-    distinction into the topology:
-
-      * One lowered kerb serving two crosswalks -> BOTH crossings attach at the SAME
-        node -> the dedupe collapses them to ONE shared pad.
-      * Two separate ramps on one lowered kerb -> the crossings attach at TWO DIFFERENT
-        nodes on that kerb way -> TWO pads.
-
-    The kerb WAY is not the unit and must not be: at Columbia every corner is a single
-    kerb way carrying two distinct pads, and at Broad & Greenwood a single kerb way
-    carries one. The attach node is the ramp; the way is just the kerb it sits on.
-
-    Returns (props, covered_crossing_ids) so the caller can skip crossing-inferred pads
-    for crossings already served by a traced ramp.
+    Set back along the crossing onto the footway until it clears the traced kerb line, so a
+    crossing that meets the kerb on a skew does not poke a corner of the pad into the road.
+    Nothing is measured against a modelled roadway.
     """
-    # node id -> the kerb way it belongs to, for tactile kerbs near this junction only
-    kerb_by_node: dict[int, dict] = {}
-    for kerb in kerb_ways:
-        coords = kerb.get("coords_wgs84")
-        if not coords or kerb.get("tags", {}).get("tactile_paving") != "yes":
-            continue
-        kxs, kys = wgs84_to_state_plane.transform([c[0] for c in coords], [c[1] for c in coords])
-        kerb_line = LineString(zip(kxs, kys))
-        for node_id in kerb.get("node_ids") or []:
-            kerb_by_node[node_id] = {"kerb": kerb, "line": kerb_line}
+    from src.geometry.kerb_points import kerb_points
 
     props = []
-    covered_ways: set[int] = set()
-    seen: set[int] = set()
-    for crossing in crossings:
-        for node_id, coord in zip(crossing.get("node_ids") or [], crossing.get("coords_wgs84") or []):
-            entry = kerb_by_node.get(node_id)
-            if entry is None:
-                continue
-            covered_ways.add(id(crossing))
-            if node_id in seen:
-                continue  # a second crossing on the SAME ramp - one pad, not two
-            seen.add(node_id)
-
-            x, y = wgs84_to_state_plane.transform(coord[0], coord[1])
-            placed = _pad_orientation(x, y, entry["line"], pavement)
-            if placed is None:
-                print(f"  NOTE: ramp node {node_id} has tactile paving, but no pad can be placed clear "
-                      f"of the modelled roadway - the modelled pavement covers the real footway here. "
-                      f"Not drawn. Check this junction's widths and corner radii.")
-                continue
-            heading, pos = placed
-            # IN THE DRAWING OR NOT - there is no "neighbouring junction". This was a 90 ft radius
-            # from the junction CENTRE, which can only answer "is this ramp ours" while a drawing
-            # is one junction; a window onto the network holds several, and measuring from its
-            # centre threw away real ramps at 231-415 ft as somebody else's when they were right
-            # there in the picture. A ramp marks a kerb, so the question is whether THIS drawing
-            # has a kerb for it to sit against - which is also exactly what `pad_off_the_kerb`
-            # asks, so emitter and invariant now agree by construction. The check still guards the
-            # pads `_tactile_pad_props` infers from a crossing, which are placed another way.
-            if curbs and min(curb.distance(Point(*pos)) for curb in curbs) > PAD_MAX_DISTANCE_FROM_CURB_FT:
-                continue
-            props.append({
-                "type": "tactile_paving_pad", "position_ft": pos, "heading_deg": heading,
-                "pad_depth_ft": TACTILE_PAD_DEPTH_FT, "pad_width_ft": TACTILE_PAD_WIDTH_FT,
-                "source": f"real (OSM node {node_id}, where a crossing way meets barrier=kerb way "
-                          f"{entry['kerb']['id']} tagged tactile_paving=yes): the surveyed curb ramp. "
-                          f"One pad per attach node, so two crossings meeting at one node render as the "
-                          f"single shared ramp they are. Approximation: pad size is a standard one.",
-            })
-    return props, covered_ways
-
-
-def _pad_orientation(x: float, y: float, kerb_line, pavement):
-    """(heading_deg, position) or None - where a pad goes at a ramp node on `kerb_line`.
-
-    The pad's depth runs PERPENDICULAR TO THE KERB, into the footway, which is both
-    physically right and the only direction that reliably leaves the roadway. Stepping
-    outward from the crossing way's centroid instead pointed along the junction at some
-    nodes, never escaping the carriageway.
-
-    Returns None if the pad can't be cleared of the pavement within a sane distance. That
-    means the modelled roadway has covered the real footway, and drawing the pad anyway
-    would put it in the street - so it's dropped and reported instead.
-    """
-    coords = np.asarray(kerb_line.coords)
-    node = np.array([x, y])
-    # Local tangent from the two kerb vertices nearest this node.
-    order = np.argsort(np.hypot(coords[:, 0] - x, coords[:, 1] - y))[:2]
-    tangent = coords[order[1]] - coords[order[0]]
-    norm = np.hypot(*tangent)
-    if norm < 1e-6:
-        return None
-    normal = np.array([-tangent[1] / norm, tangent[0] / norm])
-
-    for direction in (normal, -normal):
-        heading = float(np.degrees(np.arctan2(direction[1], direction[0])))
-        step = TACTILE_PAD_DEPTH_FT / 2
-        while step <= PAD_MAX_STEP_FT:
-            centre = node + direction * step
-            pad = pad_polygon(centre[0], centre[1], heading)
-            if pavement is None or not pad.intersects(pavement):
-                return heading, (float(centre[0]), float(centre[1]))
-            step += 0.5
-    return None
-
-
-def _tactile_pad_props(line: LineString, pavement, leg_name: str, heading: float) -> list[dict]:
-    """A detectable warning pad at each end of a crossing, wholly on the footway.
-
-    Finding the roadway edge: take the parts of the crossing way that lie OUTSIDE the
-    pavement polygon (line.difference(pavement)) - those are the footway approaches at
-    either end - and put a pad at the inner end of each. The pad is nudged outward until
-    it genuinely clears the pavement, rather than by an amount assumed to be enough. If it
-    can't be cleared within a sane distance the pad is dropped - better absent than drawn
-    in the roadway.
-    """
-    if pavement is None:
-        return []
-    outside = line.difference(pavement)
-    pieces = [outside] if outside.geom_type == "LineString" else list(getattr(outside, "geoms", []))
-    mid = line.interpolate(0.5, normalized=True)
-
-    props = []
-    for piece in pieces:
-        if piece.is_empty or piece.length < 0.5:
+    for point in kerb_points(crossings, kerbs, roads):
+        if (point.kerb_tags.get("tactile_paving") or point.crossing_tags.get("tactile_paving")) != "yes":
             continue
-        # The end of this outside piece nearer the crossing's midpoint is the roadway edge;
-        # the far end is out on the footway.
-        ends = [Point(piece.coords[0]), Point(piece.coords[-1])]
-        edge, far = sorted(ends, key=lambda pt: pt.distance(mid))
-        out_x, out_y = far.x - edge.x, far.y - edge.y
-        norm = np.hypot(out_x, out_y)
-        if norm < 1e-6:
-            continue
-        out_x, out_y = out_x / norm, out_y / norm
-
-        placed = None
-        step = TACTILE_PAD_DEPTH_FT / 2
-        while step <= TACTILE_PAD_DEPTH_FT * 3:
-            cx, cy = edge.x + out_x * step, edge.y + out_y * step
-            if not pad_polygon(cx, cy, heading).intersects(pavement):
-                placed = (cx, cy)
+        heading = float(np.degrees(np.arctan2(point.outward[1], point.outward[0])))
+        back = TACTILE_PAD_DEPTH_FT / 2
+        while True:
+            centre = (point.xy[0] + point.outward[0] * back, point.xy[1] + point.outward[1] * back)
+            if point.kerb_line is None or back >= TACTILE_PAD_MAX_SETBACK_FT \
+                    or not pad_polygon(*centre, heading).intersects(point.kerb_line):
                 break
-            step += 0.5
-        if placed is None:
-            continue
-
+            back += 0.25
         props.append({
-            "type": "tactile_paving_pad", "position_ft": placed, "heading_deg": heading,
+            "type": "tactile_paving_pad", "position_ft": centre, "heading_deg": heading,
             "pad_depth_ft": TACTILE_PAD_DEPTH_FT, "pad_width_ft": TACTILE_PAD_WIDTH_FT,
-            "source": f"real (OSM tactile_paving=yes on {leg_name}'s crossing): truncated-dome warning "
-                      "surface at the curb ramp, placed where the surveyed crossing way leaves the paved "
-                      f"area ({step:.1f} ft back onto the footway, far enough to clear the curb return). "
-                      "Approximation: pad size is a standard one, not surveyed.",
+            "surveyed_position": True,
+            "source": "real (OSM tactile_paving=yes where a crossing way meets a kerb): at the "
+                      "surveyed kerb vertex, set back onto the footway clear of the traced kerb. "
+                      "Pad size is a standard one, not surveyed.",
         })
-
-    if len(props) < 2:
-        # A crossing runs sidewalk to sidewalk, so it should leave the paved area at BOTH
-        # ends. Fewer means our modelled pavement has swallowed one or both ends - the
-        # junction throat we build is wider than the real crossing is long. Worth saying
-        # out loud rather than quietly drawing fewer ramps than exist.
-        print(f"  NOTE: only {len(props)} tactile pad(s) placed on {leg_name} - its {line.length:.0f} ft "
-              f"surveyed crossing does not clear the modelled pavement at both ends, so the modelled "
-              f"junction is wider there than reality. Check this leg's curb_to_curb_ft and the corner radius.")
     return props
 
 
+#: How far back from its kerb vertex a pad may be set to clear a skewed kerb line.
+TACTILE_PAD_MAX_SETBACK_FT = 4.0
+
 def _osm_crossing_hardware_props(state: DesignState, crossings: list[dict], nodes_ft: list[dict],
-                                  kerb_ways: list | None = None, pavement=None) -> list[dict]:
+                                  kerb_ways: list | None = None, pavement=None,
+                                  roads: list | None = None) -> list[dict]:
     """Pushbuttons, RRFBs and tactile paving pads for every crossing we can match to a leg.
 
     Reuses the same matcher the crosswalk geometry uses, so a crossing credited to a leg
@@ -472,44 +340,11 @@ def _osm_crossing_hardware_props(state: DesignState, crossings: list[dict], node
 
     pavement = pavement if pavement is not None else _modelled_pavement(state)
 
-    kerb_pads, covered_ways = _kerb_tactile_pad_props(
-        kerb_ways or [], crossings, pavement, _all_curb_lines(state.legs, state.corner_fillets))
-
-    # Which crossings already have their ramps placed from traced kerb geometry. Suppression
-    # is PER CROSSING, not global: a junction can have some corners traced and some not, and
-    # an untraced corner falls back to inference rather than silently losing its ramp.
-    # Centroids for the whole crossing layer once, rather than re-projecting every crossing
-    # way for every matched leg.
-    centroids = _crossing_centroids_ft(crossings)
-    props = list(kerb_pads)
+    props = _osm_tactile_pad_props(crossings, kerb_ways or [], roads or [])
     for leg_name, (line, crossing_tags) in match_crossing_lines_to_legs(state.legs, crossings).items():
         tags = _merged_crossing_tags(line, crossing_tags, nodes_ft)
-        if _crossing_is_covered(centroids, covered_ways, line):
-            tags = {k: v for k, v in tags.items() if k != "tactile_paving"}
         props += _crossing_endpoint_props(line, state.legs[leg_name], tags, leg_name, pavement)
     return props
-
-
-def _crossing_centroids_ft(crossings: list[dict]) -> list[tuple]:
-    """[(crossing, (x, y))] - each crossing way's mean vertex, in state-plane feet."""
-    out = []
-    for crossing in crossings:
-        coords = crossing.get("coords_wgs84") or []
-        if len(coords) < 2:
-            continue
-        xs, ys = wgs84_to_state_plane.transform([c[0] for c in coords], [c[1] for c in coords])
-        out.append((crossing, (float(np.mean(xs)), float(np.mean(ys)))))
-    return out
-
-
-def _crossing_is_covered(centroids: list[tuple], covered_ways: set, line: LineString) -> bool:
-    """Whether the crossing matching `line` already had pads placed from a traced kerb."""
-    if not centroids:
-        return False
-    target = line.interpolate(0.5, normalized=True)
-    nearest = min(centroids, key=lambda entry: np.hypot(entry[1][0] - target.x,
-                                                         entry[1][1] - target.y))[0]
-    return id(nearest) in covered_ways
 
 
 def osm_tree_points_ft(nodes_ft: list[dict]) -> list[tuple[float, float]]:
@@ -1154,7 +989,7 @@ def build_props(model: IntersectionModel, state: DesignState, offsets_ft: dict,
         _osm_streetlight_props(furniture_ft)
         + _osm_control_props(approaches, control_ft, pavement)
         + _osm_crossing_hardware_props(approaches, model.osm["crossings"], control_ft,
-                                        model.osm["kerbs"], pavement)
+                                        model.osm["kerbs"], pavement, model.osm.get("roads"))
         + _hydrant_props(furniture_ft)
         # No signal poles or heads: OSM records a signal as one node per junction, not where its
         # hardware stands, and every placement of ours was a guess.

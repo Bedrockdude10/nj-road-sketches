@@ -215,7 +215,7 @@ def design_for(features: gpd.GeoDataFrame, area: str, scenario: str = "two_way_b
     """
     model, _ = slice_design(features, osm=slice_context(features), osm_area=area)
     state = SCENARIOS[scenario](existing_conditions(model), model, features)
-    return model, state, slice_pavement(features, state.corner_fillets)
+    return model, state, slice_pavement(features, state.corner_fillets, state.legs, model.osm)
 
 
 def draw_2d(features: gpd.GeoDataFrame, area: str, name: str, out_dir: Path,
