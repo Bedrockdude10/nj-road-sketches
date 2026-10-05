@@ -6,15 +6,20 @@ feet. It decides SHAPE, never whether a marking is warranted - that is a treatme
 buffer and a daylight zone."""
 
 from math import cos, radians, sin, tan
+from typing import TYPE_CHECKING
 
 import numpy as np
 from shapely.geometry import LineString, MultiLineString, Polygon
 from src.geometry.model.leg_frame import (Leg,STRIP_SAMPLE_FT, place_in_measured_frame,
                                           _place_no_further_in_than, placement_holds, point_at, _traced_curb_frame,
                                           unit_vector, curb_edge_by_station, curb_offsets_at_stations,
-                                          curb_point_at_station, curb_station_span,
+                                          curb_station_span,
                                           inset_line_ft, inset_point_at_station, paint_stations,
                                           station_offset_many)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from src.geometry.targets import Side
 
 
 
@@ -175,41 +180,28 @@ def _corner_bulge_normal(leg: "Leg", role: str) -> np.ndarray:
     return np.array([-u[1], u[0]]) if role == "left" else np.array([u[1], -u[0]])
 
 
-def _taper_arc_points(leg: "Leg", role: str, sign: int, inner_half_ft: float,
-                       anchor_ft: float, target_ft: float, n_points: int) -> list[tuple] | None:
-    """The taper arc on ONE side of a leg, as a list of points, or None where there is none.
+def taper_arc_points(leg: "Leg", side: "str | Side", inner_offset_ft: float, anchor_ft: float,
+                     target_ft: float, kerb_offset_ft: "Callable[[np.ndarray], np.ndarray]",
+                     n_points: int = 16) -> "list[tuple[float, float]] | None":
+    """The taper arc from `edge` at `anchor_ft` to the kerb at `target_ft`, as a list of points.
 
-    Tangent to the straight inset line at anchor_ft and passing exactly through the real curb
-    at target_ft. Tangent-at-one-point + passes-through-another-point + a common circle centre
-    uniquely determines the radius - solved directly, not guessed or borrowed from elsewhere:
-    for chord d = target - anchor and outward unit normal n, R = |d|^2 / (2 * dot(d, n)).
-
-    THE ONE HOME for that arc: lane_narrowing_taper_ft draws it as the line and
-    lane_narrowing_taper_polygons_ft fills inside it, so they must not solve it separately.
-
-    Held BOTH WAYS at the end, because the arc is solved in WORLD space while the lane edge it
-    leaves from and the kerb it lands on are offsets in the LEG's frame - the same lines only
-    while the centerline is straight. Once the alignment bends onto the carriageway
-    (intersection._centre_legs_on_traced_kerbs):
-
-      * inward, the arc can cut inside the lane edge, so the offset is floored at inner_half_ft;
-      * outward, it can cross the traced kerb between its two endpoints even though both of them
-        sit on it - a chord of a circle solved in world space against a kerb that curves. At 2.5x
-        on louellen_st_west it stood 0.41 ft past the kerb and check_paint_over_the_curb refused
-        the export, which is the check doing its job on paint sized off a nominal half-width.
-
-    Both clamps are the move inset_line_ft makes; the arc keeps its shape everywhere it was
-    already between the two.
+    Tangent to the straight edge at anchor_ft and passing through the kerb at target_ft.
+    kerb_offset_ft: callable taking stations and returning UNSIGNED offsets at those stations.
     """
-    p1 = inset_point_at_station(leg, anchor_ft, sign * inner_half_ft)
-    p2 = curb_point_at_station(leg, role, target_ft)
-    if p2 is None:
-        return None
-    normal = _corner_bulge_normal(leg, role)
+    from src.geometry.targets import Side
+
+    side = Side(side)
+    sign = side.sign
+    p1 = inset_point_at_station(leg, anchor_ft, sign * inner_offset_ft)
+    # Get the kerb point by reading it through the callable at target_ft
+    kerb_off_at_target = kerb_offset_ft(np.array([target_ft]))[0]
+    p2 = inset_point_at_station(leg, target_ft, sign * kerb_off_at_target)
+
+    normal = _corner_bulge_normal(leg, side)
     d = p2 - p1
     denom = 2 * np.dot(d, normal)
     if abs(denom) < 1e-6:
-        return None     # p2 already (near enough) on the tangent line - no taper needed
+        return None
     radius_ft = np.dot(d, d) / denom
     center = p1 + radius_ft * normal
     a1 = np.arctan2(p1[1] - center[1], p1[0] - center[0])
@@ -219,16 +211,24 @@ def _taper_arc_points(leg: "Leg", role: str, sign: int, inner_half_ft: float,
     arc = np.array([(center[0] + radius_ft * np.cos(t), center[1] + radius_ft * np.sin(t))
                     for t in angles])
     stations, offsets = station_offset_many(leg.centerline, arc)
-    curb_offsets = curb_offsets_at_stations(leg, role, stations)
-    inside = np.abs(offsets) < inner_half_ft
+    curb_offsets = kerb_offset_ft(stations)
+    inside = np.abs(offsets) < inner_offset_ft
     outside = (np.abs(offsets) > np.abs(curb_offsets)) if curb_offsets is not None else np.zeros(
         len(offsets), bool)
     if not inside.any() and not outside.any():
         return [tuple(p) for p in arc]
-    offsets[inside] = sign * inner_half_ft
+    offsets[inside] = sign * inner_offset_ft
     if curb_offsets is not None:
         offsets[outside] = sign * np.abs(curb_offsets)[outside]
     return place_in_measured_frame(leg.centerline, stations, offsets)
+
+
+def _taper_arc_points(leg: "Leg", role: str, sign: int, inner_half_ft: float,
+                       anchor_ft: float, target_ft: float, n_points: int) -> list[tuple] | None:
+    """Legacy wrapper for taper_arc_points, passing curb_offsets_at_stations."""
+    return taper_arc_points(leg, role, inner_half_ft, anchor_ft, target_ft,
+                            lambda st: np.abs(curb_offsets_at_stations(leg, role, st) or np.zeros(len(st))),
+                            n_points)
 
 
 # A taper runs from the straight run's start INWARD to the curb. With target_ft further out

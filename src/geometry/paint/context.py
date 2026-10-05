@@ -27,7 +27,7 @@ if TYPE_CHECKING:    # annotation-only: these types are layered above this modul
     # so importing them for real would close a cycle.
     from shapely.geometry import Point
     from src.geometry.markings import PaintKind
-    from src.geometry.paint.datum import KerbToKerb, Ref
+    from src.geometry.paint.datum import Shape
     from src.geometry.targets import Side
     from src.geometry.treatments.state import DesignState
 
@@ -496,21 +496,29 @@ class PaintContext:
                             crosswalk_is_marked=leg_name in self.marked,
                             mouth_end_ft=None if mouth is None else mouth[1])
 
-    def paint(self, kind: "PaintKind", leg_name: str, side: "Side | str", span: tuple[float, float], outer: "Ref | KerbToKerb", inner: "Ref | None" = None, step_ft: float = 1.0, **add_kwargs) -> list[PaintPiece]:
+    def paint(self, kind: "PaintKind", leg_name: str, side: "Side | str", shape: "Shape", **add_kwargs) -> list[PaintPiece]:
         """Paint a marking using the datum system.
 
-        Computes the geometry and datum for a marking defined by outer/inner references.
+        Computes the geometry and datum for a marking defined by a Shape.
         """
-        from src.geometry.paint.datum import place
+        from src.geometry.paint.datum import At, place
+        from src.geometry.paint.pieces import _dot
 
         leg = self.state.legs[leg_name]
-        s0, s1 = span
-        n = max(2, int(np.ceil((s1 - s0) / step_ft)) + 1)
-        s = np.linspace(s0, s1, n)
-        placed = place(leg, side, s, outer, inner)
+        placed = place(leg, side, shape)
         self.last_pinched = placed.pinched_stations
         if placed.geometry is None:
             return []
+
+        # For At shapes, emit each point individually
+        if isinstance(shape, At):
+            pieces = []
+            for geom in placed.geometry.geoms:
+                p = _dot(geom.coords[0])
+                piece = self.emit(PaintPiece(kind, p, leg_name, None, datum=placed.datum))
+                pieces.append(piece)
+            return pieces
+
         return self.add(kind, placed.geometry, leg_name, side, datum=placed.datum, **add_kwargs)
 
 
