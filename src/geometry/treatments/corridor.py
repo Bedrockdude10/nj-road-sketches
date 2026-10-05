@@ -421,7 +421,8 @@ class CorridorFacility:
             return None, f"{too_short}. Beyond that, {reason}"
         return reach_ft, None
 
-    def _place_on(self, state: DesignState, leg_name: str, side: str, quiet: bool) -> DesignState:
+    def _place_on(self, state: DesignState, leg_name: str, side: str, quiet: bool,
+                  size_far_kerb: bool = True) -> DesignState:
         to_ft, refused = self._reach_on(state, leg_name, side)
         if refused is not None:
             # _reach_on has already recorded the span; nothing else is claimed on this kerb.
@@ -528,6 +529,10 @@ class CorridorFacility:
                   f"BROAD_ST_TWO_WAY_BIKEWAY.")
         # THE FAR KERB GETS THE SURPLUS: the kerb that loses its parking to the bike lane is
         # not the kerb that gains this. Single home: hold_travel_lane_at_target in parking.py.
+        # The ladder sizes the far kerb from the room left; a TAGGED facility does not - its far
+        # kerb is whatever its own parking tags say (apply_osm_street_parking).
+        if not size_far_kerb:
+            return chosen_state
         return hold_travel_lane_at_target(chosen_state, leg_name, other_side)
 
 
@@ -764,7 +769,7 @@ def apply_osm_two_way_tracks(state: DesignState, model: "IntersectionModel",
             road = _street_name(model.config["legs"].get(leg_name, {}).get("street_name", ""))
             facility = CorridorFacility(road=road, municipality=town, side=side,
                                         sections=(section,))
-            state = facility._place_on(state, leg_name, side, quiet)
+            state = facility._place_on(state, leg_name, side, quiet, size_far_kerb=False)
             if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is not None:
                 carrying.append((leg_name, side))
     if facility is None:

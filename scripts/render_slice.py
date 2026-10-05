@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt   # after matplotlib.use: the backend must be se
 
 from src.geometry.model import NJ_STATE_PLANE_FT
 from src.geometry.network.slice_design import slice_design, slice_pavement
-from src.geometry.treatments import apply_osm_two_way_tracks, existing_conditions
+from src.geometry.treatments import existing_conditions
 from src.sources.osm_context import (height_from_tags, is_kerb, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
@@ -174,11 +174,12 @@ def window_frame(features: gpd.GeoDataFrame) -> Frame:
 #: `sites/*/scenarios.py` builds the same three out of hand-written leg tuples; these do not.
 SCENARIOS = {
     "existing": lambda state, model, features: state,
-    # THE BOROUGH PROPOSAL, as OSM tags: proposals/<area>/two_way_bikeway.yaml tags each way
-    # the bikeway runs along (scripts/propose_bikeway_tags.py wrote it from the route's ladder),
-    # and what is drawn is what those tags say. There is no generic "proposed" scenario - a
-    # restriping of every kerb is not anything put to the borough.
-    "two_way_bikeway": lambda state, model, features: apply_osm_two_way_tracks(state, model),
+    # THE BOROUGH PROPOSAL, as OSM tags: proposals/<area>/two_way_bikeway.yaml tags each way the
+    # bikeway runs along and the kerbs it reshapes (scripts/propose_bikeway_tags.py wrote it from
+    # the route's ladder). The SAME function as `existing`: existing_conditions reads every
+    # facility and parking lane off the tags, and the proposal is only the tags. There is no
+    # generic "proposed" scenario - a restriping of every kerb is not anything put to the borough.
+    "two_way_bikeway": lambda state, model, features: state,
 }
 
 

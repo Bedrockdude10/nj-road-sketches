@@ -407,7 +407,72 @@ def apply_existing_markings(state: DesignState, model: "IntersectionModel") -> D
     """
     from src.geometry.treatments.bikeways import apply_osm_bike_lanes
 
-    return apply_observed_parking(apply_osm_bike_lanes(state, model), model)
+    from src.geometry.treatments.corridor import apply_osm_two_way_tracks
+
+    # ONE READER FOR WHAT IS THERE AND WHAT IS PROPOSED: a proposal is OSM tags merged onto the
+    # ways it changes (src/sources/proposals.py), so every scenario is this, over its own tags.
+    # Facilities first - they claim their kerb - then the parking the tags mark on the rest.
+    state = apply_osm_two_way_tracks(apply_osm_bike_lanes(state, model), model)
+    return apply_observed_parking(apply_osm_street_parking(state, model), model)
+
+
+def osm_street_parking(model: "IntersectionModel", leg_name: str) -> dict[str, dict]:
+    """{leg side: {value, orientation, markings, width_ft}} from OSM's street-parking schema
+    (wiki: Street parking) - `parking:<side>`, `:orientation`, `:markings`, `:width`, with
+    `parking:both:*` standing for either side. OSM's sides are the way's; the leg's are reached
+    through leg_osm_aligned. A side OSM says nothing about is absent."""
+    from src.geometry.context_roads import osm_width_ft
+
+    tags = (getattr(model, "leg_osm_tags", {}) or {}).get(leg_name) or {}
+    aligned = (getattr(model, "leg_osm_aligned", {}) or {}).get(leg_name, True)
+    out = {}
+    for osm_side in ("left", "right"):
+        def tag(suffix: str = "", osm_side: str = osm_side) -> str | None:
+            return tags.get(f"parking:{osm_side}{suffix}", tags.get(f"parking:both{suffix}"))
+
+        if tag() is None:
+            continue
+        side = osm_side if aligned else ("right" if osm_side == "left" else "left")
+        out[side] = {"value": tag(), "orientation": tag(":orientation"),
+                     "markings": tag(":markings"), "width_ft": osm_width_ft(tag(":width"))}
+    return out
+
+
+def apply_osm_street_parking(state: DesignState, model: "IntersectionModel") -> DesignState:
+    """Mark the parking OSM tags on each kerb - existing or proposed alike.
+
+    DRAWN ONLY WHERE THERE IS PAINT TO DRAW: `parking:<side>=lane` with `markings=yes` is a
+    marked parking lane in the carriageway. Unmarked parking, or parking off the carriageway
+    (`street_side`, `on_kerb`), puts no paint on the road, so nothing is drawn for it. PARALLEL
+    only: OSM has no angle tag, so a diagonal or perpendicular bay is reported and not drawn
+    rather than drawn at an angle nobody recorded. The depth is `parking:<side>:width`, else
+    PARKING_STALL_DEPTH_DEFAULT_FT, reported as assumed.
+
+    "Unless otherwise specified": a kerb something has already claimed is left alone.
+    """
+    from src.geometry.treatments.bikeways import AddBikeLane   # local: bikeways imports this module
+
+    for leg_name in list(state.legs):
+        for side, parking in sorted(osm_street_parking(model, leg_name).items()):
+            if parking["value"] != "lane" or parking["markings"] != "yes":
+                continue
+            target = LegSide(leg_name, side)
+            if (state.treatment_for(MarkedParking, target) is not None
+                    or state.treatment_for(AddBikeLane, target) is not None):
+                continue
+            if (parking["orientation"] or "parallel") != "parallel":
+                state.notes.append(
+                    f"apply_osm_street_parking({leg_name}, {side}): OSM tags "
+                    f"{parking['orientation']} parking here, which has no angle tag to draw it at - "
+                    f"not drawn.")
+                continue
+            depth_ft = parking["width_ft"] or PARKING_STALL_DEPTH_DEFAULT_FT
+            if parking["width_ft"] is None:
+                state.notes.append(
+                    f"apply_osm_street_parking({leg_name}, {side}): no parking:{side}:width, so "
+                    f"the lane is DRAWN {depth_ft:.0f} ft deep - assumed. Tag the width.")
+            state = state.apply(MarkedParking(target, depth_ft=depth_ft))
+    return state
 
 
 def apply_observed_parking(state: DesignState, model: "IntersectionModel",

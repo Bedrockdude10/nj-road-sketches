@@ -10,6 +10,9 @@ each OSM way an approach lies on, the section that approach landed on - in OSM's
     cycleway:<side>:buffer, cycleway:<side>:separation:left=flex_post,
     parking:<side>:restriction=no_parking
 
+and, on the far kerb, the parking lane the ladder's lane hold marked there, in OSM's
+street-parking schema: parking:<side>=lane, :orientation=parallel, :markings=yes, :width.
+
 `<side>` is the WAY's side, as OSM's always is. A way carrying several approaches gets the
 narrowest section any of them took, because one way is one set of tags. From then on THE FILE IS
 THE PROPOSAL: the two_way_bikeway scenario draws what it says (render_slice.SCENARIOS), so a width
@@ -30,7 +33,8 @@ import yaml
 from scripts.render_slice import load_network, slice_context
 from src.geometry.network.slice_design import slice_design
 from src.geometry.targets import Side
-from src.geometry.treatments import BROAD_ST_TWO_WAY_BIKEWAY, existing_conditions
+from src.geometry.treatments import (BROAD_ST_TWO_WAY_BIKEWAY, LaneNarrowing, MarkedParking,
+                                     existing_conditions)
 from src.geometry.treatments.bikeways import AddBikeLaneBollards, AddTwoWayBikeLane
 from src.sources.proposals import proposal_path
 
@@ -60,7 +64,33 @@ def proposed_tags(area: str) -> list[dict]:
         entry["buffer_ft"] = min(entry["buffer_ft"], lane.buffer_ft)
         entry["posts"] = entry["posts"] and (leg_name, side) in posts
         entry["legs"].append(leg_name)
+    # THE FAR KERB, AS THE LADDER LEFT IT: hold_travel_lane_at_target marked parking in the room
+    # beside the 11 ft lane. Written as OSM's street-parking schema so the scenario draws exactly
+    # it. Hatching it chose instead has no OSM tag yet and is not written (see the printout).
+    carrying = {lane.target.leg for lane in state.treatments_of(AddTwoWayBikeLane)}
+    parking: dict[tuple[int, str], float] = {}
+    for stalls in state.treatments_of(MarkedParking):
+        leg_name, side = stalls.target.leg, str(stalls.target.side)
+        if leg_name not in carrying or stalls.curb_offset_ft:
+            continue
+        aligned = model.leg_osm_aligned.get(leg_name, True)
+        key = (model.legs[leg_name].osm_way_id, side if aligned else str(Side(side).other))
+        parking[key] = min(parking.get(key, stalls.depth_ft), stalls.depth_ft)
+    hatched = sum(1 for zone in state.treatments_of(LaneNarrowing)
+                  if zone.target.leg in carrying)
+    if hatched:
+        print(f"  {hatched} far-kerb hatched zone(s) the ladder chose are NOT written - OSM has no "
+              f"tag for them yet, so the scenario leaves that width as travel lane.")
     out = []
+    for (way_id, osm_side), depth_ft in sorted(parking.items()):
+        out.append({"element": f"way/{way_id}",
+                    "tags": {f"parking:{osm_side}": "lane",
+                             f"parking:{osm_side}:orientation": "parallel",
+                             f"parking:{osm_side}:markings": "yes",
+                             f"parking:{osm_side}:width": _feet(depth_ft)},
+                    "source": "Proposal: the far kerb of Broad St's two-way bikeway, the parking "
+                              "lane hold_travel_lane_at_target marked beside an 11 ft travel lane "
+                              "(scripts/propose_bikeway_tags.py). Not a survey."})
     for (way_id, osm_side), entry in sorted(by_way.items()):
         key = f"cycleway:{osm_side}"
         tags = {key: "track", f"{key}:oneway": "no", f"{key}:width": _feet(entry["width_ft"]),
