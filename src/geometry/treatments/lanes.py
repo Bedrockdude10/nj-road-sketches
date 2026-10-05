@@ -44,6 +44,10 @@ class LaneNarrowing(Treatment):
     line_only: bool = False
     sides: tuple = BOTH_SIDES
     end_ft: float | None = None
+    #: Set, the hatch runs from the kerb to the TRAVEL LANE'S EDGE - this offset off the centre
+    #: line - however wide that leaves it, instead of a stripe of declared depth. What
+    #: hold_travel_lane_at_target asks for on a kerb too tight for a stall.
+    lane_edge_ft: float | None = None
 
     def __post_init__(self):
         if self.stripe_width_ft <= 0:
@@ -55,7 +59,8 @@ class LaneNarrowing(Treatment):
 
     def describe(self) -> str:
         end = f", end_ft={self.end_ft:.1f}" if self.end_ft is not None else ""
-        return (f"LaneNarrowing({self.target}, stripe_width_ft={self.stripe_width_ft}, "
+        edge = f", lane_edge_ft={self.lane_edge_ft:.2f}" if self.lane_edge_ft is not None else ""
+        return (f"LaneNarrowing({self.target}, stripe_width_ft={self.stripe_width_ft}{edge}, "
                 f"line_only={self.line_only}, sides={tuple(str(s) for s in self.sides)}{end})")
 
     def paint(self, ctx) -> None:
@@ -63,8 +68,9 @@ class LaneNarrowing(Treatment):
         boundary lines without the fill."""
         from src.geometry.markings import (LANE_EDGE_LINE, LANE_NARROWING_FILL, TAPER_FILL,
                                            TAPER_LINE, ZONE_END_LINE)
-        from src.geometry.paint import end_against_crossing, lane_edge_stripes, tapers_cleanly
-        from src.geometry.paint.datum import Across, Along, Kerb, Narrowest, Taper, resolve
+        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, end_against_crossing,
+                                        lane_edge_stripes, tapers_cleanly)
+        from src.geometry.paint.datum import Across, Along, Centre, Kerb, Narrowest, Taper, resolve
 
         leg_name = self.target.leg
         leg = ctx.state.legs[leg_name]
@@ -73,9 +79,16 @@ class LaneNarrowing(Treatment):
         for side in (str(s) for s in self.sides):
             # The zone's inner edge, as the unsigned offset from the alignment anchors measure in.
             whole_leg = np.array([0.0, leg.centerline.length])
-            inner_ft = abs(float(resolve(leg, side, Narrowest(stripe_width_ft), whole_leg).offsets_ft[0]))
-            at = ctx.anchors(leg_name, side, inner_offset_ft=inner_ft)
             line_ft, fill_ft = lane_edge_stripes(stripe_width_ft)
+            if self.lane_edge_ft is None:     # a zone of declared depth, rigid at the narrowest
+                line_ref, fill_ref = Narrowest(line_ft), Narrowest(fill_ft)
+                inner_ft = abs(float(resolve(leg, side, Narrowest(stripe_width_ft),
+                                             whole_leg).offsets_ft[0]))
+            else:                             # bounded by the travel lane, whatever its width
+                line_ref = Centre(self.lane_edge_ft + LANE_EDGE_LINE_WIDTH_FT / 2)
+                fill_ref = Centre(self.lane_edge_ft + LANE_EDGE_LINE_WIDTH_FT)
+                inner_ft = self.lane_edge_ft
+            at = ctx.anchors(leg_name, side, inner_offset_ft=inner_ft)
             # A crossing is something to end against: run into it and let it cut the end. Only
             # where there is none does the paint have to resolve itself back to the kerb, and
             # only then is a taper the right way to do it.
@@ -97,30 +110,30 @@ class LaneNarrowing(Treatment):
 
             # Edge line: centre half a stroke inside the zone
             ctx.paint(LANE_EDGE_LINE, leg_name, side,
-                      Along((start_ft, end_station), Narrowest(line_ft)),
+                      Along((start_ft, end_station), line_ref),
                       beyond_ft=beyond_ft)
 
             if curved:
                 ctx.paint(TAPER_LINE, leg_name, side,
-                          Taper(at.anchor_ft, at.target_ft, Narrowest(line_ft), fill=False))
+                          Taper(at.anchor_ft, at.target_ft, line_ref, fill=False))
 
             if fill:
                 # Hatch fill
                 ctx.rim(ctx.paint(LANE_NARROWING_FILL, leg_name, side,
-                                  Along((start_ft, end_station), Kerb(0), Narrowest(fill_ft)),
+                                  Along((start_ft, end_station), Kerb(0), fill_ref),
                                   beyond_ft=beyond_ft,
                                   shares_a_kerb=(leg_name, side) in ctx.straight_through), LANE_EDGE_LINE)
 
                 if curved:
                     ctx.paint(TAPER_FILL, leg_name, side,
-                              Taper(at.anchor_ft, at.target_ft, Narrowest(fill_ft), fill=True))
+                              Taper(at.anchor_ft, at.target_ft, fill_ref, fill=True))
 
                 elif leg_name not in ctx.marked and (leg_name, side) not in ctx.straight_through:
                     # Only where the kerb does NOT run straight through. On one that does, the
                     # zone continues into the adjoining leg's zone rather than ending at the
                     # node, and closing it off draws a line across the hatching mid-intersection.
                     ctx.paint(ZONE_END_LINE, leg_name, side,
-                              Across(start_ft, Kerb(0), Narrowest(fill_ft)))
+                              Across(start_ft, Kerb(0), fill_ref))
 
                 if self.end_ft is not None:
                     # The OTHER end: not the junction, the station where the room this buffer
@@ -128,7 +141,7 @@ class LaneNarrowing(Treatment):
                     # the far station instead of the near one, independent of whether the near
                     # end tapers, ends at a crossing, or runs into the intersection.
                     ctx.paint(ZONE_END_LINE, leg_name, side,
-                              Across(self.end_ft, Kerb(0), Narrowest(fill_ft)))
+                              Across(self.end_ft, Kerb(0), fill_ref))
 
 
 @dataclass(frozen=True)

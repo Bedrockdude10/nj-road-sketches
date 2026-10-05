@@ -19,8 +19,26 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from src.geometry.model import Leg
 
-__all__ = ["Across", "Along", "At", "Centre", "Glyph", "Kerb", "KerbToKerb", "Narrowest", "Placed",
-           "Profile", "Ref", "Shape", "Taper", "centre_profile", "kerb_profile", "place", "resolve"]
+__all__ = [
+    "Across",
+    "Along",
+    "At",
+    "Centre",
+    "Glyph",
+    "Kerb",
+    "KerbToKerb",
+    "Narrowest",
+    "Placed",
+    "Profile",
+    "Ref",
+    "Shape",
+    "Taper",
+    "centre_profile",
+    "kerb_profile",
+    "kerb_reach_ft",
+    "place",
+    "resolve",
+]
 
 
 @dataclass(frozen=True)
@@ -145,6 +163,22 @@ def centre_profile(leg: "Leg", stations: np.ndarray) -> Profile:
                         _traced(leg, Side.RIGHT, stations), _state(leg, stations))
 
 
+def kerb_reach_ft(leg: "Leg", side: Side | str, from_ft: float = 0.0,
+                  to_ft: float | None = None) -> float:
+    """The narrowest distance from the centre line out to this side's kerb between two stations -
+    THE measure of room beside a lane, since lanes are held off the centre. Sampled every
+    STRIP_SAMPLE_FT and at every kerb vertex between, because a pinch is a vertex and samples
+    that straddle it read the kerb wider than it is."""
+    side = Side(side)
+    to_ft = leg.centerline.length if to_ft is None else to_ft
+    samples = np.append(np.arange(from_ft, to_ft, STRIP_SAMPLE_FT), to_ft)
+    vertices = [station_offset_many(leg.centerline, np.asarray(curb.coords))[0]
+                for curb in (leg.left_curb, leg.right_curb) if curb is not None]
+    probe = np.union1d(samples, [s for v in vertices for s in v if from_ft <= s <= to_ft])
+    return float(np.min(side.sign * (kerb_profile(leg, side, probe).offsets_ft
+                                     - centre_profile(leg, probe).offsets_ft)))
+
+
 def resolve(leg: "Leg", side: Side | str, ref: Ref, stations: np.ndarray) -> Profile:
     side = Side(side)
     if isinstance(ref, Kerb):
@@ -154,14 +188,7 @@ def resolve(leg: "Leg", side: Side | str, ref: Ref, stations: np.ndarray) -> Pro
         p = centre_profile(leg, stations)
         return Profile(stations, p.offsets_ft + side.sign * ref.offset_ft, p.source)
     if isinstance(ref, Narrowest):
-        # Measured at the stations asked for AND at every kerb vertex between them: a pinch is a
-        # vertex, and samples that straddle it read the kerb wider than it is.
-        lo, hi = float(np.min(stations)), float(np.max(stations))
-        vertices = [station_offset_many(leg.centerline, np.asarray(curb.coords))[0]
-                    for curb in (leg.left_curb, leg.right_curb) if curb is not None]
-        probe = np.union1d(stations, [s for v in vertices for s in v if lo <= s <= hi])
-        reach = float(np.min(side.sign * (kerb_profile(leg, side, probe).offsets_ft
-                                          - centre_profile(leg, probe).offsets_ft)))
+        reach = kerb_reach_ft(leg, side, float(np.min(stations)), float(np.max(stations)))
         k = kerb_profile(leg, side, stations)
         c = centre_profile(leg, stations)
         return Profile(stations, c.offsets_ft + side.sign * (reach - ref.inset_ft), k.source)

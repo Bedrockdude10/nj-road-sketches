@@ -11,8 +11,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from src.geometry.targets import Target
-from src.geometry.model import (angled_stall_depth_ft, leg_heads_toward,
-                                narrowest_half_width_ft)
+from src.geometry.model import (angled_stall_depth_ft, leg_heads_toward, narrowest_half_width_ft)
 
 if TYPE_CHECKING:                       # DesignState is layered above this module;
     from src.geometry.treatments.state import DesignState   # the annotation is a string
