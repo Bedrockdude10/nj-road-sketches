@@ -182,199 +182,91 @@ class MarkedParking(Treatment):
     def paint(self, ctx) -> None:
         """The stalls, the hatched buffer between them and the kerb, and the daylight zones
         where the law forbids parking at all."""
+        import numpy as np
         from src.geometry.daylighting import merged_no_parking_spans_ft, no_parking_zones_ft
         from src.geometry.markings import (BUFFER_EDGE_LINE, BUFFER_FILL, DAYLIGHT_EDGE_LINE,
                                            DAYLIGHT_FILL, LEFT_EDGE_LINE, PARKING_EDGE_LINE,
-                                           STALL_DIVIDER,
-                                           ZONE_END_LINE)
-        from src.geometry.model import (inset_line_ft, lane_narrowing_polygons_ft,
-                                        offset_band_polygon, parking_lane_edge_line_ft,
-                                        parking_stall_lines_ft, stall_lane_runs_ft,
+                                           STALL_DIVIDER)
+        from src.geometry.model import (offset_band_polygon, stall_lane_runs_ft,
                                         stall_leftover_runs_ft)
-        from src.geometry.paint import (LANE_EDGE_LINE_WIDTH_FT, MIN_LINE_LENGTH_FT, _one,
-                                        end_against_crossing, lane_edge_stripes, parking_runs,
-                                        zone_end_line_ft)
+        from src.geometry.paint import (MIN_LINE_LENGTH_FT,
+                                        lane_edge_stripes, parking_runs)
+        from src.geometry.paint.datum import Along, Across, Kerb, Narrowest
+        from src.geometry.paint.pieces import stroke_width_ft
 
         leg_name, side = self.target.leg, str(self.target.side)
         state = ctx.state
         leg = state.legs[leg_name]
-        # THE PITCH, not the stall's own length: the two are the same number only while the
-        # parking is parallel (see pitch_ft). Named stall_length_ft still because that is the
-        # parameter every stripes.py helper takes it as - the footprint along the kerb.
         depth_ft, stall_length_ft = self.depth_ft, self.pitch_ft
         curb_offset_ft = self.curb_offset_ft
-        at = ctx.anchors(leg_name, side,
-                          inner_offset_ft=leg.curb_to_curb_ft / 2 - depth_ft - curb_offset_ft)
         runs = parking_runs(state, leg_name, side, ctx.crosswalk_offsets, ctx.props)
         if self.end_ft is not None:
             runs = [(s, min(e, self.end_ft)) for s, e in runs if s < self.end_ft]
 
-        # DAYLIGHTING. Every stretch where R.S. 39:4-138 forbids parking is hatched across
-        # the FULL depth of the parking lane, not just the buffer strip beside it. Those
-        # stretches were already no-parking in law - the treatment is MARKING them, because
-        # an unmarked setback is one people park in, and an unmarked setback next to a
-        # marked stall reads as more stall. This is the part of the proposal that actually
-        # daylights the crossing. Zones are clipped to the leg and to the point where the
-        # corner return leaves room to paint at all.
-        #
-        # The zone runs INTO the crossing and the crossing cuts its end, leaving it rimmed
-        # along the crossing's own edge - a diagonal where the crossing is skewed, meeting
-        # the straight lane-edge line at a right angle. It used to end in the same curved
-        # taper a lane-narrowing buffer gets, and on a wide leg that curve is a hairpin: at
-        # Broad St it had to swing the full 13-17 ft depth of the parking lane across 0-5.6 ft
-        # of station. Where a leg has no marked crossing there is nothing to end against, so
-        # it falls back to a taper if a gentle one exists and a square cut otherwise.
+        # DAYLIGHTING: mark no-parking zones required by law
         daylight_line_ft, daylight_fill_ft = lane_edge_stripes(depth_ft + curb_offset_ft)
-        lane_edge_offset_ft = leg.curb_to_curb_ft / 2 - daylight_line_ft
         daylight_spans = merged_no_parking_spans_ft(
             no_parking_zones_ft(state, leg_name, side, ctx.crosswalk_offsets, ctx.props))
         for zone_start_ft, zone_end_ft in daylight_spans:
-            # Capped, not filtered out early with the runs above: a daylight zone is the statute
-            # restated in paint (see the comment on beyond_the_tracing below) and still applies
-            # up to wherever this depth_ft was actually sized to reach, even though the zone
-            # itself may run further in law.
             capped_end = zone_end_ft
-            capped = self.end_ft is not None and capped_end > self.end_ft
             if self.end_ft is not None:
                 if zone_start_ft >= self.end_ft:
                     continue
                 capped_end = min(capped_end, self.end_ft)
-            if leg_name in ctx.marked and (leg_name, side) in ctx.straight_through:
-                start_ft, beyond_ft = zone_start_ft, None
-            elif leg_name in ctx.marked:
-                start_ft, beyond_ft = end_against_crossing(at, zone_start_ft)
-            else:
-                start_ft, beyond_ft = max(zone_start_ft, at.target_ft), None
-            # A solid line wherever hatching meets the travel lane, so the lane reads as a
-            # lane. The buffer beside the stalls already has one; the daylight zone runs the
-            # full depth of the parking lane, so ITS inner edge is the lane edge, and without
-            # this the hatching just faded into the carriageway.
-            #
-            # BEFORE the fill, so that the rim - which is this same line continued around the
-            # zone's cut end - can be trimmed against it. Painted after, the two overlapped by
-            # 3.3 ft where the fillet leaves the lane edge tangentially, which is exactly where
-            # they are supposed to meet; MarkingsDoNotCollide reported it.
-            # PAST THE END OF THE TRACING, which nothing else here may do. A daylight zone is
-            # not a design choice about this kerb, it is R.S. 39:4-138 restated in paint, and the
-            # statute does not stop where OSM's kerb tracing does. W Broad & Louellen's south
-            # kerb is traced only from station 60.3 against a statutory zone of 0-93.3, so the
-            # hatching was drawn over the last third of the zone and stopped 7.5 ft short of the
-            # crosswalk it exists to daylight - and hatching that stops short of a crossing
-            # undoes the treatment, because the bare stretch beside the crossing is exactly where
-            # a car parks and blocks the sight line. See leg_frame.paint_stations for what is
-            # assumed outside the tracing (the kerb held at its first traced offset) and why the
-            # stalls and buffers below deliberately do NOT ask for the same.
-            ctx.add(DAYLIGHT_EDGE_LINE,
-                     inset_line_ft(leg, side, lane_edge_offset_ft, start_ft, capped_end,
-                                    keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2,
-                                    beyond_the_tracing=True),
-                     leg_name, side, beyond_ft)
-            ctx.rim(ctx.add(DAYLIGHT_FILL, _one(lane_narrowing_polygons_ft(
-                leg, daylight_fill_ft, start_left_ft=start_ft, start_right_ft=start_ft,
-                sides=(side,), end_ft=capped_end, beyond_the_tracing=True)),
-                leg_name, side, beyond_ft,
-                shares_a_kerb=(leg_name, side) in ctx.straight_through), DAYLIGHT_EDGE_LINE)
-            # Nothing to end against and no taper available: close the square end. See
-            # zone_end_line_ft. Not where the kerb runs straight through - the zone carries
-            # on into the next leg there.
-            if leg_name not in ctx.marked and (leg_name, side) not in ctx.straight_through:
-                ctx.add(ZONE_END_LINE, zone_end_line_ft(
-                    leg, side, start_ft, leg.curb_to_curb_ft / 2 - daylight_fill_ft),
-                    leg_name, side)
-            if capped:
-                # The far end above was cut mid-zone by self.end_ft, which the crossing/opening
-                # cuts ctx.rim knows about is not one of - so without this the hatch just stops,
-                # no line, same failure LaneNarrowing.end_ft's own closing line exists to avoid.
-                ctx.add(ZONE_END_LINE, zone_end_line_ft(
-                    leg, side, capped_end, leg.curb_to_curb_ft / 2 - daylight_fill_ft),
-                    leg_name, side)
 
+            # Daylight zone: outer at traced kerb, inner at declared depth
+            daylight_edge_inset_ft = daylight_line_ft - stroke_width_ft(DAYLIGHT_EDGE_LINE) / 2
+            ctx.paint(DAYLIGHT_EDGE_LINE, leg_name, side,
+                     Along((zone_start_ft, capped_end), Kerb(daylight_edge_inset_ft)))
+            ctx.paint(DAYLIGHT_FILL, leg_name, side,
+                     Along((zone_start_ft, capped_end), Kerb(0.0),
+                           Narrowest(daylight_fill_ft)))
+
+        # PARKING STALLS: one per run
         for start_ft, end_ft in runs:
-            # ORDER ACROSS THE ROAD, and what gives when the road's width changes:
-            #
-            #   travel lane   0 -> TARGET             fixed
-            #   lane edge line                        its own width, out of the treatment
-            #   parking       -> TARGET + depth_ft    fixed, held against the LANE
-            #   HATCHING      -> the traced kerb      absorbs ALL of the variation
-            #
-            # Everything is measured from the centerline, so the only thing that touches the
-            # traced kerb is the hatching - which is just paint filling whatever asphalt is
-            # left over. The lane holds its width, which is the entire point of the markings:
-            # a lane that widens is a lane people speed in. The stall holds its width too, so
-            # the leftover cannot end up inside it.
-            #
-            # (Anchoring the stalls to the KERB instead was tried and is wrong here: it makes
-            # the parking position depend on the noisiest input in the model, and puts the
-            # variable-width hatching between the travel lane and the parked cars.)
-            edge = parking_lane_edge_line_ft(
-                leg, side, depth_ft, start_ft, end_ft,
-                curb_offset_ft=curb_offset_ft - LANE_EDGE_LINE_WIDTH_FT / 2)
-            if edge is None:
-                continue  # the corner return consumes the whole leg - see plan_view's note
-            # THE COLOUR IS DECIDED HERE, BY WHERE THE KERB IS, not by what is behind the line.
-            # This one stripe is the mouth of the bay AND the edge of the roadway, and MUTCD
-            # 3B.09 P3 makes it yellow where the roadway is one-way and this is its left edge.
-            ctx.add(LEFT_EDGE_LINE if is_left_edge_of_the_roadway(ctx.state, leg, side)
-                    else PARKING_EDGE_LINE, edge, leg_name, side)
+            # Parking edge line at inner edge of parking zone
+            edge_inset_ft = curb_offset_ft + depth_ft - stroke_width_ft(PARKING_EDGE_LINE) / 2
+            edge_kind = (LEFT_EDGE_LINE if is_left_edge_of_the_roadway(ctx.state, leg, side)
+                        else PARKING_EDGE_LINE)
+            ctx.paint(edge_kind, leg_name, side,
+                     Along((start_ft, end_ft), Narrowest(edge_inset_ft)))
 
-            # A STALL, UNLIKE THE EDGE LINE ABOVE, MUST NOT BE DRAWN WHERE IT WILL BE CUT.
-            # PARKING_EDGE_LINE is CARRIED across a driveway (real curbside parking keeps its
-            # edge line straight through one), but STALL_DIVIDER is STOPPED at every opening -
-            # a car cannot be told to park across a driveway mouth. Laying the divider grid over
-            # the LEGAL run and letting ctx.add cut it afterwards is what left a stall's far tick
-            # open-ended at the edge line, a driveway's dropped tick fusing its neighbour into a
-            # 44 ft "stall", and a stall straddling a driveway outright - see
-            # model.stall_lane_runs_ft. So the grid is built over the ground STALL_DIVIDER will
-            # actually keep: the same footprint the dividers themselves occupy, cut by the same
-            # openings/crossings/surfaces ctx.add cuts against, trimmed back to whole stalls.
-            #
-            # NOT beyond_the_tracing: a stall proposes paint on the physical kerb, not a
-            # statement of law like the daylight zone above, so it may reach no further than
-            # the kerb is actually surveyed - paint_stations' own distinction (leg_frame.py).
-            # parking_stall_lines_ft enforces the same curb_station_span bound when it places
-            # each tick's offset; asking ctx.open_runs to look past it here just meant this
-            # run and that clamp disagreed about where the ground ends, which is the second
-            # source of truth that left the run's closing tick clipped off again.
-            stall_curb_offset_ft = curb_offset_ft - LANE_EDGE_LINE_WIDTH_FT
-            half = leg.curb_to_curb_ft / 2
-            outer_off = max(half - stall_curb_offset_ft, 0.5)
-            inner_off = max(half - stall_curb_offset_ft - depth_ft, 0.5)
-            band = offset_band_polygon(leg, side, inner_off, outer_off, start_ft, end_ft)
+            # Parking stall zone: outer at kerb buffer, inner at lane edge
+            ctx.paint(BUFFER_FILL, leg_name, side,
+                     Along((start_ft, end_ft), Kerb(curb_offset_ft),
+                           Narrowest(curb_offset_ft + depth_ft)))
+
+            # Stall dividers: perpendicular ticks every pitch_ft, from outer to inner stall edge
+            stall_outer_inset_ft = curb_offset_ft
+            stall_inner_inset_ft = curb_offset_ft + self.stall_line_depth_ft
+            band = offset_band_polygon(leg, side,
+                                      leg.curb_to_curb_ft / 2 - stall_inner_inset_ft,
+                                      leg.curb_to_curb_ft / 2 - stall_outer_inset_ft,
+                                      start_ft, end_ft)
             open_runs = ctx.open_runs(leg_name, side, STALL_DIVIDER, band) if band else []
             for lo, hi in stall_lane_runs_ft(open_runs, stall_length_ft,
                                               keep_inside_ft=MIN_LINE_LENGTH_FT):
-                # THE LINE'S DEPTH, NOT THE BAY'S - stall_line_depth_ft. Identical for
-                # parallel parking, and on an angled bay it holds the divider back from the
-                # travel way by the stall's mouth so the paint does not run across the way in.
-                for divider in parking_stall_lines_ft(
-                        leg, side, self.stall_line_depth_ft, stall_length_ft, lo, hi,
-                        curb_offset_ft=stall_curb_offset_ft, skew_ft=self.skew_ft):
-                    ctx.add(STALL_DIVIDER, divider, leg_name, side)
+                # Dividers placed at computed stations
+                for station_ft in np.arange(lo, hi + stall_length_ft, stall_length_ft):
+                    if station_ft <= hi:
+                        ctx.paint(STALL_DIVIDER, leg_name, side,
+                                 Across(float(station_ft), Kerb(stall_outer_inset_ft),
+                                       Narrowest(stall_inner_inset_ft), skew_ft=self.skew_ft))
 
-            # THE TAIL stall_lane_runs_ft FLOORS AWAY - shorter than a stall, most often the
-            # stretch between the last whole stall and a driveway's clearance cut (STALL_DIVIDER
-            # stops there, PARKING_EDGE_LINE is carried straight across it - see the comment
-            # above). Left bare it reads as a stall someone forgot to finish painting rather than
-            # ground nobody was ever offering; hatch it instead, the same "too narrow, so hatched"
-            # rule allocate_kerbside already applies to a kerb too shallow for a stall, applied
-            # here along the kerb instead of across it.
+            # Leftover hatching (too-narrow stalls)
             for lo, hi in stall_leftover_runs_ft(open_runs, stall_length_ft,
                                                   keep_inside_ft=MIN_LINE_LENGTH_FT):
                 if hi - lo < MIN_HATCHED_ZONE_FT:
                     continue
-                leftover = offset_band_polygon(leg, side, inner_off, outer_off, lo, hi)
-                if leftover:
-                    ctx.add(BUFFER_FILL, leftover, leg_name, side)
+                ctx.paint(BUFFER_FILL, leg_name, side,
+                         Along((lo, hi), Kerb(stall_outer_inset_ft),
+                               Narrowest(stall_inner_inset_ft)))
 
-            if not curb_offset_ft:
-                continue
-            buffer_ft = max(curb_offset_ft - LANE_EDGE_LINE_WIDTH_FT, 0.0)
-            ctx.add(BUFFER_EDGE_LINE, inset_line_ft(
-                leg, side, leg.curb_to_curb_ft / 2 - buffer_ft, start_ft, end_ft,
-                keep_inside_ft=LANE_EDGE_LINE_WIDTH_FT / 2), leg_name, side)
-            ctx.add(BUFFER_FILL, _one(lane_narrowing_polygons_ft(
-                leg, buffer_ft, start_left_ft=start_ft, start_right_ft=start_ft,
-                sides=(side,), end_ft=end_ft)), leg_name, side)
+            # Kerb buffer: between stalls and kerb (if curb_offset_ft > 0)
+            if curb_offset_ft > 0.0:
+                buffer_edge_inset_ft = curb_offset_ft - stroke_width_ft(BUFFER_EDGE_LINE) / 2
+                ctx.paint(BUFFER_EDGE_LINE, leg_name, side,
+                         Along((start_ft, end_ft), Narrowest(buffer_edge_inset_ft)))
 
 
 @dataclass(frozen=True)
@@ -413,18 +305,22 @@ class ParkingBufferBollards(Treatment):
         the design rather than restated here - the same reason this treatment refuses a parking
         lane with no buffer.
         """
+        import numpy as np
         from src.geometry.markings import BOLLARD
-        from src.geometry.model import bollard_points_ft
-        from src.geometry.paint import PaintPiece, _dot, parking_runs
+        from src.geometry.model import bollard_points_ft, station_offset_many
+        from src.geometry.paint import parking_runs
+        from src.geometry.paint.datum import At, Kerb
 
         leg_name, side = self.target.leg, str(self.target.side)
         curb_offset_ft = ctx.state.treatment_for(MarkedParking, self.target).curb_offset_ft
         leg = ctx.state.legs[leg_name]
         for start_ft, _end_ft in parking_runs(ctx.state, leg_name, side, ctx.crosswalk_offsets,
                                                ctx.props):
-            for point in bollard_points_ft(leg, curb_offset_ft, start_ft, self.spacing_ft,
-                                            sides=(side,)):
-                ctx.emit(PaintPiece(BOLLARD, _dot(point), leg_name, side))
+            points = bollard_points_ft(leg, curb_offset_ft, start_ft, self.spacing_ft,
+                                       sides=(side,))
+            if points:
+                stations, _ = station_offset_many(leg.centerline, np.asarray(points, dtype=float))
+                ctx.paint(BOLLARD, leg_name, side, At(tuple(stations), Kerb(curb_offset_ft / 2)))
 
 
 def _kerb_already_treated(state: DesignState, leg_name: str, side: str) -> bool:
