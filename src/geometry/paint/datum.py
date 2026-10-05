@@ -17,8 +17,8 @@ from src.geometry.targets import Side
 if TYPE_CHECKING:
     from src.geometry.model import Leg
 
-__all__ = ["Centre", "Kerb", "KerbToKerb", "Placed", "Profile", "Ref", "centre_profile",
-           "kerb_profile", "place", "resolve"]
+__all__ = ["Centre", "Kerb", "KerbToKerb", "Narrowest", "Placed", "Profile", "Ref",
+           "centre_profile", "kerb_profile", "place", "resolve"]
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,14 @@ class KerbToKerb:
     """The whole carriageway, left kerb to right kerb."""
 
 
-Ref = Kerb | Centre
+@dataclass(frozen=True)
+class Narrowest:
+    """`inset_ft` in from this side's kerb at its NARROWEST over the stations asked for, measured
+    from the centre line and held there: a kerbside zone of declared depth, rigid at the pinch."""
+    inset_ft: float = 0.0
+
+
+Ref = Kerb | Centre | Narrowest
 
 
 @dataclass(frozen=True)
@@ -98,6 +105,11 @@ def resolve(leg: "Leg", side: Side | str, ref: Ref, stations: np.ndarray) -> Pro
     if isinstance(ref, Centre):
         p = centre_profile(leg, stations)
         return Profile(stations, p.offsets_ft + side.sign * ref.offset_ft, p.source)
+    if isinstance(ref, Narrowest):
+        k = kerb_profile(leg, side, stations)
+        c = centre_profile(leg, stations)
+        reach = float(np.min(side.sign * (k.offsets_ft - c.offsets_ft)))
+        return Profile(stations, c.offsets_ft + side.sign * (reach - ref.inset_ft), k.source)
     raise TypeError(f"not a paint reference: {ref!r}")
 
 
