@@ -510,6 +510,15 @@ class PaintContext:
                 sides = [leg_side(End.END, side)] if str(side) in ("left", "right") \
                     else ["left", "right"]
                 stop -= max(self.anchors(far, s).target_ft for s in sides)
+                # Recorded as what it is - the kerb measured and declined past here, for a reason -
+                # so BikewayReachesTheEndOfItsKerb reads the far junction the way it reads any other
+                # stated stop, rather than as a facility that quietly ends.
+                if str(side) in ("left", "right") and hasattr(self.state, "refuse"):
+                    from src.geometry.treatments.state import FacilityRefusal
+
+                    self.state.refuse(leg_name, str(side), FacilityRefusal(
+                        max(stop, 0.0), leg.centerline.length,
+                        "the junction at this leg's far end"))
             self.far_stops[key] = stop
         return self.far_stops[key]
 
