@@ -596,21 +596,31 @@ class _Reader:
                  else _strip(line, self.width(way["tags"], "width", "service") / 2))
         self.out["paved_surfaces"] += [{"coords": ring} for ring in rings]
 
-    def apron(self, kerb: dict, branches: list[dict], sidewalks: list[dict]) -> None:
-        """A dropped kerb's driveway mouth, paved. A `kerb=lowered` way that a driveway or parking
-        aisle crosses (at a shared node, or across it) is where that traffic leaves the street, so
-        the mouth is the whole lowered kerb, not the branch's own `width`; it is paved out to the
-        sidewalk the branch crosses nearest the kerb, through that sidewalk's band - as far as the
-        branch itself is paved. A lowered kerb nothing drives across (a crossing's ramp) is not."""
+    def apron(self, kerb: dict, branches: list[dict], sidewalks: list[dict], crossings: list[dict],
+              areas: list[dict]) -> None:
+        """A dropped kerb's mouth, paved: a `kerb=lowered` way is where traffic leaves the street,
+        so what lies between it and where that traffic goes is paved, the whole kerb wide.
+        - one a footway crossing meets is that crossing's ramp - a landing, not paved;
+        - one a driveway or parking aisle crosses (at a shared node, or across it) is paved out to
+          the sidewalk the branch crosses nearest the kerb, through that sidewalk's band - as far
+          as the branch itself is paved;
+        - any other is paved out to the paved area (`areas`: lots, `highway=*` areas) first met
+          straight out behind it, away from the street, where there is one."""
         if kerb["tags"].get("kerb") not in ("lowered", "flush"):
             return
         line = self.frame.line(kerb.get("coords_wgs84") or [])
         if line is None:
             return
         nodes = set(kerb.get("node_ids") or [])
+
+        def meets(way: dict) -> LineString | None:
+            path = self.frame.line(way["coords_wgs84"])
+            return path if path is not None and (nodes & set(way["node_ids"]) or path.intersects(line)) else None
+
+        if any(meets(way) is not None for way in crossings):
+            return
         for branch in branches:
-            path = self.frame.line(branch["coords_wgs84"])
-            if path is None or not (nodes & set(branch["node_ids"]) or path.intersects(line)):
+            if (path := meets(branch)) is None:
                 continue
             met = [(path.intersection(walk).distance(line), walk, way) for way in sidewalks
                    if (walk := self.frame.line(way["coords_wgs84"])) is not None and walk.intersects(path)]
@@ -620,13 +630,38 @@ class _Reader:
             _d, walk, way = min(met, key=lambda m: m[0])
             back = [walk.interpolate(walk.project(Point(c))).coords[0] for c in line.coords]
             along = sorted(walk.project(Point(c)) for c in back)
-            mouth = unary_union([
-                Polygon([*line.coords, *back[::-1]]).buffer(0),
-                _substring(walk, along[0], along[-1]).buffer(
-                    self.width(way["tags"], "width", "sidewalk") / 2, cap_style="flat")])
-            self.out["paved_surfaces"] += [{"coords": ring} for ring in _rings(mouth)]
-            self.stats["driveway mouths paved across their lowered kerb"] += 1
+            self.pave(line, back, _substring(walk, along[0], along[-1]).buffer(
+                self.width(way["tags"], "width", "sidewalk") / 2, cap_style="flat"))
+            self.stats["lowered kerbs paved to the sidewalk a driveway crosses"] += 1
             return
+        # Straight out from the kerb's middle, away from the street: the first paved area met.
+        middle = np.asarray(line.interpolate(0.5, normalized=True).coords[0])
+        ahead = np.asarray(line.interpolate(min(line.length / 2 + 0.5, line.length)).coords[0])
+        behind = np.asarray(line.interpolate(max(line.length / 2 - 0.5, 0.0)).coords[0])
+        t = (ahead - behind) / max(float(np.linalg.norm(ahead - behind)), 1e-9)
+        streets = [street for lines in self.street_lines.values() for street in lines]
+        if not streets:
+            return
+        street = min(streets, key=lambda one: one.distance(Point(middle)))
+        normal = np.array([-t[1], t[0]])
+        if np.dot(normal, middle - np.asarray(street.interpolate(street.project(Point(middle))).coords[0])) < 0:
+            normal = -normal
+        west, south, east, north = self.carriageway().bounds
+        ray = LineString([middle, middle + normal * math.hypot(east - west, north - south)])
+        met = [(Point(middle).distance(ray.intersection(edge)), edge) for area in areas
+               if (outline := self.frame.line(area["coords_wgs84"])) is not None and len(outline.coords) >= 4
+               and ray.intersects(edge := Polygon(outline.coords).buffer(0).exterior)]
+        if not met:
+            self.stats["lowered kerbs with nothing paved behind them"] += 1
+            return
+        _d, edge = min(met, key=lambda m: m[0])
+        self.pave(line, [edge.interpolate(edge.project(Point(c))).coords[0] for c in line.coords])
+        self.stats["lowered kerbs paved to the area behind them"] += 1
+
+    def pave(self, kerb: LineString, back: list, *more: BaseGeometry) -> None:
+        """The band between a kerb and the points `back` behind each of its vertices, with `more`."""
+        mouth = unary_union([Polygon([*kerb.coords, *back[::-1]]).buffer(0), *more])
+        self.out["paved_surfaces"] += [{"coords": ring} for ring in _rings(mouth)]
 
     def building(self, way: dict) -> None:
         line = self.frame.line(way["coords_wgs84"])
@@ -747,8 +782,11 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
         reader.paved(way, closed=False)
     for way in layers["parking_lots"] + layers["highway_areas"]:
         reader.paved(way, closed=True)
+    paved_areas = [way for way in layers["parking_lots"] + layers["highway_areas"]
+                   if way["tags"].get("parking") != "lane"]
     for way in layers["kerbs"]:
-        reader.apron(way, layers["driveways"] + layers["parking_aisles"], layers["sidewalks"])
+        reader.apron(way, layers["driveways"] + layers["parking_aisles"], layers["sidewalks"],
+                     layers["crossings"], paved_areas)
     for way in layers["buildings"]:
         reader.building(way)
     reader.out["tree_points"] = [frame.point(n["lon"], n["lat"]) for n in layers["street_furniture"]
