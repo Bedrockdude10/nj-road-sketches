@@ -15,7 +15,7 @@ from shapely.geometry import Point, Polygon
 
 import requests
 
-from src.sources.data_loader import OVERPASS_USER_AGENT, query_overpass
+from src.sources.overpass import OVERPASS_USER_AGENT, query_overpass
 
 DEFAULT_BUILDING_HEIGHT_M = 7.0  # ~2 stories, typical for small-borough Main St buildings
 METERS_PER_LEVEL = 3.0
@@ -202,7 +202,7 @@ def _snapshot_path(bbox: tuple | None = None) -> Path:
 def _download_snapshot(bbox: tuple | None = None) -> list[dict]:
     """One whole snapshot area from the OSM API, falling back to Overpass."""
     if os.environ.get("ROAD_SKETCHES_OFFLINE"):
-        from src.sources.data_loader import OfflineCacheMiss
+        from src.sources.overpass import OfflineCacheMiss
         raise OfflineCacheMiss(
             "ROAD_SKETCHES_OFFLINE is set and the snapshot for this area is not in the fixture "
             "cache. Refresh it with: cp output/.cache/borough_*.json tests/fixtures/osm_cache/")

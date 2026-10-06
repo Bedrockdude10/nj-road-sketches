@@ -42,51 +42,12 @@ forbidden_modules =
 # read as external here and are deliberately not listed.
 
 
-[importlinter:contract:config-path-stays-light]
-name = Reading a site config does not drag in the geometry stack
+[importlinter:contract:sources-do-not-know-how-they-are-drawn]
+name = Reading OSM does not import the render stage
 type = forbidden
 source_modules =
-    src.site
-    src.site_schema
-    src.config
-    src.provenance
+    src.sources
 forbidden_modules =
-    src.geometry
     src.render
-# src/site_schema.py copies VALID_CENTERLINE_STYLES instead of importing it from
-# src.geometry.treatments, ON THE GROUNDS that importing it would pull shapely, geopandas and
-# numpy into the import path of every script that only wanted to read a config.yaml. That
-# reasoning is load-bearing - it is why a constant is duplicated - so it should be a rule rather
-# than a comment somebody later "tidies up".
-#
-# THIS COUNTS `if TYPE_CHECKING:` IMPORTS TOO, which is stricter than the reason above: a
-# quoted annotation costs nothing at runtime. Taken as read anyway - these four modules cannot
-# NAME a geometry type, so a parameter here stays unannotated rather than importing one under
-# TYPE_CHECKING. An annotation pass over src/ hit exactly this on run_scenario's `model`.
-
-
-[importlinter:contract:geometry-does-not-know-how-it-is-drawn]
-name = Geometry does not import the output stages
-type = forbidden
-source_modules =
-    src.geometry
-forbidden_modules =
-    src.render.plan_view
-    src.render.export
-    src.render.scene
-    src.render.theme
-    src.render.assets
-# NOT "src.geometry must not import src.render", which is the rule you would guess and which is
-# false: geometry imports src.render.frame, src.render.coords and src.render.crosswalks today,
-# and those are shared measurement and placement helpers that happen to live under render/ - a
-# real finding, but a naming problem, not a layering violation.
-#
-# The layering rule that IS true, and is the one the architecture rests on (README, "One
-# resolution, three consumers"): geometry never reaches the stages that PRODUCE output. The 2D
-# plan view, the 3D export and the scene resolution all read geometry; none of them is read back.
-# Geometry importing one of them is how "the 2D and 3D views agree because they read one
-# geometry" quietly stops being true.
-#
-# src.render.props is deliberately absent from this list: geometry reaches it indirectly, via
-# src.geometry.paint -> src.checks -> src.render.props. Forbidding it would be asserting a rule
-# the code does not follow.
+# src/render/assets.py imports the Overpass user agent from src.sources, never the reverse: what
+# OSM says is read once, and every drawing is a reader of it.

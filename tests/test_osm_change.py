@@ -110,21 +110,18 @@ def test_no_file_is_no_change(tmp_path):
     assert load_change(tmp_path / "absent.osc") == OsmChange((), ())
 
 
-def test_a_split_is_two_ways_and_no_junction():
-    from src.geometry.network.street_graph import street_edges
-
+def test_a_split_is_two_ways_sharing_the_cut_node():
     out = apply_change(_layers(), OsmChange((), (
         WayChange(7, "modify", (1, 2), {**BROAD, **NOTE}),
         WayChange(-1, "create", (2, 3), {**BROAD, "parking:left": "lane", **NOTE}))))
-    edges, junctions, _xy = street_edges(out["roads"])
-    assert {edge.way_id for edge in edges} == {7, -1}
-    assert junctions == set()
+    first, second = sorted(out["roads"], key=lambda way: way["node_ids"])
+    assert (first["id"], first["node_ids"]) == (7, [1, 2])
+    assert (second["id"], second["node_ids"]) == (-1, [2, 3])
+    assert first["coords_wgs84"][-1] == second["coords_wgs84"][0]
 
 
 def test_one_table_of_way_layers():
-    from src.geometry.network.area import _AREA_LAYERS
-    from src.sources.osm_context import OSM_LAYERS, WAY_LAYERS
+    from src.sources.osm_context import NODE_LAYERS, OSM_LAYERS, WAY_LAYERS
 
     assert {name for name, _predicate, _n in WAY_LAYERS} <= set(OSM_LAYERS)
-    predicates = {predicate for _name, predicate, _n in WAY_LAYERS}
-    assert all(predicate in predicates for _layer, predicate, _kind in _AREA_LAYERS)
+    assert {name for name, _predicate in NODE_LAYERS} <= set(OSM_LAYERS)

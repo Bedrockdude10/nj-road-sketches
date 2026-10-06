@@ -7,7 +7,7 @@ import json
 import pyproj
 from shapely.geometry import Polygon
 
-from src.geometry.model import NJ_STATE_PLANE_FT, WGS84
+from src.geometry.model.crs import NJ_STATE_PLANE_FT, WGS84
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:    # annotation-only: these types are layered above this module,

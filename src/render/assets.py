@@ -1,6 +1,6 @@
 """Fetch + disk-cache CC0 assets from Poly Haven's public API (api.polyhaven.com)
 for Phase 4 render fidelity. Poly Haven's ToS asks for a unique User-Agent per
-application - reuses the same one as Overpass/Nominatim (src/sources/data_loader.py).
+application - reuses the same one as Overpass/Nominatim (src/sources/overpass.py).
 
 Every fetch function returns None on failure rather than raising - a missing
 texture/model must never hard-fail scripts/phase4_render_3d.py when there's no
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import requests
 
-from src.sources.data_loader import NOMINATIM_USER_AGENT
+from src.sources.overpass import NOMINATIM_USER_AGENT
 
 POLYHAVEN_API = "https://api.polyhaven.com"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # src/render/assets.py -> repo root

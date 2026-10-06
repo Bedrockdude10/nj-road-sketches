@@ -64,14 +64,19 @@ def _canonical(change: OsmChange) -> OsmChange:
                      tuple(sorted(change.ways, key=order)))
 
 
+def _attr(element: ET.Element, name: str) -> str:
+    value = element.get(name)
+    if value is None:
+        raise ValueError(f"<{element.tag} id={element.get('id')}> has no {name}")
+    return value
+
+
 def _id(element: ET.Element) -> int:
-    if element.get("id") is None:
-        raise ValueError(f"<{element.tag}> with no id")
-    return int(element.get("id"))
+    return int(_attr(element, "id"))
 
 
 def _tags(element: ET.Element) -> dict[str, str]:
-    return {tag.get("k"): tag.get("v") for tag in element.findall("tag")}
+    return {_attr(tag, "k"): _attr(tag, "v") for tag in element.findall("tag")}
 
 
 def _way(element: ET.Element, action: str) -> WayChange:
@@ -81,12 +86,12 @@ def _way(element: ET.Element, action: str) -> WayChange:
                          f"existing one a positive id")
     if action == "delete":
         return WayChange(way_id, "delete", (), {})
-    node_ids, tags = tuple(int(nd.get("ref")) for nd in element.findall("nd")), _tags(element)
+    node_ids, tags = tuple(int(_attr(nd, "ref")) for nd in element.findall("nd")), _tags(element)
     if len(node_ids) < 2:
         raise ValueError(f"{action} way/{way_id}: a way has at least 2 nodes")
     if not tags.get("note"):
         raise ValueError(f"{action} way/{way_id}: no note saying where the proposal came from")
-    return WayChange(way_id, action, node_ids, tags)
+    return WayChange(way_id, "modify" if action == "modify" else "create", node_ids, tags)
 
 
 def load_change(path: Path) -> OsmChange:
@@ -96,7 +101,8 @@ def load_change(path: Path) -> OsmChange:
     root = ET.parse(path).getroot()
     if root.tag != "osmChange":
         raise ValueError(f"{path}: root is <{root.tag}>, not <osmChange>")
-    nodes, ways = [], []
+    nodes: list[NewNode] = []
+    ways: list[WayChange] = []
     for section in root:
         if section.tag not in _ACTIONS:
             raise ValueError(f"{path}: unsupported <{section.tag}>")
@@ -104,8 +110,8 @@ def load_change(path: Path) -> OsmChange:
             if element.tag == "node" and section.tag == "create":
                 if _id(element) >= 0:
                     raise ValueError(f"create node/{_id(element)}: a created node has a negative id")
-                nodes.append(NewNode(_id(element), float(element.get("lon")),
-                                     float(element.get("lat")), _tags(element)))
+                nodes.append(NewNode(_id(element), float(_attr(element, "lon")),
+                                     float(_attr(element, "lat")), _tags(element)))
             elif element.tag == "way":
                 ways.append(_way(element, section.tag))
             else:
@@ -172,10 +178,10 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
                "tags": dict(change_way.tags), "id": change_way.id,
                "node_ids": list(change_way.node_ids)}
         for name, predicate, min_coords in WAY_LAYERS:
-            if predicate(way["tags"]) and len(way["node_ids"]) >= min_coords:
+            if predicate(change_way.tags) and len(change_way.node_ids) >= min_coords:
                 entry = dict(way)
                 if name == "buildings":
-                    recorded = height_from_tags(way["tags"])
+                    recorded = height_from_tags(change_way.tags)
                     entry["height_m"], entry["height_source"] = recorded if recorded else (None, None)
                 out.setdefault(name, []).append(entry)
     return out
