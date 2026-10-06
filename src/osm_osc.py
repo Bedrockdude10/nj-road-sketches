@@ -216,11 +216,16 @@ class _Network:
         return _Leg(junction, _street_key(self.streets[steps[0][0]]), steps, nodes, xy, d, end)
 
     @staticmethod
-    def claimed(leg: _Leg, crossing_nodes) -> int | None:
+    def claimed(leg: _Leg, crossing_nodes, stops: dict[int, list[LineString]]) -> int | None:
         """The crossing node whose crosswalk ends this leg's centre line at its junction: the
         first out along the leg - unless it is the only one on a leg between two junctions and
-        nearer the other, whose crosswalk it then is."""
-        on_leg = list(dict.fromkeys(n for n in leg.nodes[1:] if n in crossing_nodes and n != leg.end))
+        nearer the other, whose crosswalk it then is. Never one beyond the stop line serving the
+        approach: a stop line is placed in advance of its junction's crosswalk (MUTCD 3B.16, as
+        cited), so a crossing past it is mid-block, dark only across its own band."""
+        stop_at = _Network.stop_line(leg, stops)
+        on_leg = list(dict.fromkeys(
+            n for k, n in enumerate(leg.nodes) if k > 0 and n in crossing_nodes and n != leg.end
+            and (stop_at is None or float(leg.d[k]) < stop_at)))
         if not on_leg:
             return None
         if leg.end is not None and len(on_leg) == 1:
@@ -500,6 +505,21 @@ def _at(line: LineString, s: float, offset: float) -> np.ndarray:
 
 # --- existing conditions -----------------------------------------------------------------------
 
+def _stops(layers: dict, frame: LocalFrame, network: _Network,
+           report: Counter[str]) -> dict[int, list[LineString]]:
+    """Every stop line, by each street node it is joined to; one joined to none is reported."""
+    stops: dict[int, list[LineString]] = defaultdict(list)
+    for stop_way in layers["stop_lines"]:
+        stop = frame.line(stop_way["coords_wgs84"])
+        joined = [n for n in stop_way["node_ids"] if n in network.on_node]
+        if stop is None or not joined:
+            report[f"stop line not joined to a street: way {stop_way['id']}"] += 1
+            continue
+        for n in joined:
+            stops[n].append(stop)
+    return stops
+
+
 def existing_markings(area: str) -> tuple[OsmChange, Counter[str]]:
     """Every street way split where its centre line is not painted, the stretch tagged
     `lane_markings=no`, and each piece's `width` measured between its kerbs - and what each was
@@ -520,15 +540,7 @@ def existing_markings(area: str) -> tuple[OsmChange, Counter[str]]:
             crossing_of |= {n: crossing for n in crossing["node_ids"] if n in network.on_node}
     half_of = {n: (width_m(c["tags"].get("width")) or DEFAULT_WIDTHS_M["crossing"]) / 2
                for n, c in crossing_of.items()}
-    stops: dict[int, list[LineString]] = defaultdict(list)
-    for stop_way in layers["stop_lines"]:
-        stop = frame.line(stop_way["coords_wgs84"])
-        joined = [n for n in stop_way["node_ids"] if n in network.on_node]
-        if stop is None or not joined:
-            report[f"stop line not joined to a street: way {stop_way['id']}"] += 1
-            continue
-        for n in joined:
-            stops[n].append(stop)
+    stops = _stops(layers, frame, network, report)
 
     intervals: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for node, half in half_of.items():
@@ -538,7 +550,7 @@ def existing_markings(area: str) -> tuple[OsmChange, Counter[str]]:
     for junction in network.junctions:
         for leg in network.legs(junction):
             marks = []
-            claimed = network.claimed(leg, half_of)
+            claimed = network.claimed(leg, half_of, stops)
             if claimed is not None:
                 k = leg.nodes.index(claimed)
                 marks.append((float(leg.d[k]) + half_of[claimed], "the far edge of its crosswalk"))
@@ -952,9 +964,10 @@ def two_way_bikeway(area: str, base: OsmChange) -> tuple[OsmChange, Counter[str]
     crossing_of = {n: c for c in layers["crossings"] for n in c["node_ids"]}
     zebra = {c["id"] for c in layers["crossings"] if _marked(c["tags"])}
     zebra |= {crossing_of[n]["id"] for w in broad for n in w["node_ids"] if n in crossing_of}
+    stops = _stops(layers, frame, network, Counter())
     for junction in network.junctions:
         for leg in network.legs(junction):
-            if (n := network.claimed(leg, crossing_of)) is not None:
+            if (n := network.claimed(leg, crossing_of, stops)) is not None:
                 zebra.add(crossing_of[n]["id"])
     report["crosswalks made continental"] = len(zebra)
     for crossing in layers["crossings"]:

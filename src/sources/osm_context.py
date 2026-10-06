@@ -330,8 +330,18 @@ def is_road_area(tags: dict) -> bool:
     return "area:highway" in tags
 
 
+# `highway=*` values that are always an area, never a line (wiki Key:highway, "areas").
+AREA_HIGHWAYS = frozenset({"services", "rest_area"})
+
+
+def is_highway_area(tags: dict) -> bool:
+    """A `highway=*` mapped as a surface - `highway=services` / `rest_area`, or any highway with
+    `area=yes` - rather than a centreline: a closed highway way is otherwise a loop road."""
+    return tags.get("highway") in AREA_HIGHWAYS or ("highway" in tags and tags.get("area") == "yes")
+
+
 def is_road(tags: dict) -> bool:
-    return "highway" in tags
+    return "highway" in tags and not is_highway_area(tags)
 
 
 def is_traffic_control(tags: dict) -> bool:
@@ -367,7 +377,8 @@ WAY_LAYERS: tuple[tuple[str, Callable[[dict], bool], int], ...] = (
     ("sidewalks", is_sidewalk, 2), ("driveways", is_driveway, 2),
     ("parking_aisles", is_parking_aisle, 2), ("parking_lots", is_parking_lot, 4),
     ("kerbs", is_kerb, 2), ("roads", is_road, 2), ("stop_lines", is_stop_line, 2),
-    ("road_markings", is_restriction_marking, 4), ("road_areas", is_road_area, 4))
+    ("road_markings", is_restriction_marking, 4), ("road_areas", is_road_area, 4),
+    ("highway_areas", is_highway_area, 4))
 NODE_LAYERS: tuple[tuple[str, Callable[[dict], bool]], ...] = (
     ("traffic_control", is_traffic_control), ("street_furniture", is_street_furniture),
     ("kerbs", is_kerb))
@@ -400,7 +411,7 @@ class UnknownAreaError(KeyError):
 #: Every layer `osm_layers` returns. The names are the ones consumers already know them by.
 OSM_LAYERS = ("buildings", "crossings", "sidewalks", "driveways", "parking_aisles",
               "parking_lots", "traffic_control", "street_furniture", "kerbs", "roads",
-              "stop_lines", "road_markings", "road_areas", "municipalities")
+              "stop_lines", "road_markings", "road_areas", "highway_areas", "municipalities")
 
 _AREA_LAYERS_MEMO: dict[str, tuple] = {}
 

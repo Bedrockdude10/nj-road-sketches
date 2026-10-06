@@ -34,7 +34,8 @@ Everything drawn is something OSM maps, placed where OSM puts it:
   markings      `road_marking=stop_line` bars (STOP_BAR_M wide), `road_marking=restriction`
                 hatched areas
   kerbs         `barrier=kerb` ways, at the height their `kerb` / `kerb:height` says
-  paved ground  driveways, parking aisles, `amenity=parking` areas - except `parking=lane`
+  paved ground  driveways, parking aisles, `amenity=parking` areas and `highway=*` areas
+                (src/sources/osm_context.py:is_highway_area) - except `parking=lane`
                 areas, which are on the carriageway and drawn as their marked outline - and
                 a driveway's mouth across the whole lowered kerb it crosses
   buildings     their footprints, at `height` / `building:levels`
@@ -744,7 +745,7 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
         reader.kerb(way)
     for way in layers["driveways"] + layers["parking_aisles"]:
         reader.paved(way, closed=False)
-    for way in layers["parking_lots"]:
+    for way in layers["parking_lots"] + layers["highway_areas"]:
         reader.paved(way, closed=True)
     for way in layers["kerbs"]:
         reader.apron(way, layers["driveways"] + layers["parking_aisles"], layers["sidewalks"])
