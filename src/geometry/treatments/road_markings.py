@@ -52,18 +52,23 @@ class RestrictionMarking(Treatment):
         return float(np.abs(offsets[within]).min()) if within.any() else None
 
     def paint(self, ctx) -> None:
-        """The way's outline, its centre half a stripe inside the way, and the chevron fill
-        inside the outline - so the painted marking covers the mapped area and no more."""
+        """The fill reaches the kerb; the edge line runs half a stripe inside the area along its road-facing edges only - none along the kerb, as LaneNarrowing paints none there."""
         from src.geometry.markings import LANE_EDGE_LINE, LANE_NARROWING_FILL
         from src.geometry.paint import LANE_EDGE_LINE_WIDTH_FT
 
+        W = LANE_EDGE_LINE_WIDTH_FT
         leg_name, side = self.target.leg, str(self.target.side)
+        leg = ctx.state.legs[leg_name]
+        kerb = leg.left_curb if side == "left" else leg.right_curb
+        kerb_zone = kerb.buffer(W) if kerb is not None else None
         for area in self.polygons():
-            outline = area.buffer(-LANE_EDGE_LINE_WIDTH_FT / 2, join_style=2)
-            for part in getattr(outline, "geoms", [outline]):
-                if part.geom_type == "Polygon" and not part.is_empty:
-                    ctx.add(LANE_EDGE_LINE, LineString(part.exterior.coords), leg_name, side)
-            fill = area.buffer(-LANE_EDGE_LINE_WIDTH_FT, join_style=2)
+            road_edge = area.exterior if kerb_zone is None else area.exterior.difference(kerb_zone)
+            line = LineString(area.buffer(-W / 2, join_style=2).exterior.coords)
+            line = line if kerb_zone is None else line.difference(kerb_zone)
+            for part in getattr(line, "geoms", [line]):
+                if part.geom_type == "LineString" and not part.is_empty:
+                    ctx.add(LANE_EDGE_LINE, part, leg_name, side)
+            fill = area.difference(road_edge.buffer(W, cap_style=2, join_style=2))
             if not fill.is_empty:
                 ctx.add(LANE_NARROWING_FILL, fill, leg_name, side)
 

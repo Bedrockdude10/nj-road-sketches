@@ -13,8 +13,6 @@ for empty.
 """
 from __future__ import annotations
 
-from collections import defaultdict
-
 import geopandas as gpd
 from shapely import reverse
 from shapely.geometry import LineString, Point, box
@@ -116,7 +114,8 @@ def _home_frame(edge: StreetEdge, junctions: set[int]) -> tuple[LineString, int 
 def leg_key(street_name: str, u: int, v: int) -> str:
     """A world leg's key from OSM's own identity - its street and the two nodes it runs between -
     so splitting a way elsewhere renames nothing."""
-    raise NotImplementedError("Phase 1 limb D")
+    slug = street_name.lower().replace(" ", "_")
+    return f"{slug}_{min(u, v)}_{max(u, v)}"
 
 
 def _legs_of(edges: list[StreetEdge], junctions: set[int], streets: gpd.GeoDataFrame,
@@ -128,7 +127,6 @@ def _legs_of(edges: list[StreetEdge], junctions: set[int], streets: gpd.GeoDataF
     `street` row under its middle - which is what corridor_pavement drew the asphalt to.
     """
     legs: dict[str, Leg] = {}
-    taken: dict[str, int] = defaultdict(int)
     for edge in sorted(edges, key=lambda e: (e.name, e.way_id, e.u)):
         line, start, end, aligned = _home_frame(edge, junctions)
         if boundary is not None and not boundary.contains(line):
@@ -154,10 +152,9 @@ def _legs_of(edges: list[StreetEdge], junctions: set[int], streets: gpd.GeoDataF
         if float(distances.min()) > 1.0:
             continue
         row = distances.idxmin()
-        slug = edge.name.lower().replace(" ", "_")
-        index = taken[slug]
-        taken[slug] += 1
-        key = slug if index == 0 else f"{slug}_{index}"
+        key = leg_key(edge.name, edge.u, edge.v)
+        if key in legs:
+            key = f"{key}_{abs(edge.way_id)}"
         # `Leg.name` IS THE KEY, as it is at a site; the street name lives only in
         # `config["legs"][key]["street_name"]`, which is where `legs_on_road` reads it. WITHOUT A
         # WIDTH A LEG IS NOT A STREET: every treatment sizes its section off curb_to_curb_ft.
