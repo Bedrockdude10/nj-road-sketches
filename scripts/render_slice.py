@@ -88,6 +88,7 @@ SLICE_LAYERS: dict[str, tuple[str, str]] = {
     "driveways": ("osm_driveways", "LineString"),
     "parking_aisles": ("osm_parking_aisles", "LineString"),
     "stop_lines": ("osm_stop_lines", "LineString"),
+    "road_markings": ("osm_road_markings", "Polygon"),
     "roads": ("osm_roads", "LineString"),
 }
 

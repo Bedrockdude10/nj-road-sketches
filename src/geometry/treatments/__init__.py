@@ -120,6 +120,9 @@ from src.geometry.treatments.parking import (MIN_HATCHED_ZONE_FT, MIN_USABLE_STA
                                              kerb_may_hold_parking,
                                              restriction_summary)
 from src.geometry.treatments.extras import (ExtraProp, build_sidewalk_pieces)
+from src.geometry.treatments.road_markings import (RestrictionMarking,
+                                                  apply_osm_road_markings,
+                                                  restriction_painted_ft)
 
 __all__ = [
                                           "AASHTO_MIN_BIKE_LANE_FT",
@@ -188,6 +191,7 @@ __all__ = [
                                           "ProtectDaylightZone",
                                           "RaiseCrossing",
                                           "RefugeIsland",
+                                          "RestrictionMarking",
                                           "RestrictionSummary",
                                           "Section",
                                           "SetCenterlineStyle",
@@ -201,6 +205,7 @@ __all__ = [
                                           "apply_observed_parking",
                                           "apply_osm_bike_lanes",
                                           "apply_osm_parking",
+                                          "apply_osm_road_markings",
                                           "apply_osm_two_way_tracks",
                                           "bike_lane_spare_ft",
                                           "build_sidewalk_pieces",
@@ -223,6 +228,7 @@ __all__ = [
                                           "osm_derived_baseline",
                                           "osm_two_way_tracks",
                                           "resolved_crossing_stations",
+                                          "restriction_painted_ft",
                                           "restriction_summary",
                                           "route_decision_for",
                                           "traffic_runs_outward",

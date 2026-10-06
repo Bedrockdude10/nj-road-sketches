@@ -24,8 +24,8 @@ from src.render.coords import wgs84_to_state_plane
 from src.sources.observations import ELEMENT_FROM_OSM, apply_observations, load_observations
 from src.sources.osm_context import (SNAPSHOT_AREAS, fetch_borough_osm, is_building,
                                      is_crossing_way, is_driveway, is_kerb, is_parking_aisle,
-                                     is_parking_lot, is_road, is_sidewalk, is_stop_line,
-                                     osm_layers)
+                                     is_parking_lot, is_restriction_marking, is_road, is_sidewalk,
+                                     is_stop_line, osm_layers)
 
 Bbox = tuple[float, float, float, float]
 NodeXY = dict[int, tuple[float, float]]
@@ -237,6 +237,7 @@ _AREA_LAYERS: tuple[tuple[str, object, str], ...] = (
     ("driveways", is_driveway, "line"),
     ("parking_aisles", is_parking_aisle, "line"),
     ("stop_lines", is_stop_line, "line"),
+    ("road_markings", is_restriction_marking, "ring"),
     ("roads", is_road, "line"),
 )
 

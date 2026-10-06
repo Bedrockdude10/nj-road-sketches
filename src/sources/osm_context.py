@@ -317,6 +317,13 @@ def is_stop_line(tags: dict) -> bool:
     return tags.get("road_marking") == "stop_line"
 
 
+def is_restriction_marking(tags: dict) -> bool:
+    """A hatched area on the carriageway - wiki Key:road_marking, `restriction`: "Neutral areas
+    or restriction markings, like gore chevron or no-parking markings". Mapped as a closed way;
+    the way IS the painted area, as a stop_line way is the painted bar."""
+    return tags.get("road_marking") == "restriction"
+
+
 def is_road(tags: dict) -> bool:
     return "highway" in tags
 
@@ -373,7 +380,7 @@ class UnknownAreaError(KeyError):
 #: Every layer `osm_layers` returns. The names are the ones consumers already know them by.
 OSM_LAYERS = ("buildings", "crossings", "sidewalks", "driveways", "parking_aisles",
               "parking_lots", "traffic_control", "street_furniture", "kerbs", "roads",
-              "stop_lines", "municipalities")
+              "stop_lines", "road_markings", "municipalities")
 
 _AREA_LAYERS_MEMO: dict[str, tuple] = {}
 
@@ -439,6 +446,7 @@ def osm_layers(area: str) -> dict[str, list]:
         "kerbs": kerbs,
         "roads": ways_where(is_road, 2),
         "stop_lines": ways_where(is_stop_line, 2),
+        "road_markings": ways_where(is_restriction_marking, 4),
         "municipalities": _closed_municipal_rings(snapshot),
     }
     _AREA_LAYERS_MEMO[area] = (raw, layers)

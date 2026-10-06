@@ -411,8 +411,12 @@ def apply_existing_markings(state: DesignState, model: "IntersectionModel") -> D
 
     # ONE READER FOR WHAT IS THERE AND WHAT IS PROPOSED: a proposal is OSM tags merged onto the
     # ways it changes (src/sources/proposals.py), so every scenario is this, over its own tags.
-    # Facilities first - they claim their kerb - then the parking the tags mark on the rest.
+    # Facilities first - they claim their kerb - then the hatched areas OSM maps
+    # (road_marking=restriction), then the parking the tags mark on the rest.
+    from src.geometry.treatments.road_markings import apply_osm_road_markings
+
     state = apply_osm_two_way_tracks(apply_osm_bike_lanes(state, model), model)
+    state = apply_osm_road_markings(state, model)
     return apply_observed_parking(apply_osm_street_parking(state, model), model)
 
 

@@ -387,7 +387,8 @@ class TravelLanesKeepTheirWidth(SceneCheck):
         state = scene.state
         from src.geometry.targets import BOTH_SIDES, LegSide, LegTarget
         from src.geometry.treatments import (TARGET_LANE_WIDTH_FT, LaneNarrowing,
-                                              MarkedParking, travel_lane_width_ft)
+                                              MarkedParking, restriction_painted_ft,
+                                              travel_lane_width_ft)
 
         violations = []
         for leg_name, leg in state.legs.items():
@@ -413,6 +414,8 @@ class TravelLanesKeepTheirWidth(SceneCheck):
                 parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
                 if parking is not None:
                     painted_ft = parking.depth_ft + parking.curb_offset_ft
+                # A road_marking=restriction area is kerbside paint too, measured off the way.
+                painted_ft = max(painted_ft, restriction_painted_ft(state, leg_name, side))
                 if painted_ft <= 0:
                     continue
                 # The travel lane runs from the DIVIDER to the paint, not from the alignment to
@@ -1044,7 +1047,7 @@ class TravelLanesHoldTheTarget(SceneCheck):
         from src.geometry.treatments import (TARGET_LANE_WIDTH_FT, AddBikeLane, LaneNarrowing,
                                               MarkedParking,
                                               lane_surplus_that_cannot_be_striped_ft,
-                                              travel_lane_width_ft)
+                                              restriction_painted_ft, travel_lane_width_ft)
 
         state = scene.state
         violations = []
@@ -1060,7 +1063,8 @@ class TravelLanesHoldTheTarget(SceneCheck):
                     return parking.depth_ft + parking.curb_offset_ft
                 if narrowing is not None and side in narrowing.sides:
                     return narrowing.stripe_width_ft
-                return 0.0
+                # A road_marking=restriction area: what OSM maps there, measured off the way.
+                return restriction_painted_ft(state, leg_name, side)
 
             def a_decision_was_made(side: str, narrowing=narrowing, leg_name=leg_name):
                 """Has THIS DESIGN restriped this kerb - as against recorded what is there?
@@ -1140,7 +1144,8 @@ class TruckRouteLanesHoldTheAllowance(SceneCheck):
         from src.geometry.model import narrowest_half_width_ft
         from src.geometry.targets import BOTH_SIDES, LegSide, LegTarget
         from src.geometry.treatments import (TARGET_LANE_WIDTH_FT, LaneNarrowing,
-                                              MarkedParking, travel_lane_width_ft)
+                                              MarkedParking, restriction_painted_ft,
+                                              travel_lane_width_ft)
 
         state, model = scene.state, scene.model
         if model is None:
@@ -1160,6 +1165,7 @@ class TruckRouteLanesHoldTheAllowance(SceneCheck):
                 parking = state.treatment_for(MarkedParking, LegSide(leg_name, side))
                 if parking is not None:
                     painted_ft = parking.depth_ft + parking.curb_offset_ft
+                painted_ft = max(painted_ft, restriction_painted_ft(state, leg_name, side))
                 lane_ft = travel_lane_width_ft(state, leg_name, side, painted_ft)
                 if painted_ft <= 0:
                     # Nothing painted this kerb, so the lane really ends at the TRACED kerb, not
