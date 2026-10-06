@@ -123,6 +123,8 @@ from src.geometry.treatments.extras import (ExtraProp, build_sidewalk_pieces)
 from src.geometry.treatments.road_markings import (RestrictionMarking,
                                                   apply_osm_road_markings,
                                                   restriction_painted_ft)
+from src.geometry.treatments.kerbside import kerbside_paint_ft
+from src.geometry.treatments.propose import hatched_zone_ft, proposal_from_design
 
 __all__ = [
                                           "AASHTO_MIN_BIKE_LANE_FT",
@@ -217,16 +219,19 @@ __all__ = [
                                           "existing_conditions",
                                           "far_kerb_surplus_ft",
                                           "find_corner",
+                                          "hatched_zone_ft",
                                           "hold_travel_lane_at_target",
                                           "is_left_edge_of_the_roadway",
                                           "kerb_may_hold_parking",
                                           "kerbside_allowance_ft",
+                                          "kerbside_paint_ft",
                                           "lane_surplus_that_cannot_be_striped_ft",
                                           "legs_on_road",
                                           "min_bike_lane_buffer_ft",
                                           "narrow_lanes_and_recover_parking",
                                           "osm_derived_baseline",
                                           "osm_two_way_tracks",
+                                          "proposal_from_design",
                                           "resolved_crossing_stations",
                                           "restriction_painted_ft",
                                           "restriction_summary",

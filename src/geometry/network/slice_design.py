@@ -113,6 +113,12 @@ def _home_frame(edge: StreetEdge, junctions: set[int]) -> tuple[LineString, int 
     return edge.line, start, end, True
 
 
+def leg_key(street_name: str, u: int, v: int) -> str:
+    """A world leg's key from OSM's own identity - its street and the two nodes it runs between -
+    so splitting a way elsewhere renames nothing."""
+    raise NotImplementedError("Phase 1 limb D")
+
+
 def _legs_of(edges: list[StreetEdge], junctions: set[int], streets: gpd.GeoDataFrame,
              width_by_street: dict[int, float], boundary, street_of: dict[str, str],
              way_of: dict[str, tuple[dict, bool, int]]) -> dict[str, Leg]:
