@@ -12,8 +12,10 @@ each OSM way an approach lies on, the section that approach landed on - in OSM's
 
 and the far kerb's hatching as what OSM maps hatching as: a new closed way (negative id, OSM's
 convention for an element not yet uploaded) tagged road_marking=restriction + pattern=chevron,
-traced off the zone the ladder's design actually painted. Far-kerb PARKING is not written yet:
-see proposed_tags.
+traced off the zone the ladder's design actually painted. The far kerb's PARKING is OSM's
+street-parking schema on the way, and where it changes from one leg to the next the way is SPLIT
+at the junction between them (wiki Street parking: "The roadway needs to be split up where any
+of the properties changes"), written as osmChange writes a split.
 
 `<side>` is the WAY's side, as OSM's always is. A way carrying several approaches gets the
 narrowest section any of them took, because one way is one set of tags. From then on THE FILE IS
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import itertools
 import sys
 from pathlib import Path
 
@@ -34,7 +37,7 @@ import yaml
 
 from scripts.render_slice import load_network, slice_context
 from src.geometry.network.slice_design import slice_design
-from src.geometry.targets import Side
+from src.geometry.targets import LegSide, Side
 from src.geometry.treatments import (BROAD_ST_TWO_WAY_BIKEWAY, LaneNarrowing, MarkedParking,
                                      existing_conditions)
 from src.geometry.treatments.bikeways import AddBikeLaneBollards, AddTwoWayBikeLane
@@ -52,7 +55,7 @@ _HATCH_KINDS = ("lane_narrowing_fill", "taper_fill", "lane_edge_line", "taper_li
                 "zone_end_line")
 
 
-def _hatched_areas(model, state, network, carrying: set[str]) -> list[dict]:
+def _hatched_areas(model, state, network, carrying: set[str], new_ids) -> list[dict]:
     """[{element, tags, coords, source}] - each far-kerb hatched zone the ladder's design PAINTS,
     as one new road_marking=restriction way. Traced off the drawn paint rather than rebuilt from
     the treatment's numbers, so the area is the zone as drawn - cut at its crossings and swept
@@ -76,7 +79,7 @@ def _hatched_areas(model, state, network, carrying: set[str]) -> list[dict]:
         props = build_props(model, state, scene.crosswalk_offsets, pavement=scene.pavement)
         paint, _ = scene.build_paint_and_posts(props)
     to_wgs84 = pyproj.Transformer.from_crs(NJ_STATE_PLANE_FT, WGS84, always_xy=True)
-    out, next_id = [], -1
+    out = []
     for leg_name, side in sorted(hatched):
         pieces = [p for p in paint if p.leg == leg_name and str(p.side) == side
                   and str(p.kind) in _HATCH_KINDS]
@@ -93,7 +96,7 @@ def _hatched_areas(model, state, network, carrying: set[str]) -> list[dict]:
                 continue
             xs, ys = zip(*part.exterior.coords)
             lons, lats = to_wgs84.transform(xs, ys)
-            out.append({"element": f"way/{next_id}",
+            out.append({"element": f"way/{next(new_ids)}",
                         "tags": {"road_marking": "restriction", "pattern": "chevron",
                                  "colour": "white"},
                         "coords": [[round(lon, 8), round(lat, 8)] for lon, lat in zip(lons, lats)],
@@ -101,55 +104,119 @@ def _hatched_areas(model, state, network, carrying: set[str]) -> list[dict]:
                                   f"bikeway, as BROAD_ST_TWO_WAY_BIKEWAY's ladder painted it on "
                                   f"{leg_name} {side} (scripts/propose_bikeway_tags.py). "
                                   f"Not a survey."})
-            next_id -= 1
     return out
 
 
+def _leg_span(leg, aligned: bool, node_ids: list[int]) -> tuple[int, int] | None:
+    """(first, last) index into the way's node list that this leg covers. A leg whose far end is
+    no junction (the area stops) runs on to the way's own end in its direction."""
+    at = {node: i for i, node in enumerate(node_ids)}
+    start, end = at.get(leg.start_node), at.get(leg.end_node)
+    if start is None and end is None:
+        return None
+    if end is None:
+        end = len(node_ids) - 1 if aligned else 0
+    if start is None:
+        start = 0 if aligned else len(node_ids) - 1
+    return min(start, end), max(start, end)
+
+
+def _pieces(node_ids: list[int], spans: list[tuple[int, int, object]]) -> list[tuple[list[int], object]]:
+    """The way cut wherever the answer changes from one leg to the next - at the node the two
+    legs share, which is a junction OSM already has. [(node ids, answer)], in way order; one
+    piece, the whole way, where every leg agrees."""
+    groups: list[list] = []
+    for lo, hi, answer in sorted(spans, key=lambda span: span[0]):
+        if groups and groups[-1][2] == answer:
+            groups[-1][1] = max(groups[-1][1], hi)
+        else:
+            groups.append([lo, hi, answer])
+    cuts = [0, *(group[0] for group in groups[1:]), len(node_ids) - 1]
+    return [(node_ids[a:b + 1], group[2]) for (a, b), group in zip(itertools.pairwise(cuts), groups)]
+
+
+def _parking_tags(osm_side: str, depth_ft: float | None) -> dict:
+    """OSM's street-parking schema for a marked parallel lane `depth_ft` deep, or nothing."""
+    if depth_ft is None:
+        return {}
+    return {f"parking:{osm_side}": "lane", f"parking:{osm_side}:orientation": "parallel",
+            f"parking:{osm_side}:markings": "yes", f"parking:{osm_side}:width": _feet(depth_ft)}
+
+
 def proposed_tags(area: str) -> list[dict]:
-    """[{element, tags, source}] - one entry per way side the ladder placed the bikeway on,
-    and one new way per far-kerb hatched zone it painted."""
+    """[{element, tags, source, nodes?, coords?}]: the bikeway's tags on each way it runs along,
+    the far kerb's parking on each stretch of way the ladder parked - the way split where that
+    changes - and one new way per far-kerb hatched zone it painted."""
     network = load_network(area)
+    osm = slice_context(network)
     with contextlib.redirect_stdout(io.StringIO()):
-        model, _ = slice_design(network, osm=slice_context(network), osm_area=area)
+        model, _ = slice_design(network, osm=osm, osm_area=area)
         state = BROAD_ST_TWO_WAY_BIKEWAY.apply_to(existing_conditions(model), model, quiet=True)
     posts = {(t.target.leg, str(t.target.side)) for t in state.treatments_of(AddBikeLaneBollards)}
-    by_way: dict[tuple[int, str], dict] = {}
+    by_way: dict[int, dict] = {}
     for lane in state.treatments_of(AddTwoWayBikeLane):
         leg_name, side = lane.target.leg, str(lane.target.side)
         leg = model.legs[leg_name]
         aligned = model.leg_osm_aligned.get(leg_name, True)
         osm_side = side if aligned else str(Side(side).other)
-        entry = by_way.setdefault((leg.osm_way_id, osm_side),
-                                  {"width_ft": lane.width_ft, "buffer_ft": lane.buffer_ft,
-                                   "posts": True, "legs": []})
+        way = by_way.setdefault(leg.osm_way_id, {"sides": {}, "legs": []})
+        entry = way["sides"].setdefault(osm_side, {"width_ft": lane.width_ft,
+                                                   "buffer_ft": lane.buffer_ft, "posts": True})
         entry["width_ft"] = min(entry["width_ft"], lane.width_ft)
         entry["buffer_ft"] = min(entry["buffer_ft"], lane.buffer_ft)
         entry["posts"] = entry["posts"] and (leg_name, side) in posts
-        entry["legs"].append(leg_name)
+        # THE FAR KERB, per leg: the parking lane hold_travel_lane_at_target marked there, or
+        # None where it hatched or left nothing. Kept per leg, because the way is split by it.
+        far = str(Side(side).other)
+        stalls = state.treatment_for(MarkedParking, LegSide(leg_name, far))
+        depth_ft = (round(stalls.depth_ft, 2)
+                    if stalls is not None and not stalls.curb_offset_ft else None)
+        way["legs"].append((leg_name, aligned, far if aligned else side, depth_ft))
     carrying = {lane.target.leg for lane in state.treatments_of(AddTwoWayBikeLane)}
-    out = [*_hatched_areas(model, state, network, carrying)]
-    # FAR-KERB PARKING IS NOT WRITTEN. The ladder sizes it per leg, and one OSM way carries
-    # several legs (way 27459436 carries broad_street_6..9): one parking tag for the way put a
-    # 7.7 ft stall on legs where the ladder had hatched for want of room. The wiki's answer
-    # (Street parking) is to split the way, or to map the lane as its own amenity=parking +
-    # parking=lane area with parking:<side>=separate on the street - not chosen yet.
-    stalls = sum(1 for zone in state.treatments_of(MarkedParking)
-                 if zone.target.leg in carrying and not zone.curb_offset_ft)
-    if stalls:
-        print(f"  {stalls} far-kerb parking lane(s) the ladder chose are NOT written - the far "
-              f"kerb's parking stays as OSM records it.")
-    for (way_id, osm_side), entry in sorted(by_way.items()):
-        key = f"cycleway:{osm_side}"
-        tags = {key: "track", f"{key}:oneway": "no", f"{key}:width": _feet(entry["width_ft"]),
-                f"{key}:buffer": _feet(entry["buffer_ft"]),
-                f"parking:{osm_side}:restriction": "no_parking"}
-        if entry["posts"]:
-            tags[f"{key}:separation:left"] = "flex_post"
-        out.append({"element": f"way/{way_id}", "tags": tags,
-                    "source": f"Proposal: Broad St two-way protected bikeway, the rung "
-                              f"BROAD_ST_TWO_WAY_BIKEWAY's ladder chose on "
-                              f"{', '.join(sorted(entry['legs']))} "
-                              f"(scripts/propose_bikeway_tags.py). Not a survey."})
+    new_ids = itertools.count(-1, -1)
+    out = [*_hatched_areas(model, state, network, carrying, new_ids)]
+    roads = {road["id"]: road for road in osm["roads"]
+             if len(road.get("node_ids") or []) == len(road.get("coords_wgs84") or [])}
+    splits = 0
+    for way_id, way in sorted(by_way.items()):
+        bikeway = {}
+        for osm_side, entry in sorted(way["sides"].items()):
+            key = f"cycleway:{osm_side}"
+            bikeway.update({key: "track", f"{key}:oneway": "no",
+                            f"{key}:width": _feet(entry["width_ft"]),
+                            f"{key}:buffer": _feet(entry["buffer_ft"]),
+                            f"parking:{osm_side}:restriction": "no_parking"})
+            if entry["posts"]:
+                bikeway[f"{key}:separation:left"] = "flex_post"
+        legs = ", ".join(sorted(name for name, *_ in way["legs"]))
+        source = (f"Proposal: Broad St two-way protected bikeway, the rung "
+                  f"BROAD_ST_TWO_WAY_BIKEWAY's ladder chose on {legs}, and the far kerb's parking "
+                  f"lane where it marked one (scripts/propose_bikeway_tags.py). Not a survey.")
+        road = roads[way_id]
+        spans = []
+        for leg_name, aligned, osm_far, depth_ft in way["legs"]:
+            span = _leg_span(model.legs[leg_name], aligned, road["node_ids"])
+            if span is not None:
+                spans.append((*span, (osm_far, depth_ft)))
+        pieces = _pieces(road["node_ids"], spans) if spans else [(road["node_ids"], None)]
+        for i, (nodes, answer) in enumerate(pieces):
+            parking = _parking_tags(*answer) if answer is not None else {}
+            if i == 0:
+                entry = {"element": f"way/{way_id}", "tags": {**bikeway, **parking},
+                         "source": source}
+                if len(pieces) > 1:
+                    entry["nodes"] = nodes        # restated, shortened: osmChange's split
+            else:
+                # A CREATED WAY CARRIES ITS WHOLE TAG SET, as in osmChange: OSM's own tags for
+                # the street, then what the proposal adds.
+                entry = {"element": f"way/{next(new_ids)}", "nodes": nodes,
+                         "tags": {**roads[way_id]["tags"], **bikeway, **parking},
+                         "source": f"{source} Split from way/{way_id} where the far kerb's "
+                                   f"parking changes (wiki: Street parking)."}
+                splits += 1
+            out.append(entry)
+    if splits:
+        print(f"  split {splits} piece(s) off their ways where the far kerb's parking changes.")
     return out
 
 
@@ -168,7 +235,7 @@ def main() -> None:
               "# Schema: src/sources/proposals.py.\n")
     path.write_text(header + yaml.safe_dump({"observations": entries}, sort_keys=False,
                                             allow_unicode=True, width=100))
-    print(f"wrote {path} ({len(entries)} way side(s))")
+    print(f"wrote {path} ({len(entries)} element(s))")
 
 
 if __name__ == "__main__":
