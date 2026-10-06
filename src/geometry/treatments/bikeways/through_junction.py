@@ -41,8 +41,22 @@ MIN_EXTENSION_GAP_FT = 6.0
 MIN_MARK_FRACTION = 0.5
 
 
+def _on_the_leg(approach: str, side: str) -> tuple[str, str, bool]:
+    """(leg, the leg's own side, whether the junction is at the leg's END) for an approach id
+    and a side seen from that approach - src/geometry/model/approach.py's two halves of a leg."""
+    from src.geometry.model.approach import End, leg_side, split_approach_id
+
+    leg_name, end = split_approach_id(approach)
+    return leg_name, leg_side(end, side), end is End.END
+
+
 def lane_end_face(ctx, leg_name: str, side: str):
     """Where this kerb's green STOPS, as (station_ft, inner_offset_ft, outer_offset_ft).
+
+    AT THE JUNCTION THE APPROACH FACES. `leg_name` may be an approach id (`<leg>:end`, with
+    `side` as that approach sees it): the green is the leg's own paint, so it is read off the
+    leg and the stop taken at the leg's far end. Stations and offsets come back in the LEG'S
+    frame either way, so the caller places points on the leg's own centreline.
 
     READ OFF THE PAINT, NOT REBUILT FROM THE SECTION, and that is the whole reason this is a
     function rather than four lines in the caller. The lane's edges are on one of two datums
@@ -65,6 +79,7 @@ def lane_end_face(ctx, leg_name: str, side: str):
     from src.geometry.markings import BIKE_LANE_SURFACE_KINDS
     from src.geometry.model import station_offset_many
 
+    leg_name, side, at_far_end = _on_the_leg(leg_name, side)
     centerline = ctx.state.legs[leg_name].centerline
     stations, offsets = [], []
     for piece in ctx.pieces:
@@ -81,8 +96,12 @@ def lane_end_face(ctx, leg_name: str, side: str):
     if not stations:
         return None
     stations, offsets = np.concatenate(stations), np.concatenate(offsets)
-    end_ft = float(stations.min())
-    near = offsets[stations <= end_ft + LANE_END_FACE_SAMPLE_FT]
+    if at_far_end:
+        end_ft = float(stations.max())
+        near = offsets[stations >= end_ft - LANE_END_FACE_SAMPLE_FT]
+    else:
+        end_ft = float(stations.min())
+        near = offsets[stations <= end_ft + LANE_END_FACE_SAMPLE_FT]
     if near.size < 2:
         return None
     # By MAGNITUDE, then carrying the sign: "inner" is the edge nearer the alignment and "outer"
@@ -141,7 +160,8 @@ class ExtendBikeLaneThroughJunction(Treatment):
         from src.geometry.model.corners import through_street_sides
 
         through = through_street_sides(state.legs)
-        for leg_name, side in self.target.ends:
+        for approach, approach_side in self.target.ends:
+            leg_name, side, _at_far_end = _on_the_leg(approach, approach_side)
             if state.treatment_for(AddBikeLane, LegSide(leg_name, side)) is None:
                 raise KeyError(
                     f"{leg_name} {side} has no bike lane, so there is nothing to extend across "
@@ -182,7 +202,7 @@ class ExtendBikeLaneThroughJunction(Treatment):
             if face is None:
                 return          # no lane on one end - see apply_to, and CorridorFacility's note
             station_ft, inner_ft, outer_ft = face
-            centerline = ctx.state.legs[leg_name].centerline
+            centerline = ctx.state.legs[_on_the_leg(leg_name, side)[0]].centerline
             ends.append((point_at(centerline, station_ft, inner_ft),
                           point_at(centerline, station_ft, outer_ft)))
             # HALF A STRIPE OUTSIDE THE GREEN, WHICH IS WHERE AN EDGE LINE GOES. lane_end_face

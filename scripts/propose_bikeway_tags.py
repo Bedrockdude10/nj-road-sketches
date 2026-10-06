@@ -135,12 +135,22 @@ def _pieces(node_ids: list[int], spans: list[tuple[int, int, object]]) -> list[t
     return [(node_ids[a:b + 1], group[2]) for (a, b), group in zip(itertools.pairwise(cuts), groups)]
 
 
-def _parking_tags(osm_side: str, depth_ft: float | None) -> dict:
-    """OSM's street-parking schema for a marked parallel lane `depth_ft` deep, or nothing."""
-    if depth_ft is None:
+def _to_the_inch(depth_ft: float) -> int:
+    """A stall depth in whole inches, rounded DOWN so the stall is never deeper than the ladder
+    sized it. Also what keeps two legs a hundredth of a foot apart from splitting a way - the
+    wiki's "avoid over-fragmenting the street line"."""
+    return int(depth_ft * 12 + 1e-9)
+
+
+def _parking_tags(osm_side: str, depth_in: int | None) -> dict:
+    """OSM's street-parking schema for a marked parallel lane `depth_in` inches deep (feet and
+    inches notation, which osm_width_ft reads), or nothing."""
+    if depth_in is None:
         return {}
+    feet, inches = divmod(depth_in, 12)
     return {f"parking:{osm_side}": "lane", f"parking:{osm_side}:orientation": "parallel",
-            f"parking:{osm_side}:markings": "yes", f"parking:{osm_side}:width": _feet(depth_ft)}
+            f"parking:{osm_side}:markings": "yes",
+            f"parking:{osm_side}:width": f"{feet}'{inches}\"" if inches else f"{feet}'"}
 
 
 def proposed_tags(area: str) -> list[dict]:
@@ -169,9 +179,9 @@ def proposed_tags(area: str) -> list[dict]:
         # None where it hatched or left nothing. Kept per leg, because the way is split by it.
         far = str(Side(side).other)
         stalls = state.treatment_for(MarkedParking, LegSide(leg_name, far))
-        depth_ft = (round(stalls.depth_ft, 2)
+        depth_in = (_to_the_inch(stalls.depth_ft)
                     if stalls is not None and not stalls.curb_offset_ft else None)
-        way["legs"].append((leg_name, aligned, far if aligned else side, depth_ft))
+        way["legs"].append((leg_name, aligned, far if aligned else side, depth_in))
     carrying = {lane.target.leg for lane in state.treatments_of(AddTwoWayBikeLane)}
     new_ids = itertools.count(-1, -1)
     out = [*_hatched_areas(model, state, network, carrying, new_ids)]
@@ -194,10 +204,10 @@ def proposed_tags(area: str) -> list[dict]:
                   f"lane where it marked one (scripts/propose_bikeway_tags.py). Not a survey.")
         road = roads[way_id]
         spans = []
-        for leg_name, aligned, osm_far, depth_ft in way["legs"]:
+        for leg_name, aligned, osm_far, depth_in in way["legs"]:
             span = _leg_span(model.legs[leg_name], aligned, road["node_ids"])
             if span is not None:
-                spans.append((*span, (osm_far, depth_ft)))
+                spans.append((*span, (osm_far, depth_in)))
         pieces = _pieces(road["node_ids"], spans) if spans else [(road["node_ids"], None)]
         for i, (nodes, answer) in enumerate(pieces):
             parking = _parking_tags(*answer) if answer is not None else {}

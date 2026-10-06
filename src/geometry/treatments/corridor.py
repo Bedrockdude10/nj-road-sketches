@@ -296,27 +296,44 @@ class CorridorFacility:
         ONLY BETWEEN LANES THAT WERE ACTUALLY PLACED. `carrying` is the approaches that took a
         section, not the ones the route passes through, and the difference is the junction where
         the corridor breaks - extending from a leg that refused every rung would paint a
-        continuous facility across the one place it stops. Below two there is nothing to join.
+        continuous facility across the one place it stops. Below two at a node there is nothing to
+        join there.
         """
-        if len(carrying) < 2:
-            return state
-        if len(carrying) > 2 and not quiet:
-            # A route crossing its own junction has two approaches. Three would mean a street
-            # meeting itself, and pairing them by hand is a guess about which two are opposite.
-            print(f"  NOTE: {self.road} has {len(carrying)} approaches carrying the facility at "
-                  f"this junction, and a lane extension joins a PAIR. Drawn between "
-                  f"{carrying[0][0]} and {carrying[1][0]}; check the others by eye.")
-        (leg_a, side_a), (leg_b, side_b) = carrying[0], carrying[1]
-        try:
-            return state.apply(ExtendBikeLaneThroughJunction(
-                AcrossTheJunction(leg_a, side_a, leg_b, side_b)))
-        except ValueError as no_gap:
-            # The facility's kerb is never opened here - the stem is on the far side, so the lane
-            # runs through unbroken and there is nothing to extend. Reported, not swallowed: "no
-            # crossbike here" is a fact about the junction.
-            if not quiet:
-                print(f"  NOTE: no lane extension across this junction - {no_gap}")
-            return state
+        # AT EACH JUNCTION, FROM OSM'S TOPOLOGY. A leg runs junction to junction, so the two
+        # approaches a crossbike joins are the ones whose ends share a node - the leg itself
+        # where its start is there, its `:end` view where its end is (model/approach.py). Pairing
+        # the first two legs in name order instead was right at a site, whose legs all start at
+        # the one junction, and in the world drew one "crossbike" down the whole length of a leg.
+        from src.geometry.model.approach import End, approach_id, leg_side, node_at
+
+        at_node: dict[int, list[tuple[str, str]]] = {}
+        for leg_name, side in carrying:
+            leg = state.legs[leg_name]
+            for end in End:
+                node = node_at(leg, end)
+                if node is not None:
+                    at_node.setdefault(node, []).append((approach_id(leg_name, end),
+                                                         leg_side(end, side)))
+        for node, meeting in sorted(at_node.items()):
+            if len(meeting) < 2:
+                continue        # the facility ends at this junction
+            if len(meeting) > 2 and not quiet:
+                # A route crossing its own junction has two approaches. Three would mean a street
+                # meeting itself, and pairing them by hand is a guess about which two are opposite.
+                print(f"  NOTE: {self.road} has {len(meeting)} approaches carrying the facility "
+                      f"at junction {node}, and a lane extension joins a PAIR. Drawn between "
+                      f"{meeting[0][0]} and {meeting[1][0]}; check the others by eye.")
+            (leg_a, side_a), (leg_b, side_b) = meeting[0], meeting[1]
+            try:
+                state = state.apply(ExtendBikeLaneThroughJunction(
+                    AcrossTheJunction(leg_a, side_a, leg_b, side_b)))
+            except ValueError as no_gap:
+                # The facility's kerb is never opened here - the stem is on the far side, so the
+                # lane runs through unbroken and there is nothing to extend. Reported, not
+                # swallowed: "no crossbike here" is a fact about the junction.
+                if not quiet:
+                    print(f"  NOTE: no lane extension across junction {node} - {no_gap}")
+        return state
 
     def _reach_on(self, state: DesignState, leg_name: str, side: str
                    ) -> tuple[float | None, str | None]:
