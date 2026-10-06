@@ -17,9 +17,9 @@ from src.geometry.model import (crosswalk_estimate_ft, leg_clearance_ft,
 from src.geometry.markings import EDGE_LINE_WIDTH_M, NARROW_LINE_WIDTH_M
 from src.geometry.targets import Everywhere, LegSide, LegTarget, Side
 from src.geometry.treatments import (CENTERLINE_IS_DASHED, VALID_CENTERLINE_STYLES,
-                                     AddBikeLane, DesignState, LaneNarrowing, MarkedParking,
-                                     ShiftCrosswalk, UpgradeCrosswalkMarkings,
-                                     carriageway_is_one_way, divider_shift_toward_ft)
+                                     AddBikeLane, DesignState, ShiftCrosswalk,
+                                     UpgradeCrosswalkMarkings, carriageway_is_one_way,
+                                     divider_shift_toward_ft, kerbside_paint_ft)
 
 # OSM crossing:markings values -> our 3 rendered styles. "lines" (two simple
 # transverse boundary lines) is the least visible; FHWA/NACTO guidance treats
@@ -151,13 +151,8 @@ def travel_lane_edge_ft(state: DesignState, leg_name: str, side: str) -> float |
     bike_lane = state.treatment_for(AddBikeLane, kerb)
     if bike_lane is not None:
         return bike_lane.section(state).offsets_from_centerline_ft()["travel_lane_edge_ft"]
-    narrowing = state.treatment_for(LaneNarrowing, kerb.leg_target)
-    if narrowing is not None and side in narrowing.sides:
-        return half_ft - narrowing.stripe_width_ft
-    parking = state.treatment_for(MarkedParking, kerb)
-    if parking is not None:
-        return half_ft - parking.curb_offset_ft - parking.depth_ft
-    return None
+    painted_ft = kerbside_paint_ft(state, leg_name, str(side))
+    return half_ft - painted_ft if painted_ft > 0 else None
 
 
 def entering_lane_width_ft(state: DesignState, leg_name: str) -> float | None:
