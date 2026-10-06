@@ -192,29 +192,9 @@ data/
 # polygons). Re-including the directory is enough; nothing else here matches its contents.
 !tests/fixtures/data/
 
-# Downloaded/derived caches under output/. .textures is 138 MB of Poly Haven CC0
-# textures and glTF models fetched by src/render/theme.py:build_default_theme(), and
-# .cache is Overpass responses - both are re-downloaded on demand and neither belongs
-# in the repo. The renders and geometry JSON in output/<site>/ ARE committed; these two
-# directories are not.
-output/.textures/
-output/.cache/
-
-# Everything the scripts write under output/: rendered PNGs and the geometry_*.json /
-# slice *_3d.json exports. All regenerable (scripts/build_all.py, export_all_scenarios.py,
-# render_slice.py), and ~38 MB of binary/JSON churn was bloating the repo. Rebuilding the
-# JSON needs the licensed data/ download, so a clone without it has none until it does.
-output/**/*.png
-output/*.png
-output/**/geometry_*.json
-output/slices/*_3d.json
+# Everything the scripts write: renders, .blend scenes, world and geometry JSON, cameras, and
+# the downloaded caches (.textures, Poly Haven CC0; .cache, Overpass/OSM pulls) and verify.py's
+# before/after trees. All regenerable, and all of it churns on every run.
+output/
 
 .DS_Store
-.DS_Store
-output/.DS_Store
-output/.DS_Store
-.DS_Store
-
-# The before/after export trees and the known-failure baseline scripts/verify.py keeps.
-# Derived, per-machine, and rewritten on every run - like .cache and .textures above.
-output/.verify/

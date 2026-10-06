@@ -155,7 +155,8 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
     out = {name: list(items) for name, items in layers.items()}
     # A way clipped at the snapshot's edge has fewer coords than node ids, so it places nothing.
     coords = {node_id: list(coord) for items in out.values() for way in items
-              if way.get("node_ids") and len(way["node_ids"]) == len(way.get("coords_wgs84") or ())
+              if isinstance(way, dict) and way.get("node_ids")
+              and len(way["node_ids"]) == len(way.get("coords_wgs84") or ())
               for node_id, coord in zip(way["node_ids"], way["coords_wgs84"], strict=True)}
     coords |= {node.id: [node.lon, node.lat] for node in change.nodes}
 
@@ -163,10 +164,12 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
         if change_way.action != "create":
             # A modify is the way's whole new self, as in osmChange: drop the old one everywhere
             # and route the new one, since its new tags may sort it into other layers.
-            held = sum(way.get("id") == change_way.id for items in out.values() for way in items)
+            held = sum(isinstance(way, dict) and way.get("id") == change_way.id
+                       for items in out.values() for way in items)
             if not held:
                 raise ValueError(f"{change_way.action} way/{change_way.id}: not in this area")
-            out = {name: [way for way in items if way.get("id") != change_way.id]
+            out = {name: [way for way in items
+                          if not isinstance(way, dict) or way.get("id") != change_way.id]
                    for name, items in out.items()}
         if change_way.action == "delete":
             continue

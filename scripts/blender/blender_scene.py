@@ -740,6 +740,24 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
                 surveyed.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     surveyed.build()
 
+    # A CYCLE CROSSING THROUGH A JUNCTION, at the same layers as the bikeway it carries on: green
+    # half a clearance under the stripes, its dotted edges and divider at the stripe layer. It
+    # never meets a crosswalk's bars - the reader cuts every crosswalk's band out of other paint.
+    crossing_green = MeshBatch("cycle_crossing_surface", bike_surface_mat)
+    for ring in data.get("cycle_crossing_surface_polygons", []):
+        crossing_green.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z - MARKING_CLEARANCE_M)
+    crossing_green.build()
+    crossing_white = MeshBatch("cycle_crossing_edges", marking_mat)
+    for line in data.get("cycle_crossing_edge_lines", []):
+        for ring in polyline_rings(line, 0.25):
+            crossing_white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
+    crossing_white.build()
+    crossing_yellow = MeshBatch("cycle_crossing_divider", centerline_mat)
+    for line in data.get("cycle_crossing_divider_lines", []):
+        for ring in polyline_rings(line, CENTERLINE_WIDTH_M):
+            crossing_yellow.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
+    crossing_yellow.build()
+
     for island in data.get("refuge_islands", []):
         extrude_polygon(f"refuge_{island['name']}", island["coords"], island.get("height_m", 0.15), refuge_mat)
 

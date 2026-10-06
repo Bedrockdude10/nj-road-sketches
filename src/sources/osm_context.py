@@ -325,6 +325,11 @@ def is_restriction_marking(tags: dict) -> bool:
     return tags.get("road_marking") == "restriction"
 
 
+def is_road_area(tags: dict) -> bool:
+    """`area:highway=*` - a road's surface mapped as its outline, drawn along its kerbs."""
+    return "area:highway" in tags
+
+
 def is_road(tags: dict) -> bool:
     return "highway" in tags
 
@@ -362,7 +367,7 @@ WAY_LAYERS: tuple[tuple[str, Callable[[dict], bool], int], ...] = (
     ("sidewalks", is_sidewalk, 2), ("driveways", is_driveway, 2),
     ("parking_aisles", is_parking_aisle, 2), ("parking_lots", is_parking_lot, 4),
     ("kerbs", is_kerb, 2), ("roads", is_road, 2), ("stop_lines", is_stop_line, 2),
-    ("road_markings", is_restriction_marking, 4))
+    ("road_markings", is_restriction_marking, 4), ("road_areas", is_road_area, 4))
 NODE_LAYERS: tuple[tuple[str, Callable[[dict], bool]], ...] = (
     ("traffic_control", is_traffic_control), ("street_furniture", is_street_furniture),
     ("kerbs", is_kerb))
@@ -395,7 +400,7 @@ class UnknownAreaError(KeyError):
 #: Every layer `osm_layers` returns. The names are the ones consumers already know them by.
 OSM_LAYERS = ("buildings", "crossings", "sidewalks", "driveways", "parking_aisles",
               "parking_lots", "traffic_control", "street_furniture", "kerbs", "roads",
-              "stop_lines", "road_markings", "municipalities")
+              "stop_lines", "road_markings", "road_areas", "municipalities")
 
 _AREA_LAYERS_MEMO: dict[str, tuple] = {}
 
