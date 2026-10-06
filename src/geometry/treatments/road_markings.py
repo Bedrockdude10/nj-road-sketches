@@ -3,8 +3,8 @@
 Wiki Key:road_marking (approved): `restriction` is an AREAL marking, "Neutral areas or
 restriction markings, like gore chevron or no-parking markings", mapped as a closed way. The
 way is the painted area, as a `road_marking=stop_line` way is the painted bar, so nothing here
-sizes anything: the outline is painted half a stripe inside the way and the chevron fill inside
-that. A kerb's hatching beside a travel lane is one of these, existing or proposed alike - a
+sizes anything: the chevron fill covers the way to the kerb, and the edge line runs half a
+stripe inside it along the road-facing edges only. A kerb's hatching beside a travel lane is one of these, existing or proposed alike - a
 proposal adds it as a new way (src/sources/osm_change.py) and this reads it.
 """
 from __future__ import annotations
