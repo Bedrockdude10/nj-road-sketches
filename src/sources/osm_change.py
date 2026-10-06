@@ -14,6 +14,7 @@ refused, as an observation with no `source` is.
 """
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -50,16 +51,131 @@ def proposal_path(area: str, scenario: str) -> Path:
     return PROPOSALS_DIR / area / f"{scenario}.osc"
 
 
+_ACTIONS = ("create", "modify", "delete")
+
+
+def _canonical(change: OsmChange) -> OsmChange:
+    """Nodes -1, -2...; creates by id descending, then modifies, then deletes, by id ascending -
+    so a change written and loaded again is the same change."""
+    def order(way: WayChange) -> tuple[int, int]:
+        return _ACTIONS.index(way.action), -way.id if way.action == "create" else way.id
+
+    return OsmChange(tuple(sorted(change.nodes, key=lambda node: -node.id)),
+                     tuple(sorted(change.ways, key=order)))
+
+
+def _id(element: ET.Element) -> int:
+    if element.get("id") is None:
+        raise ValueError(f"<{element.tag}> with no id")
+    return int(element.get("id"))
+
+
+def _tags(element: ET.Element) -> dict[str, str]:
+    return {tag.get("k"): tag.get("v") for tag in element.findall("tag")}
+
+
+def _way(element: ET.Element, action: str) -> WayChange:
+    way_id = _id(element)
+    if (way_id < 0) != (action == "create"):
+        raise ValueError(f"{action} way/{way_id}: a created element has a negative id, an "
+                         f"existing one a positive id")
+    if action == "delete":
+        return WayChange(way_id, "delete", (), {})
+    node_ids, tags = tuple(int(nd.get("ref")) for nd in element.findall("nd")), _tags(element)
+    if len(node_ids) < 2:
+        raise ValueError(f"{action} way/{way_id}: a way has at least 2 nodes")
+    if not tags.get("note"):
+        raise ValueError(f"{action} way/{way_id}: no note saying where the proposal came from")
+    return WayChange(way_id, action, node_ids, tags)
+
+
 def load_change(path: Path) -> OsmChange:
     """The change at `path` in canonical order, or an empty change where there is no file."""
-    raise NotImplementedError("Phase 1 limb A")
+    if not path.exists():
+        return OsmChange((), ())
+    root = ET.parse(path).getroot()
+    if root.tag != "osmChange":
+        raise ValueError(f"{path}: root is <{root.tag}>, not <osmChange>")
+    nodes, ways = [], []
+    for section in root:
+        if section.tag not in _ACTIONS:
+            raise ValueError(f"{path}: unsupported <{section.tag}>")
+        for element in section:
+            if element.tag == "node" and section.tag == "create":
+                if _id(element) >= 0:
+                    raise ValueError(f"create node/{_id(element)}: a created node has a negative id")
+                nodes.append(NewNode(_id(element), float(element.get("lon")),
+                                     float(element.get("lat")), _tags(element)))
+            elif element.tag == "way":
+                ways.append(_way(element, section.tag))
+            else:
+                raise ValueError(f"{path}: unsupported <{element.tag}> in <{section.tag}>")
+    return _canonical(OsmChange(tuple(nodes), tuple(ways)))
+
+
+def _tag_children(parent: ET.Element, tags: dict[str, str]) -> None:
+    for key in sorted(tags):
+        ET.SubElement(parent, "tag", k=key, v=tags[key])
 
 
 def write_change(change: OsmChange, path: Path) -> None:
     """`change` as an osmChange file, in canonical order."""
-    raise NotImplementedError("Phase 1 limb A")
+    change = _canonical(change)
+    root = ET.Element("osmChange", version="0.6", generator="nj-road-sketches")
+    for action in _ACTIONS:
+        nodes = change.nodes if action == "create" else ()
+        ways = [way for way in change.ways if way.action == action]
+        if not nodes and not ways:
+            continue
+        section = ET.SubElement(root, action)
+        for node in nodes:
+            _tag_children(ET.SubElement(section, "node", id=str(node.id), lat=f"{node.lat:.7f}",
+                                        lon=f"{node.lon:.7f}"), node.tags)
+        for way in ways:
+            element = ET.SubElement(section, "way", id=str(way.id))
+            for node_id in way.node_ids:
+                ET.SubElement(element, "nd", ref=str(node_id))
+            _tag_children(element, way.tags)
+    tree = ET.ElementTree(root)
+    ET.indent(tree, space="  ")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(path, encoding="utf-8", xml_declaration=True)
 
 
 def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, list[dict]]:
     """`layers` (osm_layers' shape) with `change` applied. Pure: the input is never mutated."""
-    raise NotImplementedError("Phase 1 limb A")
+    from src.sources.osm_context import WAY_LAYERS, height_from_tags
+
+    out = {name: list(items) for name, items in layers.items()}
+    # A way clipped at the snapshot's edge has fewer coords than node ids, so it places nothing.
+    coords = {node_id: list(coord) for items in out.values() for way in items
+              if way.get("node_ids") and len(way["node_ids"]) == len(way.get("coords_wgs84") or ())
+              for node_id, coord in zip(way["node_ids"], way["coords_wgs84"], strict=True)}
+    coords |= {node.id: [node.lon, node.lat] for node in change.nodes}
+
+    for change_way in _canonical(change).ways:
+        if change_way.action != "create":
+            # A modify is the way's whole new self, as in osmChange: drop the old one everywhere
+            # and route the new one, since its new tags may sort it into other layers.
+            held = sum(way.get("id") == change_way.id for items in out.values() for way in items)
+            if not held:
+                raise ValueError(f"{change_way.action} way/{change_way.id}: not in this area")
+            out = {name: [way for way in items if way.get("id") != change_way.id]
+                   for name, items in out.items()}
+        if change_way.action == "delete":
+            continue
+        missing = [node_id for node_id in change_way.node_ids if node_id not in coords]
+        if missing:
+            raise ValueError(f"{change_way.action} way/{change_way.id}: nodes {missing} are not "
+                             f"in this area or the change")
+        way = {"coords_wgs84": [coords[node_id] for node_id in change_way.node_ids],
+               "tags": dict(change_way.tags), "id": change_way.id,
+               "node_ids": list(change_way.node_ids)}
+        for name, predicate, min_coords in WAY_LAYERS:
+            if predicate(way["tags"]) and len(way["node_ids"]) >= min_coords:
+                entry = dict(way)
+                if name == "buildings":
+                    recorded = height_from_tags(way["tags"])
+                    entry["height_m"], entry["height_source"] = recorded if recorded else (None, None)
+                out.setdefault(name, []).append(entry)
+    return out

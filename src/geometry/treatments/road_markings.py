@@ -5,7 +5,7 @@ restriction markings, like gore chevron or no-parking markings", mapped as a clo
 way is the painted area, as a `road_marking=stop_line` way is the painted bar, so nothing here
 sizes anything: the outline is painted half a stripe inside the way and the chevron fill inside
 that. A kerb's hatching beside a travel lane is one of these, existing or proposed alike - a
-proposal adds it as a new way (src/sources/proposals.py) and this reads it.
+proposal adds it as a new way (src/sources/osm_change.py) and this reads it.
 """
 from __future__ import annotations
 

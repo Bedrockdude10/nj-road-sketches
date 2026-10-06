@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from shapely.geometry import Point, Polygon
@@ -353,6 +354,20 @@ def is_kerb(tags: dict) -> bool:
     return tags.get("barrier") == "kerb"
 
 
+# THE ONE TABLE of which layer an OSM element lands in: (layer, predicate, least coords) for
+# ways, (layer, predicate) for nodes. `osm_layers` sorts a snapshot by it and `apply_change`
+# routes a proposed way by it, so a proposal cannot land somewhere OSM's own data would not.
+WAY_LAYERS: tuple[tuple[str, Callable[[dict], bool], int], ...] = (
+    ("buildings", is_building, 3), ("crossings", is_crossing_way, 2),
+    ("sidewalks", is_sidewalk, 2), ("driveways", is_driveway, 2),
+    ("parking_aisles", is_parking_aisle, 2), ("parking_lots", is_parking_lot, 4),
+    ("kerbs", is_kerb, 2), ("roads", is_road, 2), ("stop_lines", is_stop_line, 2),
+    ("road_markings", is_restriction_marking, 4))
+NODE_LAYERS: tuple[tuple[str, Callable[[dict], bool]], ...] = (
+    ("traffic_control", is_traffic_control), ("street_furniture", is_street_furniture),
+    ("kerbs", is_kerb))
+
+
 def height_from_tags(tags: dict) -> tuple[float, str] | None:
     """(height in metres, which tag said so) if a mapper recorded one, else None.
 
@@ -427,28 +442,16 @@ def osm_layers(area: str) -> dict[str, list]:
         return [{"lon": n["lon"], "lat": n["lat"], "tags": n.get("tags") or {}, "id": n["id"]}
                 for n in nodes if predicate(n.get("tags") or {})]
 
-    buildings = ways_where(is_building, 3)
-    for building in buildings:
+    layers = {name: ways_where(predicate, min_coords) for name, predicate, min_coords in WAY_LAYERS}
+    for name, predicate in NODE_LAYERS:
+        # A kerb is mapped as a way or as a node, so its layer holds both; a node has no coords.
+        found = nodes_where(predicate)
+        layers[name] = ([*layers[name], *({"coords_wgs84": None, **node} for node in found)]
+                        if name in layers else found)
+    for building in layers["buildings"]:
         recorded = height_from_tags(building["tags"])
         building["height_m"], building["height_source"] = recorded if recorded else (None, None)
-    kerbs = ways_where(is_kerb, 2)
-    kerbs += [{"coords_wgs84": None, **n} for n in nodes_where(is_kerb)]
-
-    layers = {
-        "buildings": buildings,
-        "crossings": ways_where(is_crossing_way, 2),
-        "sidewalks": ways_where(is_sidewalk, 2),
-        "driveways": ways_where(is_driveway, 2),
-        "parking_aisles": ways_where(is_parking_aisle, 2),
-        "parking_lots": ways_where(is_parking_lot, 4),
-        "traffic_control": nodes_where(is_traffic_control),
-        "street_furniture": nodes_where(is_street_furniture),
-        "kerbs": kerbs,
-        "roads": ways_where(is_road, 2),
-        "stop_lines": ways_where(is_stop_line, 2),
-        "road_markings": ways_where(is_restriction_marking, 4),
-        "municipalities": _closed_municipal_rings(snapshot),
-    }
+    layers["municipalities"] = _closed_municipal_rings(snapshot)
     _AREA_LAYERS_MEMO[area] = (raw, layers)
     return layers
 

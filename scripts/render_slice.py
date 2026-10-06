@@ -6,8 +6,8 @@
 
 A "site" here is a window onto the borough document, so a drawing is a crop plus a decision:
 `slice_design` turns the crop into the (model, state) pair this project's renderers already
-take, a scenario's proposal is OSM tags merged onto the ways it changes
-(src/sources/proposals.py), and `plot_design_state` and `export_scenario` draw it. Nothing about the geometry is computed here - if a marking is
+take, a scenario's proposal is an osmChange applied to the ways it changes
+(src/sources/osm_change.py), and `plot_design_state` and `export_scenario` draw it. Nothing about the geometry is computed here - if a marking is
 missing from the picture it is missing from the document or from the treatment, which is the
 property that makes the two impossible to disagree.
 """
@@ -33,7 +33,7 @@ from src.geometry.treatments import existing_conditions
 from src.sources.osm_context import (height_from_tags, is_kerb, is_street_furniture,
                                      is_traffic_control)
 from src.render.export import export_scenario
-from src.sources.proposals import load_proposal, with_proposal
+from src.sources.osm_change import apply_change, load_change, proposal_path
 from src.render.frame import Frame
 from src.render.plan_view import plot_design_state
 
@@ -194,9 +194,9 @@ def design_for(features: gpd.GeoDataFrame, area: str, scenario: str = "two_way_b
     The baseline is `existing_conditions`, the same state every site pipeline labels "Existing
     Conditions", so "existing" here means what it means everywhere else in this repo.
     """
-    # A PROPOSAL IS OSM TAGS (src/sources/proposals.py), merged in before the model is built, so
+    # A PROPOSAL IS AN OSMCHANGE (src/sources/osm_change.py), applied before the model is built, so
     # the street it proposes is drawn by the code that draws the street OSM records.
-    osm = with_proposal(slice_context(features), load_proposal(area, scenario))
+    osm = apply_change(slice_context(features), load_change(proposal_path(area, scenario)))
     model, _ = slice_design(features, osm=osm, osm_area=area)
     state = SCENARIOS[scenario](existing_conditions(model), model, features)
     return model, state, slice_pavement(features, state.corner_fillets, state.legs, model.osm)
