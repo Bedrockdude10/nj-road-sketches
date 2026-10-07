@@ -26,14 +26,21 @@ The governing law for every no-parking setback drawn here. NJ has no statute cal
 "daylighting"; it gets there through the ordinary parking prohibitions.
 
 Encoded in [`src/geometry/daylighting.py`](src/geometry/daylighting.py), whose module docstring
-is the long-form version of this section. The OSM wrapper applies clause (e)'s two arms as
-`NO_STANDING_FT` in [`src/osm_osc.py`](src/osm_osc.py): each leg split at the further arm and the
-piece tagged `parking:<side>:restriction=no_standing` + `:reason=junction`. Its crosswalk arm reads
-mapped crossings only, so where none is mapped the side-line arm stands in for it (a shorter zone).
-The daylighting proposal (`two_way_bikeway(..., kerb_extensions=True)`) takes the bulbout rows'
-10 ft, `NO_STANDING_WITH_EXTENSION_FT`, for a painted extension edged in flexible posts. **Whether
-paint and posts are a curb extension "constructed" in the statute's sense is not established**:
-the Borough's engineer or attorney has to say so before that proposal's extra stalls are real.
+is the long-form version of this section. The OSM wrapper applies clause (e)'s two arms as `NO_STANDING_FT` in
+[`src/osm_osc.py`](src/osm_osc.py) (`_datums`), kerb by kerb: the crosswalk's side line is where
+the crossing way's band (its `width`) meets that kerb's mapped `barrier=kerb`, so a skewed
+crosswalk is measured where it actually meets the kerb; the side-line arm is the cross street's
+kerb line. Each leg is split at the further arm plus the setback and the piece tagged
+`parking:<side>:restriction=no_standing` + `:reason=junction`. Its crosswalk arm reads mapped
+crossings only, so where none is mapped the side-line arm stands in for it (a shorter zone).
+The 10 ft bulbout rows (`NO_STANDING_WITH_EXTENSION_FT`) apply on a kerb whose crosswalk node
+carries `crossing:kerb_extension` (wiki, in use); the daylighting proposal tags every junction
+crosswalk `both`, maps each extension as a `road_marking=restriction` + `pattern=stripes` area
+(wiki Key:road_marking, approved) from where the crosswalk meets the kerb out the 10 ft, with
+`barrier=bollard` + `bollard=flexible` nodes in it, and lifts the kerb restrictions OSM records
+with no `:restriction:reason`. **Whether paint and posts are a
+curb extension "constructed" in the statute's sense is not established**: the Borough's engineer
+or attorney has to say so before that proposal's extra stalls are real.
 
 **R.S. 39:4-138**, as amended by P.L. 2009 c.257 — parking prohibited: *(as cited)*
 
@@ -486,7 +493,11 @@ crosswalk and the manual has no case for a box at a *jurisdictional* terminus, w
 crossing to sit beside and the ground past it is another town's. We put the box in the last
 `TURN_BOX_LENGTH_FT` of borough street — inside the line, never past it — which is what
 `src/geometry/treatments/bikeways/terminus.py:turn_box_span_ft` and `checks.PaintInsideTheMunicipality`
-enforce. Second, 9B.18(04)'s advance-plus-at-the-intersection pair is conditioned on riders being
+enforce. The OSM wrapper (`src/osm_osc.py:_turn_boxes`) puts the box over the track's last
+`TURN_BOX_LENGTH_FT` wherever the track stops, as a closed way `area:highway=cycleway` +
+`cycleway=two_stage_box` + `surface:colour=green`. OSM has no approved tag for the box: the value is
+from the 2020 draft Proposal:Two-stage bicycle turn, whose main model - a `type=restriction:bicycle`
+relation for the movement - the osmChange writer cannot yet express. Second, 9B.18(04)'s advance-plus-at-the-intersection pair is conditioned on riders being
 *required* to use the box; they are not required here, so one R9-23b at the box's near edge is what
 is drawn (¶05: near side), with the W9-5 as the only advance plate.
 
@@ -1200,7 +1211,7 @@ leads into and out of it, along which the reader interpolates the layout (`src/o
 | taper length for a lateral shift, > 40 mph | L = W·S | `taper_rate` | MUTCD (as cited) |
 | speed where `maxspeed` is not tagged | 25 mph | `DEFAULT_MPH` | N.J.S.A. 39:4-98, residence / business district (as cited) |
 | the order a too-narrow section gives in | buffer, track, parking, lanes | `_narrowed` | **Local** - Danny, 2026-10-07 |
-| how far the buffer gives | 3 ft → 2 ft | `MIN_BUFFER_FT` | **Local** - Danny, 2026-10-07 |
+| how far the buffer gives | 3 ft → 2 ft | `MIN_BUFFER_FT` | **Local** - Danny, 2026-10-07; also at block level (`_design`), so a block 2 in short of the 8 ft rung keeps its track - Danny, 2026-10-07 |
 | how far the track gives | 10 ft → 8 ft | `CONSTRAINED_TRACK_FT` | the old design ladder's constrained rung |
 
 ---
@@ -1221,9 +1232,9 @@ Listed so nobody goes looking for a standard behind them.
 | `TRACED_SECTION_START/END_FT` | 35 / 130 ft | `intersection.py` | the window a leg's *width* is a fact about |
 | `CROSSWALK_OFFSET_FROM_KERB_FT` | 8.3 ft | `model/context.py` | **not the statute** — measured, see below |
 | `MAX_CROSSWALK_FROM_MOUTH_FT` | 25 ft | `cross_streets.py` | how far outside a mouth a traced crossing is still that junction's |
-| `BICYCLE_LENGTH_FT` | 6 ft | `bikeways/terminus.py` | a bicycle, for sizing a queue — MUTCD 9E.11(10) gives no box dimension at all |
-| `TURN_BOX_QUEUE_BICYCLES` | 2 | `bikeways/terminus.py` | how deep the queue is allowed to get before its back is level with moving traffic — 9E.11(10) factor two, as a number |
-| `TURN_BOX_LENGTH_FT` | 12 ft | `bikeways/terminus.py` | the product of the two above, not a figure anyone publishes |
+| `BICYCLE_LENGTH_FT` | 6 ft | `bikeways/terminus.py`, `src/osm_osc.py` | a bicycle, for sizing a queue — MUTCD 9E.11(10) gives no box dimension at all |
+| `TURN_BOX_QUEUE_BICYCLES` | 2 | `bikeways/terminus.py`, `src/osm_osc.py` | how deep the queue is allowed to get before its back is level with moving traffic — 9E.11(10) factor two, as a number |
+| `TURN_BOX_LENGTH_FT` | 12 ft | `bikeways/terminus.py`, `src/osm_osc.py` | the product of the two above, not a figure anyone publishes |
 | `SHARROW_INTERVAL_FT` | 150 ft | `bikeways/terminus.py` | the middle of MUTCD 9E.09(09)'s permitted 50–250 ft band, rather than either end of it |
 | `BIKE_LANE_ENDS_ADVANCE_FT` | 100 ft | `bikeways/terminus.py` | how far "in advance of" is for the W9-5 — 9C.07(01) requires the sign and gives no distance; ≈2 s of reading at 25 mph, rounded up |
 | `BOUNDARY_CONTEXT_RADIUS_M` | 130 m | `intersection/municipality.py` | not a design figure — the window the admin_level=8 boundary is looked for in, the same base every street-following layer uses |

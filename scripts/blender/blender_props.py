@@ -83,10 +83,10 @@ RRFB_POST_RADIUS_M = 0.05          # mirrored in plan - see the block above
 RRFB_PLATE_THICKNESS_M = 0.03
 RRFB_PLATE_WIDTH_M = 0.4
 
-# Plastic flex-post delineator/bollard: real MUTCD/channelizer safety orange, banded with
-# white retroreflective tape. No CC0 bollard model was found, so this is the same
-# "procedural, but with real colours and dimensions" approach as the rest of this file.
-BOLLARD_SAFETY_ORANGE = (0.85, 0.28, 0.03)
+# Plastic flex-post delineator/bollard: white (Danny, 2026-10-07), banded with white
+# retroreflective tape. No CC0 bollard model was found, so this is the same "procedural, but with
+# real colours and dimensions" approach as the rest of this file.
+BOLLARD_POST_WHITE = (0.92, 0.92, 0.90)
 BOLLARD_REFLECTIVE_WHITE = (0.96, 0.96, 0.94)
 # 42 in. SPECIFIED, not derived - the height asked for. Flex posts are sold in 28, 36 and
 # 48 in as well; 42 in is a common daylighting/bike-lane height and is tall enough to sit in
@@ -398,8 +398,8 @@ def bollard_band_centres_m() -> list[float]:
 
 
 def add_bollard(name: str, position: tuple):
-    """A single plastic flex-post delineator: a safety-orange post banded with white
-    retroreflective tape.
+    """A single plastic flex-post delineator: a white post banded with white retroreflective
+    tape.
 
     Placement (which leg, spacing, where along the daylight zone) is decided upstream in
     src/render/props.py - heading is irrelevant for a rotationally-symmetric post, so unlike
@@ -413,7 +413,7 @@ def add_bollard(name: str, position: tuple):
     post = prims.add_cylinder(radius=BOLLARD_RADIUS_M, depth=BOLLARD_HEIGHT_M,
                                location=(x, y, BOLLARD_HEIGHT_M / 2))
     post.name = f"{name}_post"
-    post.data.materials.append(blender_materials.shared_material(f"{name}_post_mat", BOLLARD_SAFETY_ORANGE, roughness=0.5))
+    post.data.materials.append(blender_materials.shared_material(f"{name}_post_mat", BOLLARD_POST_WHITE, roughness=0.5))
 
     band_mat = make_retroreflective_material(f"{name}_band_mat", BOLLARD_REFLECTIVE_WHITE)
     for i, band_z in enumerate(bollard_band_centres_m()):

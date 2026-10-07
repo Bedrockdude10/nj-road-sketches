@@ -8,7 +8,8 @@ layers `osm_layers` returns, routing every created or modified way through the s
 `osm_layers` sorts OSM by, so a proposed scenario is drawn by exactly the code that draws the
 street as OSM records it. Nothing downstream knows an element came from a proposal.
 
-Supported: <create> node and way, <modify> way, <delete> way. Every created or modified way
+Supported: <create> node (a vertex, or with tags a feature of its own) and way, <modify> node
+(moved, or retagged) and way, <delete> way. Every created or modified way
 carries a `note` (OSM's Key:note) saying where it came from - a proposal with no provenance is
 refused, as an observation with no `source` is.
 """
@@ -165,18 +166,41 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
     # A moved node moves everything that uses it - every way through it the change does not itself
     # rewrite, and the node itself where a layer holds it (a kerb, a signal) - so nothing joined to
     # a re-centred street is left behind at the old spot.
+    from src.sources.osm_context import NODE_LAYERS
+
+    def route_node(node: NewNode) -> None:
+        """A node feature into each node layer its tags belong in, as osm_layers sorts OSM's."""
+        entry = {"lon": node.lon, "lat": node.lat, "tags": dict(node.tags), "id": node.id}
+        for name, predicate in NODE_LAYERS:
+            if predicate(node.tags):
+                mixed = any(isinstance(i, dict) and "coords_wgs84" in i for i in out.get(name, []))
+                out.setdefault(name, []).append({"coords_wgs84": None, **entry} if mixed else entry)
+
     moved = {node.id: node for node in change.nodes if node.id > 0}
     if moved:
+
         def placed(item):
             if not isinstance(item, dict):
                 return item
             ids = item.get("node_ids") or []
             if ids and len(ids) == len(item.get("coords_wgs84") or ()) and moved.keys() & set(ids):
                 return {**item, "coords_wgs84": [coords[node_id] for node_id in ids]}
-            if item.get("id") in moved and "lon" in item and not item.get("coords_wgs84"):
-                return {**item, "lon": moved[item["id"]].lon, "lat": moved[item["id"]].lat}
             return item
-        out = {name: [placed(item) for item in items] for name, items in out.items()}
+
+        def a_node(item) -> bool:
+            return isinstance(item, dict) and "lon" in item and not item.get("coords_wgs84")
+
+        # A modified node is its whole new self, as a modified way is: dropped from every node
+        # layer, then routed by its new tags - a crossing node given `crossing:kerb_extension`, or
+        # a node that only now becomes `highway=crossing`, lands where OSM's own would.
+        out = {name: [placed(item) for item in items if not (a_node(item) and item["id"] in moved)]
+               for name, items in out.items()}
+        for node in moved.values():
+            route_node(node)
+    # A created node with tags is a feature in its own right - a bollard, say - not only a vertex.
+    for node in change.nodes:
+        if node.id < 0 and node.tags:
+            route_node(node)
 
     for change_way in _canonical(change).ways:
         if change_way.action != "create":

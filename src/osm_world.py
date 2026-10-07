@@ -126,6 +126,12 @@ BOLLARD_SPACING_M = 8 * FT_TO_M   # flex posts down a buffer's centre, as the ol
 # A conflict area's dotted line, and the green skip-paint that follows its pattern: 2 ft dashes,
 # 2 ft gaps (MUTCD 3B.08 dotted lines, IA-14 green colored pavement - as cited).
 CROSSBIKE_DASH_M = 2 * FT_TO_M
+# An angled stall, N.J.A.C. 5:21-4.14 (STANDARDS.md 1a): 9 ft across, 18 ft along, in its own frame.
+# OSM has no key for a diagonal stall's angle, so `orientation=diagonal` is drawn at one: 60 degrees
+# from the kerb, the angle observed on Grand Central Ave (Danny, 2026-09-10) and 1a's worked row.
+STALL_WIDTH_M, STALL_BODY_M, DIAGONAL_DEG = 9 * FT_TO_M, 18 * FT_TO_M, 60.0
+# A parallel stall along the kerb (STANDARDS.md 3), where a marked lane gives no capacity.
+PARALLEL_STALL_M = 20 * FT_TO_M
 # A bicycle symbol's / arrow's painted footprint - schematic, as the old pipeline drew them
 # (MUTCD 9E.11(05) names the markings, not a size).
 SYMBOL_LENGTH_M, SYMBOL_WIDTH_M = 5.5 * FT_TO_M, 2.4 * FT_TO_M
@@ -494,6 +500,9 @@ class _Reader:
                     for part in _polygons(band.intersection(own) if own is not None else band):
                         self.hatched.append((part, tags.get("name")))
             edge = inner
+        parked = parking and (tags.get(f"parking:{side}") or tags.get("parking:both")) == "lane"
+        if parked and _has_cycleway(tags, side) and parking_at_the_kerb(tags, side):
+            edge, parked = self.parking_lane(tags, side, stations, edge), False
         if _has_cycleway(tags, side):
             inner = edge - self.eased(tags, f"cycleway:{side}:width", "cycleway", stations)
             green = tags.get(f"cycleway:{side}:surface:colour") == "green"
@@ -528,23 +537,38 @@ class _Reader:
                 edge = edge - buffer
                 buffer_line = LineString(stations.line(sign * edge))
                 self.out["bike_lane_edge_lines"] += _dotted(buffer_line) if crossed else _lines(buffer_line)
-        if parking and (tags.get(f"parking:{side}") or tags.get("parking:both")) == "lane":
-            outer, edge = edge, edge - self.eased(tags, f"parking:{side}:width", "parking", stations)
-            self.out["parking_edge_lines"].append(stations.line(sign * edge))
-            self.stalls(tags, side, stations, sign * edge, sign * outer)
+        if parked:
+            edge = self.parking_lane(tags, side, stations, edge)
+        return edge
+
+    def parking_lane(self, tags: dict, side: str, stations: Stations, edge: np.ndarray) -> np.ndarray:
+        """A parking lane from `edge` inward - as deep as parking_depth_m says - its inner edge
+        line and its stalls; return its inner edge."""
+        sign = 1 if side == "left" else -1
+        depth = parking_depth_m(tags, side)
+        width = (self.along(depth, lambda t: parking_depth_m(t, side), stations) if depth
+                 else self.eased(tags, f"parking:{side}:width", "parking", stations))
+        outer, edge = edge, edge - width
+        self.out["parking_edge_lines"].append(stations.line(sign * edge))
+        self.stalls(tags, side, stations, sign * edge, sign * outer)
         return edge
 
     def stalls(self, tags: dict, side: str, stations: Stations, one: np.ndarray,
                other: np.ndarray) -> None:
         """A marked parking lane on this way's piece, kept for stall_all: its two edges and its
         `parking:<side>:capacity`."""
-        if tags.get(f"parking:{side}:markings") != "yes" or _int(tags.get(f"parking:{side}:capacity")) is None:
-            return
+        markings = tags.get(f"parking:{side}:markings") or tags.get("parking:both:markings")
         nodes = self._way.get("node_ids") or []
-        if len(nodes) < 2:
+        if markings != "yes" or len(nodes) < 2:
             return
+        # Which way traffic passes this kerb, along the way: a diagonal stall leans with it.
+        oneway = tags.get("oneway")
+        ahead = -1 if oneway == "-1" or (oneway != "yes" and side == "left") else 1
+        direction = tags.get(f"parking:{side}:direction") or tags.get("parking:both:direction") or "head_in"
         self.parking.append({"street": tags.get("name"), "side": side, "first": nodes[0],
                              "last": nodes[-1], "capacity": _int(tags.get(f"parking:{side}:capacity")),
+                             "orientation": _orientation(tags, side),
+                             "lean": ahead * (1 if direction == "head_in" else -1),
                              "one": stations.line(one), "other": stations.line(other)})
 
     def stall_all(self) -> None:
@@ -561,7 +585,7 @@ class _Reader:
                 seen.add(id(piece))
                 run.append(piece)
                 piece = after.get((piece["street"], piece["side"], piece["last"]))
-            capacity = sum(p["capacity"] for p in run)
+            capacity = sum(p["capacity"] or 0 for p in run)
             if not capacity:
                 continue
             one = LineString([c for k, p in enumerate(run) for c in p["one"][(k > 0):]])
@@ -766,7 +790,12 @@ class _Reader:
         crosshatch the MUTCD gives an area between opposing traffic), else white."""
         line = self.frame.line(way["coords_wgs84"])
         if line is not None and len(line.coords) >= 4:
-            parts = [(part, None) for part in _polygons(Polygon(line.coords).buffer(0))]
+            # On a street - its centre inside that street's own surface - it is struck along that
+            # street, so it hatches as one with the street's shoulders (hatch_all).
+            polygons = _polygons(Polygon(line.coords).buffer(0))
+            name = next((street for street, own in self.areas.items() if street and polygons
+                         and any(a.contains(polygons[0].representative_point()) for a in own)), None)
+            parts = [(part, name) for part in polygons]
             if way["tags"].get("colour") == "yellow":
                 self.hatched_yellow += [part for part, _name in parts]
             else:
@@ -1132,6 +1161,40 @@ def carriageway_width_m(tags: dict) -> tuple[float, str]:
         return DEFAULT_WIDTHS_M["service"], "DEFAULTED (service)"
     lanes = _int(tags.get("lanes")) or (1 if tags.get("oneway") == "yes" else 2)
     return lanes * DEFAULT_WIDTHS_M["lane"], "DEFAULTED (lanes x lane)"
+
+
+def _orientation(tags: dict, side: str) -> str:
+    return tags.get(f"parking:{side}:orientation") or tags.get("parking:both:orientation") or "parallel"
+
+
+def parking_depth_m(tags: dict, side: str) -> float | None:
+    """How deep a parking lane is off the kerb: its `parking:<side>:width`, else by orientation -
+    a diagonal bay `L sin(a) + W cos(a)`, a perpendicular one the stall's length (STANDARDS.md 1a);
+    None for a parallel lane, which takes DEFAULT_WIDTHS_M."""
+    tagged = width_m(tags.get(f"parking:{side}:width") or tags.get("parking:both:width"))
+    if tagged:
+        return tagged
+    angle = {"diagonal": DIAGONAL_DEG, "perpendicular": 90.0}.get(_orientation(tags, side))
+    if angle is None:
+        return None
+    a = math.radians(angle)
+    return STALL_BODY_M * math.sin(a) + STALL_WIDTH_M * math.cos(a)
+
+
+def kerbward(tags: dict, side: str) -> str:
+    """Which side of `side`'s cycle lane its kerb is on, as the lane is ridden (wiki Key:separation:
+    left and right are the direction a oneway cycle lane is used in). A right lane rides with the
+    way; a left lane rides with it on a oneway street, against it on a two-way one."""
+    if side == "right":
+        return "right"
+    return "left" if tags.get("oneway") == "yes" and tags.get("cycleway:left:oneway") != "-1" else "right"
+
+
+def parking_at_the_kerb(tags: dict, side: str) -> bool:
+    """Whether `side`'s parking lies between its cycle lane and the kerb - the lane outside it -
+    as `cycleway:<side>:traffic_mode:<kerb side>=parking` says (Proposal:Separation); else the
+    lane is at the kerb and the parking outside it, protecting it."""
+    return tags.get(f"cycleway:{side}:traffic_mode:{kerbward(tags, side)}") == "parking"
 
 
 def _footpath(tags: dict) -> bool:
