@@ -67,7 +67,12 @@ from blender_props import (
 random.seed(7)  # stable building color assignment across existing/proposed renders
 
 PAVEMENT_HEIGHT_M = 0.05
-SIDEWALK_HEIGHT_M = 0.03
+# A sidewalk is at kerb height: the road's top plus a raised kerb's 6 in reveal, src/osm_world.py
+# KERB_HEIGHT_M["raised"] (NJDOT, STANDARDS.md 6a; this script runs in Blender's Python and cannot
+# import it). The reader cuts the street and the tactile pads out of the sidewalks, so standing
+# above them hides neither; across a driveway or apron the sidewalk is built on, over the paving.
+RAISED_KERB_M = 6 * 0.0254
+SIDEWALK_HEIGHT_M = PAVEMENT_HEIGHT_M + RAISED_KERB_M
 # crosswalks/centerlines/stop bars (add_crosswalk*/add_dashed_centerline/add_double_yellow_centerline/
 # add_stop_bar) sit at blender_crosswalks.py:EXISTING_MARKING_Z_BASE (0.06) with thickness
 # EXISTING_MARKING_THICKNESS_M (0.01) - this is their real top, i.e. EXISTING_MARKING_Z_BASE +
@@ -248,10 +253,15 @@ SAMPLED_POLYLINE_CHANNELS = (
 # Two-point strokes: a hatch stroke runs edge to edge of its zone and a stall tick lies across the
 # kerbside strip. Only their two ends exist, so the chord IS the line.
 TWO_POINT_CHANNELS = (
-    "lane_narrowing_hatch_lines", "corner_hatching_lines", "parking_stall_divider_lines",
+    "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines", "corner_hatching_lines",
+    "parking_stall_divider_lines",
     "parking_buffer_hatch_lines", "bike_lane_hatch_lines",
 )
 TWO_POINT_WIDTH_M = 0.15
+# Diagonal crosshatch strokes at MUTCD's widths (as cited; STANDARDS.md 6b): 8 in below 45 mph,
+# 12 in at or above - src/osm_world.py sorts each street's strokes by its OSM `maxspeed`.
+TWO_POINT_WIDTHS_M = {"lane_narrowing_hatch_lines": 8 * 0.0254,
+                      "lane_narrowing_hatch_wide_lines": 12 * 0.0254}
 # THE CHANNELS DRAWN IN THE YELLOW MATERIAL. Every other paint channel is white, so this is the
 # whole of what makes a stripe yellow at this end - which is why a yellow marking gets its own
 # channel upstream rather than sharing an edge-line one (src/geometry/markings.py). Two entries,
@@ -602,10 +612,13 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
         coords = kerb.get("coords") or []
         if len(coords) < 2:
             continue
-        height = kerb.get("height_m", 0.20)
+        # `kerb:height` is the kerb's face ABOVE THE ROAD (wiki Key:kerb:height), so it stands on
+        # the road slab's top: built from the ground, a lowered kerb's 3 cm ended 2 cm inside the
+        # 5 cm slab and drew nothing. A flush kerb keeps MARKING_CLEARANCE_M, not to be coplanar.
+        height = kerb.get("height_m", RAISED_KERB_M)
         batch = kerb_batches.setdefault(height, MeshBatch(f"kerbs_{height:g}m", kerb_mat))
         for ring in polyline_rings(coords, KERB_WIDTH_M):
-            batch.add_prism(ring, height, z_base=0.0)
+            batch.add_prism(ring, PAVEMENT_HEIGHT_M + max(height, MARKING_CLEARANCE_M), z_base=0.0)
     for batch in kerb_batches.values():
         batch.build()
 
@@ -659,7 +672,7 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     # The hatch strokes and stall ticks really are two-point segments, so only their ends matter.
     for key in TWO_POINT_CHANNELS:
         for line in data.get(key, []):
-            ring = line_ring(line[0], line[-1], TWO_POINT_WIDTH_M)
+            ring = line_ring(line[0], line[-1], TWO_POINT_WIDTHS_M.get(key, TWO_POINT_WIDTH_M))
             if ring is not None:
                 white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     # A TWO-WAY LANE'S CENTRE STRIPE IS YELLOW, and the channel is what decides that - see
@@ -739,6 +752,16 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
             for ring in polyline_rings(line, SURVEYED_CROSSING_LINE_WIDTH_M):
                 surveyed.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     surveyed.build()
+
+    # A curb ramp's detectable warning surface (`tactile_paving=yes`, ADA 705.1's 24 in pad): dark
+    # red, at the ramp's flush foot - the road's top plus the clearance a flush kerb keeps. The
+    # reader cuts each pad out of the sidewalk, so the slab above it hides none of it.
+    tactile_mat = make_material("TactilePaving", (0.38, 0.06, 0.05), roughness=0.9)
+    tactile = MeshBatch("tactile_paving", tactile_mat)
+    for ring in data.get("tactile_paving_polygons", []):
+        if len(ring) >= 3:
+            tactile.add_prism(ring, PAVEMENT_HEIGHT_M + MARKING_CLEARANCE_M, z_base=0.0)
+    tactile.build()
 
     # A CYCLE CROSSING THROUGH A JUNCTION, at the same layers as the bikeway it carries on: green
     # half a clearance under the stripes, its dotted edges and divider at the stripe layer. It

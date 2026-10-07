@@ -74,7 +74,7 @@ from shapely.geometry import LineString, Point, Polygon
 from src.osm_world import (CARRIAGEWAY, DEFAULT_WIDTHS_M, FT_TO_M, LocalFrame,
                            Stations, carriageway_width_m, has_centre_line, width_m)
 from src.sources.osm_change import NewNode, OsmChange, WayChange, apply_change
-from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
+from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm, osm_layers
 
 # NOT OSM: Danny's rule for a junction leg with no stop line, no crosswalk, and no kerb of any
 # cross street mapped - the centre line stops this far from the junction node.
@@ -302,7 +302,7 @@ def _lines(geometry) -> list[list]:
 class _Kerbs:
     """The mapped `barrier=kerb` ways, in segments, each the edge of the street whose centreline is
     nearest it (OSM does not say which street a kerb bounds), and which are `kerb=lowered` or
-    `flush` - a dropped kerb, where traffic may cross it."""
+    `flush` and no crossing's ramp - a dropped kerb, where traffic may cross it."""
 
     def __init__(self, layers: dict, frame: LocalFrame, network: _Network,
                  bbox: tuple[float, float, float, float]):
@@ -311,7 +311,10 @@ class _Kerbs:
             line = frame.line(way.get("coords_wgs84") or [])
             if line is None:
                 continue
-            low = way["tags"].get("kerb") in ("lowered", "flush")
+            # A dropped kerb traffic crosses - not a crossing's ramp: one a footway crossing meets
+            # carries pedestrians, and its crosswalk's band already cuts the paint there.
+            low = (way["tags"].get("kerb") in ("lowered", "flush")
+                   and not _meets(way, line, layers["crossings"], frame))
             for a, b in itertools.pairwise(line.coords):
                 if a != b:
                     segments.append(LineString([a, b]))
@@ -469,6 +472,23 @@ def _junction_face(network: _Network, kerbs: _Kerbs, junction: int) -> Polygon |
             # Closed: inside its legs' cross-sections (to numerical precision).
             return face if face.difference(hull).area <= face.area * 1e-9 else None
     return None
+
+
+def _meets(kerb: dict, line: LineString, ways: list[dict], frame: LocalFrame) -> list[LineString]:
+    """The `ways` that meet a kerb way - at a node they share, or across it."""
+    nodes = set(kerb.get("node_ids") or [])
+    return [path for way in ways if (path := frame.line(way.get("coords_wgs84") or [])) is not None
+            and (nodes & set(way["node_ids"]) or path.intersects(line))]
+
+
+def _ramp_gaps(layers: dict, frame: LocalFrame, report: Counter[str]) -> None:
+    """Report each lowered kerb a footway crossing meets that has no `wheelchair` tag: the reader
+    draws a curb ramp flush only where OSM says `wheelchair=yes`, so these are mapping gaps."""
+    for kerb in layers["kerbs"]:
+        line = frame.line(kerb.get("coords_wgs84") or [])
+        if (line is not None and kerb["tags"].get("kerb") == "lowered" and kerb["tags"].get("wheelchair") is None
+                and _meets(kerb, line, layers["crossings"], frame)):
+            report["lowered kerbs at a crossing with no wheelchair tag: not drawn as ramps"] += 1
 
 
 def _closed_way(ring: list, tags: dict, ids: Iterator[int], frame: LocalFrame,
@@ -635,6 +655,8 @@ def existing_markings(area: str) -> tuple[OsmChange, Counter[str]]:
         ways.append(_closed_way(list(face.exterior.coords),
                                 {"area:highway": rank, "junction": "yes", "note": AREA_NOTE},
                                 ids, frame, nodes))
+
+    _ramp_gaps(layers, frame, report)
 
     # Each way split where its centre line stops and at each junction it runs through - so every
     # piece is one block's - and each piece given its block's width. A `width` OSM has is kept.
@@ -867,15 +889,71 @@ def _section_tags(osm: dict, row) -> dict:
     return tags
 
 
+def _recentred(area: str, base: OsmChange, report: Counter[str]) -> OsmChange:
+    """`base` with every street re-centred between its kerbs, block by block.
+
+    A way runs down the middle of its carriageway (wiki Key:placement, the default) and every
+    marking is laid from it, but a mapped way is often off that middle - Seminary Avenue by 4.4 ft,
+    W Broad east of Louellen by 1.2-3.2 ft, which squeezed a lane there to 8.4 ft. OSM has no tag
+    for "this far off centre"; the way itself is moved. Each block (a junction leg) takes ONE
+    offset - the median, over its cross-sections that meet its own kerbs on both sides, of where
+    the kerbs' midline lies from it - so the paint laid from it cannot jitter; every node inside
+    the block moves square to it by that much. Junction nodes stay: the cross street shares them.
+    A block with no kerb pair mapped stays where OSM has it. Only the proposal moves ways: the
+    existing render draws OSM as it is."""
+    layers = apply_change(osm_layers(area), base)
+    frame = LocalFrame(SNAPSHOT_AREAS[area])
+    network = _Network(layers, frame)
+    kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
+    raw = fetch_borough_osm(bbox=SNAPSHOT_AREAS[area])
+    raw_nodes = raw["nodes"] if isinstance(raw["nodes"], dict) else {n["id"]: n for n in raw["nodes"]}
+    moves: dict[int, np.ndarray] = {}
+    done: set[frozenset] = set()
+    for junction in network.junctions:
+        for leg in network.legs(junction):
+            key = frozenset(leg.nodes)
+            if key in done:
+                continue                                 # the same block, walked from its far end
+            done.add(key)
+            line = leg.line()
+            offsets = []
+            for way_id in {way_id for way_id, _i in leg.steps}:
+                way = network.streets[way_id]
+                stations = Stations(network.lines[way_id])
+                left = kerbs.hits(_street_key(way), stations, 1)
+                right = kerbs.hits(_street_key(way), stations, -1)
+                both = np.isfinite(left) & np.isfinite(right)
+                middle = stations.xy[both] + stations.left[both] * ((left[both] - right[both]) / 2)[:, None]
+                offsets += [_station(line, point)[1] for point in middle]
+            if not offsets:
+                report["blocks with no kerb pair mapped: not re-centred"] += 1
+                continue
+            shift = float(np.median(offsets))
+            report["blocks re-centred between their kerbs"] += 1
+            report[f"blocks re-centred by {abs(shift) / FT_TO_M:.0f} ft"] += 1
+            for k, node in enumerate(leg.nodes):
+                if node in (leg.junction, leg.end) or node in network.junctions or node in moves:
+                    continue
+                moves[node] = _at(line, float(leg.d[k]), shift) if line.length > 0 else leg.xy[k]
+    report["nodes moved to re-centre streets"] = len(moves)
+    kept = [node for node in base.nodes if node.id not in moves]
+    moved = [NewNode(node, *frame.wgs84(*xy), raw_nodes.get(node, {}).get("tags") or {}
+                     if node > 0 else next(n.tags for n in base.nodes if n.id == node))
+             for node, xy in moves.items()]
+    return dataclasses.replace(base, nodes=(*kept, *moved))
+
+
 def two_way_bikeway(area: str, base: OsmChange) -> tuple[OsmChange, Counter[str]]:
     """`base` with the proposal applied across the whole world - the road diet, continental
-    crossings, and Broad Street's two-way bikeway - and how much of each."""
+    crossings, and Broad Street's two-way bikeway - laid on streets first re-centred between
+    their kerbs (_recentred) - and how much of each."""
+    report: Counter[str] = Counter()
+    base = _recentred(area, base, report)
     layers = apply_change(osm_layers(area), base)
     frame = LocalFrame(SNAPSHOT_AREAS[area])
     network = _Network(layers, frame)
     kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
     ids = _ids_below(base)
-    report: Counter[str] = Counter()
     edits: dict[int, tuple[tuple[int, ...] | None, dict]] = {}   # way -> (new node list, tags)
     nodes: list[NewNode] = []
     created: list[WayChange] = []

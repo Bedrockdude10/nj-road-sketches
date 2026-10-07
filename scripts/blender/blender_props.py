@@ -267,9 +267,16 @@ location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
     pole.name = f"{name}_pole"
     pole.data.materials.append(pole_mat)
 
+    arm_z = TRAFFIC_SIGNAL_POLE_HEIGHT_M - 0.4
+    if arm_length_m <= 0:
+        # Pole-mounted (OSM support=pole): the head on the pole's face, no arm.
+        face = math.radians(head_facing_deg)
+        offset = TRAFFIC_SIGNAL_POLE_RADIUS_M + VEHICLE_SIGNAL_HEAD_WIDTH_M / 2
+        add_vehicle_signal_head(f"{name}_head", (x + math.cos(face) * offset, y + math.sin(face) * offset,
+                                                 arm_z - 0.2), head_facing_deg, housing_mat)
+        return pole
     arm_dir = math.radians(arm_heading_deg if arm_heading_deg is not None else head_facing_deg + 180)
     dx, dy = math.cos(arm_dir), math.sin(arm_dir)
-    arm_z = TRAFFIC_SIGNAL_POLE_HEIGHT_M - 0.4
     arm_center = (x + dx * arm_length_m / 2, y + dy * arm_length_m / 2, arm_z)
     arm = prims.add_cylinder(radius=MAST_ARM_RADIUS_M, depth=arm_length_m,
                               location=arm_center)

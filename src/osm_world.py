@@ -33,11 +33,13 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 carriageway only
   markings      `road_marking=stop_line` bars (STOP_BAR_M wide), `road_marking=restriction`
                 hatched areas
-  kerbs         `barrier=kerb` ways, at the height their `kerb` / `kerb:height` says
+  kerbs         `barrier=kerb` ways, at the height their `kerb` / `kerb:height` says, and a
+                dark red detectable warning pad behind each `tactile_paving=yes` one
   paved ground  driveways, parking aisles, `amenity=parking` areas and `highway=*` areas
                 (src/sources/osm_context.py:is_highway_area) - except `parking=lane`
                 areas, which are on the carriageway and drawn as their marked outline - and
-                a driveway's mouth across the whole lowered kerb it crosses
+                a lowered kerb's driveway mouth (_Reader.mouths), and any mapped driveway
+                surface (`area:highway=service` + `service=driveway`)
   buildings     their footprints, at `height` / `building:levels`
 
 Where OSM records no width, DEFAULT_WIDTHS_M stands in, and every use of it is counted in
@@ -56,7 +58,7 @@ import shapely
 from shapely import unary_union
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import linemerge
+from shapely.ops import linemerge, split
 
 from src.geometry.model.crs import NJ_STATE_PLANE_FT, WGS84
 from src.sources.osm_change import OsmChange, apply_change, load_change
@@ -75,8 +77,23 @@ DEFAULT_WIDTHS_M = {"lane": 3.0, "service": 3.5, "cycleway": 1.5, "parking": 2.2
                     "shoulder": 1.0}
 DEFAULT_BUILDING_HEIGHT_M = 7.0
 
-# Kerb heights for `kerb=*` (wiki Key:kerb), used where `kerb:height` is absent.
-KERB_HEIGHT_M = {"raised": 0.15, "regular": 0.15, "rolled": 0.08, "lowered": 0.03, "flush": 0.0}
+# Kerb reveals above the gutter for `kerb=*` (wiki Key:kerb), where `kerb:height` is absent - the
+# NJDOT Roadway Design Manual and N.J.A.C. 16:47 figures in STANDARDS.md 6a (as cited): a 6 in
+# vertical face where sidewalks are built, a mountable kerb at most 4 in, a driveway's depressed
+# kerb 1.5 in. A lowered kerb that is a curb ramp is flush instead (RAMP_HEIGHT_M, _Reader.kerb).
+IN_TO_M = 0.0254
+KERB_HEIGHT_M = {"raised": 6 * IN_TO_M, "regular": 6 * IN_TO_M, "rolled": 4 * IN_TO_M,
+                 "lowered": 1.5 * IN_TO_M, "flush": 0.0}
+RAMP_HEIGHT_M = 0.0
+# A detectable warning surface's depth in the direction of travel, across the ramp's full width
+# (ADA 2010 Standards 705.1, as cited; STANDARDS.md 6a).
+TACTILE_DEPTH_M = 24 * IN_TO_M
+# A curb ramp's width, flares excluded - NJDOT's minimum (as cited; STANDARDS.md 6a). OSM maps
+# where a ramp is, not how wide, so each detectable warning pad is this wide.
+RAMP_WIDTH_M = 48 * IN_TO_M
+# A traffic-control support's lateral clearance behind the face of the kerb (MUTCD, as cited;
+# STANDARDS.md 6a): where a signal pole or pedestrian signal post stands, off the drawn street.
+SIGNAL_CLEARANCE_M = 2 * FT_TO_M
 
 STATION_STEP_M = 2.0     # spacing of the cross-sections a road's edges are sampled at
 CHUNK_M = 50.0           # a road is drawn in pieces this long, so a looped road encloses nothing
@@ -90,11 +107,17 @@ BOLLARD_SPACING_M = 8 * FT_TO_M   # flex posts down a buffer's centre, as the ol
 # 2 ft gaps (MUTCD 3B.08 dotted lines, IA-14 green colored pavement - as cited).
 CROSSBIKE_DASH_M = 2 * FT_TO_M
 ZEBRA_BAR_M = 0.5            # a continental crossing's bar width, and the gap between bars
-HATCH_SPACING_M = 1.0        # spacing of the hatch strokes across a restriction area
+# Diagonal crosshatch (MUTCD 3B, as cited; STANDARDS.md 6b): strokes 30-45 degrees to the lines
+# they meet (45 here), spaced along the street by engineering judgment - 10-20 ft on low-speed
+# urban streets, the dense end taken so a short stretch between driveways still shows strokes - and
+# 8 in wide below 45 mph, 12 in at or above (by OSM `maxspeed`: the wide strokes' own channel).
+HATCH_SPACING_M = 10 * FT_TO_M
+HATCH_WIDE_MPH = 45
 SEAM_M = 0.05                # hatching laid way by way leaves mm seams where consecutive ways turn
 # The line channels that are paint, kept on the street surface (_Reader.on_carriageway).
 PAINT_LINES = ("bike_lane_edge_lines", "parking_edge_lines", "bike_lane_contraflow_lines",
-               "lane_narrowing_edge_lines", "lane_narrowing_hatch_lines", "parking_stall_divider_lines",
+               "lane_narrowing_edge_lines", "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
+               "parking_stall_divider_lines",
                "cycle_crossing_edge_lines",
                "cycle_crossing_divider_lines")
 
@@ -215,9 +238,11 @@ class _Reader:
         # Each named street's centrelines and widest carriageway: what its hatching is struck along.
         self.street_lines: dict[str, list[LineString]] = defaultdict(list)
         self.street_width: dict[str, float] = defaultdict(float)
+        self.street_mph: dict[str, float] = defaultdict(float)     # its highest posted `maxspeed`
         self.crosswalk_bands: list[BaseGeometry] = []   # kept clear of other paint (on_carriageway)
         # Per road way: its nodes, drawn surface and edges - what a crossing is painted on.
         self.road_nodes: dict[int, set[int]] = {}
+        self.road_ways: dict[int, tuple[LineString, list[int], dict]] = {}   # signals() reads them
         self.road_surfaces: dict[int, list[Polygon]] = {}
         self.road_names: dict[int, str | None] = {}
         self.edges: dict[int, tuple[Stations, np.ndarray, np.ndarray]] = {}
@@ -227,9 +252,11 @@ class _Reader:
             "pavement": [], "sidewalks": [], "buildings": [], "kerbs": [], "paved_surfaces": [],
             "surveyed_crossings": [], "bike_lane_surface_polygons": [], "bike_lane_edge_lines": [],
             "parking_edge_lines": [], "bike_lane_contraflow_lines": [], "lane_narrowing_edge_lines": [],
-            "lane_narrowing_hatch_lines": [], "tree_points": [], "props": [],
+            "lane_narrowing_hatch_lines": [], "lane_narrowing_hatch_wide_lines": [],
+            "tree_points": [], "props": [],
             "cycle_crossing_surface_polygons": [], "cycle_crossing_edge_lines": [],
-            "cycle_crossing_divider_lines": [], "parking_stall_divider_lines": []}
+            "cycle_crossing_divider_lines": [], "parking_stall_divider_lines": [],
+            "tactile_paving_polygons": []}
 
     def width(self, tags: dict, key: str, default: str) -> float:
         found = width_m(tags.get(key))
@@ -264,9 +291,11 @@ class _Reader:
         if tags.get("name") not in self.areas or tags.get("highway") == "service":
             self.out["pavement"] += surface      # where its street is mapped, the area is the pavement
         self.road_nodes[way["id"]] = set(nodes)
+        self.road_ways[way["id"]] = (line, list(nodes), tags)
         self.road_names[way["id"]] = tags.get("name")
         if tags.get("name"):
             self.street_lines[tags["name"]].append(line)
+            self.street_mph[tags["name"]] = max(self.street_mph[tags["name"]], _mph(tags.get("maxspeed")))
             self.street_width[tags["name"]] = max(self.street_width[tags["name"]],
                                                   carriageway_width_m(tags)[0])
         self.road_surfaces[way["id"]] = [Polygon(ring) for ring in surface]
@@ -493,7 +522,8 @@ class _Reader:
             clipped = [part for line in self.out[key] if len(line) >= 2
                        for part in _lines(LineString(line).intersection(road))]
             self.out[key] = ([[part[0], part[-1]] for part in clipped]
-                             if key in ("lane_narrowing_hatch_lines", "parking_stall_divider_lines")
+                             if key in ("lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
+                                        "parking_stall_divider_lines")
                              else clipped)
         for key in ("bike_lane_surface_polygons", "cycle_crossing_surface_polygons"):
             self.out[key] = [ring for poly in self.out[key] if len(poly) >= 4
@@ -551,18 +581,19 @@ class _Reader:
                     long = sides[np.argmax(np.linalg.norm(sides, axis=1))]
                     middle = np.asarray(piece.centroid.coords[0])
                     reach = float(np.linalg.norm(long))
-                    self.strokes(LineString([middle - long, middle + long]), piece, reach)
+                    self.strokes(LineString([middle - long, middle + long]), piece, reach, wide=False)
                 continue
             shapely.prepare(area)
             for line in getattr(linemerge(self.street_lines[name]), "geoms", None) or [
                     linemerge(self.street_lines[name])]:
-                self.strokes(line, area, self.street_width[name])
+                self.strokes(line, area, self.street_width[name], wide=self.street_mph[name] >= HATCH_WIDE_MPH)
 
-    def strokes(self, along: LineString, area: BaseGeometry, reach: float) -> None:
-        """Strokes at 45 degrees to `along`, from points HATCH_SPACING_M * sqrt(2) apart on it -
-        so HATCH_SPACING_M apart square to themselves - `reach` either side, clipped to `area`."""
-        step = HATCH_SPACING_M * math.sqrt(2)
-        for at in np.arange(0.0, along.length, step):
+    def strokes(self, along: LineString, area: BaseGeometry, reach: float, wide: bool) -> None:
+        """Strokes at 45 degrees to `along`, from points HATCH_SPACING_M apart along it - the
+        longitudinal spacing - `reach` either side, clipped to `area`; in the wide strokes'
+        channel where the street is posted at HATCH_WIDE_MPH or more."""
+        channel = "lane_narrowing_hatch_wide_lines" if wide else "lane_narrowing_hatch_lines"
+        for at in np.arange(HATCH_SPACING_M / 2, along.length, HATCH_SPACING_M):
             p = np.asarray(along.interpolate(at).coords[0])
             ahead = np.asarray(along.interpolate(min(at + 0.5, along.length)).coords[0])
             behind = np.asarray(along.interpolate(max(at - 0.5, 0.0)).coords[0])
@@ -570,14 +601,21 @@ class _Reader:
             d = (t + np.array([-t[1], t[0]])) / math.sqrt(2)      # 45 degrees off the street
             stroke = LineString([p - d * reach, p + d * reach])
             for piece in _lines(stroke.intersection(area)):
-                self.out["lane_narrowing_hatch_lines"].append([piece[0], piece[-1]])
+                self.out[channel].append([piece[0], piece[-1]])
 
     def kerb(self, way: dict) -> None:
+        """A kerb at its `kerb:height`, else its `kerb=*` reveal - a lowered one tagged
+        `wheelchair=yes` (wiki Key:wheelchair: passable in a wheelchair, which is what makes a
+        curb ramp) flush with the road. An untagged one is not guessed at: src/osm_osc.py reports
+        each a crossing meets, for mapping."""
         line = self.frame.line(way.get("coords_wgs84") or [])
         if line is None:
             return
         tags = way["tags"]
         height = width_m(tags.get("kerb:height"))
+        if height is None and tags.get("kerb") == "lowered" and tags.get("wheelchair") == "yes":
+            height = RAMP_HEIGHT_M
+            self.stats["lowered kerbs flush: curb ramps (wheelchair=yes)"] += 1
         if height is None:
             height = KERB_HEIGHT_M.get(tags.get("kerb", "raised"), KERB_HEIGHT_M["raised"])
         self.out["kerbs"].append({"coords": _lines(line)[0], "height_m": height})
@@ -596,72 +634,246 @@ class _Reader:
                  else _strip(line, self.width(way["tags"], "width", "service") / 2))
         self.out["paved_surfaces"] += [{"coords": ring} for ring in rings]
 
-    def apron(self, kerb: dict, branches: list[dict], sidewalks: list[dict], crossings: list[dict],
-              areas: list[dict]) -> None:
-        """A dropped kerb's mouth, paved: a `kerb=lowered` way is where traffic leaves the street,
-        so what lies between it and where that traffic goes is paved, the whole kerb wide.
-        - one a footway crossing meets is that crossing's ramp - a landing, not paved;
-        - one a driveway or parking aisle crosses (at a shared node, or across it) is paved out to
-          the sidewalk the branch crosses nearest the kerb, through that sidewalk's band - as far
-          as the branch itself is paved;
-        - any other is paved out to the paved area (`areas`: lots, `highway=*` areas) first met
-          straight out behind it, away from the street, where there is one."""
-        if kerb["tags"].get("kerb") not in ("lowered", "flush"):
-            return
-        line = self.frame.line(kerb.get("coords_wgs84") or [])
-        if line is None:
-            return
-        nodes = set(kerb.get("node_ids") or [])
+    def sidewalks_off_the_street(self) -> None:
+        """Sidewalks stop where the street, or a ramp's tactile pad, begins: they stand at kerb
+        height, above both, so a sidewalk strip drawn over a junction's corner would cover the
+        road. A sidewalk runs on across a driveway, a lot's mouth or an apron, as it is built -
+        the slab stands above the paving and draws over it."""
+        paving = unary_union([self.carriageway(), *(
+            part for ring in self.out["tactile_paving_polygons"] if len(ring) >= 4
+            for part in _polygons(Polygon(ring).buffer(0)))])
+        walks = unary_union([part for ring in self.out["sidewalks"] if len(ring) >= 4
+                             for part in _polygons(Polygon(ring).buffer(0))])
+        self.out["sidewalks"] = [ring for part in _hole_free(walks.difference(paving))
+                                 for ring in _rings(part)]
 
-        def meets(way: dict) -> LineString | None:
-            path = self.frame.line(way["coords_wgs84"])
-            return path if path is not None and (nodes & set(way["node_ids"]) or path.intersects(line)) else None
-
-        if any(meets(way) is not None for way in crossings):
-            return
-        for branch in branches:
-            if (path := meets(branch)) is None:
-                continue
-            met = [(path.intersection(walk).distance(line), walk, way) for way in sidewalks
-                   if (walk := self.frame.line(way["coords_wgs84"])) is not None and walk.intersects(path)]
-            if not met:
-                self.stats["lowered kerbs a driveway crosses, no sidewalk to pave to"] += 1
-                continue
-            _d, walk, way = min(met, key=lambda m: m[0])
-            back = [walk.interpolate(walk.project(Point(c))).coords[0] for c in line.coords]
-            along = sorted(walk.project(Point(c)) for c in back)
-            self.pave(line, back, _substring(walk, along[0], along[-1]).buffer(
-                self.width(way["tags"], "width", "sidewalk") / 2, cap_style="flat"))
-            self.stats["lowered kerbs paved to the sidewalk a driveway crosses"] += 1
-            return
-        # Straight out from the kerb's middle, away from the street: the first paved area met.
+    def away(self, line: LineString) -> tuple[np.ndarray, np.ndarray] | None:
+        """A kerb's middle, and the unit normal there pointing away from the nearest street."""
+        streets = [street for lines in self.street_lines.values() for street in lines]
+        if not streets:
+            return None
         middle = np.asarray(line.interpolate(0.5, normalized=True).coords[0])
         ahead = np.asarray(line.interpolate(min(line.length / 2 + 0.5, line.length)).coords[0])
         behind = np.asarray(line.interpolate(max(line.length / 2 - 0.5, 0.0)).coords[0])
         t = (ahead - behind) / max(float(np.linalg.norm(ahead - behind)), 1e-9)
-        streets = [street for lines in self.street_lines.values() for street in lines]
-        if not streets:
-            return
         street = min(streets, key=lambda one: one.distance(Point(middle)))
         normal = np.array([-t[1], t[0]])
         if np.dot(normal, middle - np.asarray(street.interpolate(street.project(Point(middle))).coords[0])) < 0:
             normal = -normal
-        west, south, east, north = self.carriageway().bounds
-        ray = LineString([middle, middle + normal * math.hypot(east - west, north - south)])
-        met = [(Point(middle).distance(ray.intersection(edge)), edge) for area in areas
-               if (outline := self.frame.line(area["coords_wgs84"])) is not None and len(outline.coords) >= 4
-               and ray.intersects(edge := Polygon(outline.coords).buffer(0).exterior)]
-        if not met:
-            self.stats["lowered kerbs with nothing paved behind them"] += 1
-            return
-        _d, edge = min(met, key=lambda m: m[0])
-        self.pave(line, [edge.interpolate(edge.project(Point(c))).coords[0] for c in line.coords])
-        self.stats["lowered kerbs paved to the area behind them"] += 1
+        return middle, normal
 
-    def pave(self, kerb: LineString, back: list, *more: BaseGeometry) -> None:
-        """The band between a kerb and the points `back` behind each of its vertices, with `more`."""
-        mouth = unary_union([Polygon([*kerb.coords, *back[::-1]]).buffer(0), *more])
-        self.out["paved_surfaces"] += [{"coords": ring} for ring in _rings(mouth)]
+    def tactile(self, kerb: dict, crossings: list[dict]) -> None:
+        """A curb ramp's detectable warning surface (`tactile_paving=yes`): a pad RAMP_WIDTH_M wide
+        and TACTILE_DEPTH_M deep at the foot of each ramp, behind the kerb, away from the street.
+        OSM maps where a ramp is - where a footway crossing meets the kerb - not how wide it is,
+        so each pad is centred there at the ramp's minimum width (STANDARDS.md 6a), not spread
+        along a lowered kerb that also carries the ramp's flares or the rest of the corner.
+        - a kerb way: a pad along it about each point a crossing meets it, at a node they share or
+          across it;
+        - a kerb node on a crossing way: a pad square to that crossing, from the node away from the
+          street, along the direction of travel.
+        A tactile kerb no crossing meets says nothing of where its ramp is, so draws none."""
+        if kerb["tags"].get("tactile_paving") != "yes":
+            return
+        half = RAMP_WIDTH_M / 2
+        line = self.frame.line(kerb.get("coords_wgs84") or [])
+        if line is None:                         # a kerb node: on the crossing whose ramp it is
+            at = np.asarray(self.frame.point(kerb["lon"], kerb["lat"]))
+            for crossing in crossings:
+                ids = crossing.get("node_ids") or []
+                path = self.frame.line(crossing.get("coords_wgs84") or [])
+                if kerb["id"] not in ids or path is None or len(ids) != len(path.coords):
+                    continue
+                i = ids.index(kerb["id"])
+                coords = np.asarray(path.coords)
+                ends = [coords[j] for j in (i - 1, i + 1) if 0 <= j < len(coords)]
+                streets = [one for lines in self.street_lines.values() for one in lines]
+                if not ends or not streets:
+                    continue
+                # away from the street: the neighbouring vertex further from its nearest centreline
+                far = max(ends, key=lambda c: min(one.distance(Point(c)) for one in streets))
+                d = (far - at) / max(float(np.linalg.norm(far - at)), 1e-9)
+                w = np.array([-d[1], d[0]])
+                self.out["tactile_paving_polygons"].append(
+                    [list(at - w * half), list(at + w * half), list(at + w * half + d * TACTILE_DEPTH_M),
+                     list(at - w * half + d * TACTILE_DEPTH_M), list(at - w * half)])
+                self.stats["tactile paving pads (kerb node on a crossing)"] += 1
+                return
+            self.stats["tactile paving on a kerb node no crossing passes: not drawn"] += 1
+            return
+        if (away := self.away(line)) is None:
+            return
+        middle, normal = away
+        ahead = np.asarray(line.interpolate(min(line.length / 2 + 0.5, line.length)).coords[0])
+        left = np.cross(np.append(ahead - middle, 0.0), np.append(normal, 0.0))[2] > 0
+        nodes = set(kerb.get("node_ids") or [])
+        ramps = []
+        for crossing in crossings:
+            path = self.frame.line(crossing.get("coords_wgs84") or [])
+            if path is None:
+                continue
+            shared = [c for n, c in zip(crossing.get("node_ids") or [], path.coords, strict=False) if n in nodes]
+            meet = Point(shared[0]) if shared else path.intersection(line)
+            if not meet.is_empty:
+                ramps.append(line.project(meet if isinstance(meet, Point) else meet.centroid))
+        if not ramps:
+            self.stats["tactile paving on a kerb no crossing meets: not drawn"] += 1
+            return
+        for at in ramps:
+            # Off the kerb's own vertices, not resampled stations: a corner ramp's curve would be cut.
+            piece = _substring(line, max(at - half, 0.0), min(at + half, line.length))
+            pad = piece.buffer(TACTILE_DEPTH_M if left else -TACTILE_DEPTH_M, single_sided=True,
+                               cap_style="flat", join_style="round")
+            self.out["tactile_paving_polygons"] += _rings(pad)
+            self.stats["tactile paving pads (kerb way, at a crossing)"] += 1
+
+    def mouths(self, layers: dict) -> None:
+        """Each lowered kerb's driveway mouth, paved - a rendering of what OSM maps (the lowered
+        kerb, the driveway, the sidewalk, the lot), not a surface OSM has: a `kerb=lowered` way is
+        where traffic leaves the street, so what lies between it and where that traffic goes is
+        paved, the whole kerb wide.
+        - one a footway crossing meets is that crossing's ramp - a landing, not a mouth;
+        - one a driveway or parking aisle crosses is paved out to the sidewalk the branch crosses
+          nearest the kerb, through that sidewalk's band - as far as the branch itself is paved;
+        - any other is paved out to the lot (`amenity=parking`) or `highway=*` area met first
+          straight out behind it, away from its street, where no building or other kerb is met
+          before it - through any sidewalk, as a driveway is.
+        Built after the buildings, which it reads; the sidewalk draws over it."""
+        branches = layers["driveways"] + layers["parking_aisles"]
+        areas = [Polygon(line.coords).buffer(0).exterior
+                 for way in layers["parking_lots"] + layers["highway_areas"]
+                 if way["tags"].get("parking") != "lane"
+                 and (line := self.frame.line(way["coords_wgs84"])) is not None and len(line.coords) >= 4]
+        blockers = [Polygon(b["coords"]).exterior for b in self.out["buildings"] if len(b["coords"]) >= 4]
+        kerb_lines = {way["id"]: line for way in layers["kerbs"]
+                      if (line := self.frame.line(way.get("coords_wgs84") or [])) is not None}
+        west, south, east, north = self.carriageway().bounds
+        reach = math.hypot(east - west, north - south)
+
+        def meets(kerb: dict, line: LineString, ways: list[dict]) -> list[LineString]:
+            nodes = set(kerb.get("node_ids") or [])
+            return [path for way in ways if (path := self.frame.line(way.get("coords_wgs84") or [])) is not None
+                    and (nodes & set(way["node_ids"]) or path.intersects(line))]
+
+        def first(ray: LineString, edges: list) -> float:
+            start = Point(ray.coords[0])
+            return min((start.distance(ray.intersection(e)) for e in edges if ray.intersects(e)), default=math.inf)
+
+        for kerb in layers["kerbs"]:
+            line = kerb_lines.get(kerb["id"])
+            if line is None or kerb["tags"].get("kerb") not in ("lowered", "flush"):
+                continue
+            if meets(kerb, line, layers["crossings"]):
+                continue
+            back, more = None, []
+            for path in meets(kerb, line, branches):
+                met = [(path.intersection(walk).distance(line), walk, way) for way in layers["sidewalks"]
+                       if (walk := self.frame.line(way["coords_wgs84"])) is not None and walk.intersects(path)]
+                if met:
+                    _d, walk, way = min(met, key=lambda m: m[0])
+                    back = [walk.interpolate(walk.project(Point(c))).coords[0] for c in line.coords]
+                    along = sorted(walk.project(Point(c)) for c in back)
+                    more = [_substring(walk, along[0], along[-1]).buffer(
+                        self.width(way["tags"], "width", "sidewalk") / 2, cap_style="flat")]
+                    self.stats["driveway mouths: to the sidewalk the driveway crosses"] += 1
+                    break
+            if back is None:
+                if (away := self.away(line)) is None:
+                    continue
+                middle, normal = away
+                ray = LineString([middle, middle + normal * reach])
+                between = first(ray, blockers + [o for kid, o in kerb_lines.items() if kid != kerb["id"]])
+                met = [(d, edge) for edge in areas if (d := first(ray, [edge])) < between]
+                if not met:
+                    self.stats["lowered kerbs with nothing paved straight behind them"] += 1
+                    continue
+                _d, edge = min(met, key=lambda m: m[0])
+                back = [edge.interpolate(edge.project(Point(c))).coords[0] for c in line.coords]
+                self.stats["driveway mouths: to the lot behind"] += 1
+            mouth = unary_union([Polygon([*line.coords, *back[::-1]]).buffer(0), *more])
+            self.out["paved_surfaces"] += [{"coords": ring} for ring in _rings(mouth)]
+
+    def off_the_street(self, at: np.ndarray, outward: np.ndarray, limit: float) -> np.ndarray | None:
+        """The first point from `at` along `outward` (a unit vector) standing SIGNAL_CLEARANCE_M from
+        the drawn street - None if there is none before `limit`."""
+        road = self.carriageway()
+        for d in np.arange(0.0, limit, 0.05):
+            if not road.contains(point := Point(at + outward * d)) and road.distance(point) >= SIGNAL_CLEARANCE_M:
+                return at + outward * d
+        return None
+
+    def signals(self, controls: list[dict], crossings: list[dict]) -> None:
+        """Signal hardware where OSM maps it. OSM maps a signalized junction (a
+        `highway=traffic_signals` node) and how its heads are held (`support=*`), not where each
+        pole stands, so the poles follow the rule confirmed against street view for Broad &
+        Greenwood: one at each corner, on the corner of the leg whose left edge (looking out from
+        the junction) forms it, its head facing back into the junction - the far-side signal for
+        traffic arriving from across it. With `support=mast_arm` the head hangs at the end of an
+        arm square to that leg, over its centreline; otherwise it is on the pole (`support=pole`).
+        A corner is where two neighbouring legs' edges meet - two legs less than 180 degrees
+        apart - and the pole stands SIGNAL_CLEARANCE_M behind where the street ends along the
+        corner's bisector. Each end of a `crossing=traffic_signals` crossing gets a pedestrian
+        signal facing across it to the other end, with a push button where `button_operated=yes`."""
+        for node in controls:
+            if node["tags"].get("highway") != "traffic_signals":
+                continue
+            here = np.asarray(self.frame.point(node["lon"], node["lat"]))
+            legs = []                                # (outward unit vector, half carriageway width)
+            for line, ids, tags in self.road_ways.values():
+                coords = np.asarray(line.coords)
+                if node["id"] not in ids or len(ids) != len(coords):
+                    continue
+                i = ids.index(node["id"])
+                for j in (i - 1, i + 1):
+                    if 0 <= j < len(coords) and (n := float(np.linalg.norm(coords[j] - coords[i]))) > 0:
+                        legs.append(((coords[j] - coords[i]) / n, self.carriageway_width(tags) / 2))
+            if len(legs) < 3:
+                self.stats["traffic signals not at a junction: not drawn"] += 1
+                continue
+            legs.sort(key=lambda leg: math.atan2(leg[0][1], leg[0][0]))
+            arm = node["tags"].get("support") == "mast_arm"
+            if node["tags"].get("support") is None:
+                self.stats["signalized junctions with no support tag: heads drawn on their poles"] += 1
+            for k, (u_a, h_a) in enumerate(legs):
+                u_b, h_b = legs[(k + 1) % len(legs)]
+                turn = (math.atan2(u_b[1], u_b[0]) - math.atan2(u_a[1], u_a[0])) % (2 * math.pi)
+                if not 0 < turn < math.pi:
+                    continue                         # no corner between them
+                left_a, right_b = np.array([-u_a[1], u_a[0]]), np.array([u_b[1], -u_b[0]])
+                t, _r = np.linalg.solve(np.column_stack([u_a, -u_b]), right_b * h_b - left_a * h_a)
+                corner = here + left_a * h_a + u_a * t
+                outward = (corner - here) / max(float(np.linalg.norm(corner - here)), 1e-9)
+                pole = self.off_the_street(corner, outward, h_a + h_b + SIGNAL_CLEARANCE_M * 4)
+                if pole is None:
+                    self.stats["signal poles with no corner clear of the street: not drawn"] += 1
+                    continue
+                self.out["props"].append({
+                    "type": "traffic_signal_pole", "position_m": pole.tolist(),
+                    "heading_deg": math.degrees(math.atan2(-u_a[1], -u_a[0])),
+                    "arm_heading_deg": math.degrees(math.atan2(-left_a[1], -left_a[0])),
+                    # out to the leg's centreline: the pole's distance from it, square to the leg
+                    "arm_length_m": float(np.dot(pole - here, left_a)) if arm else 0.0})
+                self.stats["traffic signal poles"] += 1
+        for way in crossings:
+            line = self.frame.line(way.get("coords_wgs84") or [])
+            if line is None or way["tags"].get("crossing") != "traffic_signals":
+                continue
+            # From the crossing's middle out along it each way, to where it has left the street:
+            # the post stands at its end of the crosswalk, not where the footway goes on to.
+            middle = np.asarray(line.interpolate(0.5, normalized=True).coords[0])
+            for end in (np.asarray(line.coords[0]), np.asarray(line.coords[-1])):
+                outward = (end - middle) / max(float(np.linalg.norm(end - middle)), 1e-9)
+                post = self.off_the_street(middle, outward, line.length)
+                if post is None:
+                    continue
+                facing = math.degrees(math.atan2(-outward[1], -outward[0]))
+                self.out["props"].append({"type": "pedestrian_signal_head", "position_m": post.tolist(),
+                                          "heading_deg": facing, "own_post": True})
+                self.stats["pedestrian signal heads"] += 1
+                if way["tags"].get("button_operated") == "yes":
+                    self.out["props"].append({"type": "pedestrian_pushbutton", "position_m": post.tolist(),
+                                              "heading_deg": facing})
+                    self.stats["pedestrian push buttons"] += 1
 
     def building(self, way: dict) -> None:
         line = self.frame.line(way["coords_wgs84"])
@@ -708,6 +920,22 @@ def _seamless(parts: list[Polygon]) -> BaseGeometry:
             .buffer(-SEAM_M, join_style="mitre").buffer(0))
 
 
+def _hole_free(geometry: BaseGeometry) -> list[Polygon]:
+    """`geometry`'s polygons with no holes: one with a hole is cut in two across it, as often as
+    it takes. Blender extrudes a ring's outline only, so a hole drawn as a ring would be filled."""
+    out = []
+    for part in _polygons(geometry):
+        if not part.interiors:
+            out.append(part)
+            continue
+        x = Polygon(part.interiors[0]).representative_point().x   # inside the hole, so the cut crosses it
+        _west, south, _east, north = part.bounds
+        halves = _polygons(split(part, LineString([(x, south - 1.0), (x, north + 1.0)])))
+        out += [whole for half in halves for whole in _hole_free(half)] if len(halves) > 1 else [
+            Polygon(part.exterior)]
+    return out
+
+
 def _polygons(geometry: BaseGeometry) -> list[Polygon]:
     return [part for part in getattr(geometry, "geoms", [geometry])
             if isinstance(part, Polygon) and not part.is_empty]
@@ -736,6 +964,16 @@ def _skip_bars(line: LineString, half_m: float) -> list[list[list[float]]]:
     return [ring for dash in _dotted(line) for ring in _strip(LineString(dash), half_m)]
 
 
+def _mph(value: str | None) -> float:
+    """A `maxspeed` in mph: "25 mph", or a bare number, which OSM reads as km/h. 0 where unknown."""
+    if not value:
+        return 0.0
+    number = re.match(r"\s*(\d+(?:\.\d+)?)", value)
+    if number is None:
+        return 0.0
+    return float(number.group(1)) * (1.0 if "mph" in value else 0.621371)
+
+
 def _int(value: str | None) -> int | None:
     try:
         return int(str(value).split(";")[0])
@@ -756,11 +994,17 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
         layers = apply_change(layers, change)
     frame = LocalFrame(SNAPSHOT_AREAS[area])
     areas: dict[str | None, list[Polygon]] = defaultdict(list)
+    mouths: list[Polygon] = []
     for way in layers.get("road_areas", []):
         line = frame.line(way["coords_wgs84"])
         if line is not None and len(line.coords) >= 4:
-            areas[way["tags"].get("name")] += _polygons(Polygon(line.coords).buffer(0))
+            # A driveway's surface (`area:highway=service` + `service=driveway`) is paved ground
+            # beside the street, not its carriageway.
+            driveway = way["tags"].get("area:highway") == "service" and way["tags"].get("service") == "driveway"
+            (mouths if driveway else areas[way["tags"].get("name")]).extend(
+                _polygons(Polygon(line.coords).buffer(0)))
     reader = _Reader(frame, dict(areas))
+    reader.out["paved_surfaces"] += [{"coords": ring} for p in mouths for ring in _rings(p)]
     reader.out["pavement"] += [ring for polygons in areas.values() for p in polygons
                                for ring in _rings(p)]
     for way in layers["roads"]:
@@ -778,17 +1022,16 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
         reader.restriction(way)
     for way in layers["kerbs"]:
         reader.kerb(way)
+        reader.tactile(way, layers["crossings"])
     for way in layers["driveways"] + layers["parking_aisles"]:
         reader.paved(way, closed=False)
     for way in layers["parking_lots"] + layers["highway_areas"]:
         reader.paved(way, closed=True)
-    paved_areas = [way for way in layers["parking_lots"] + layers["highway_areas"]
-                   if way["tags"].get("parking") != "lane"]
-    for way in layers["kerbs"]:
-        reader.apron(way, layers["driveways"] + layers["parking_aisles"], layers["sidewalks"],
-                     layers["crossings"], paved_areas)
     for way in layers["buildings"]:
         reader.building(way)
+    reader.mouths(layers)
+    reader.sidewalks_off_the_street()
+    reader.signals(layers["traffic_control"], layers["crossings"])
     reader.out["tree_points"] = [frame.point(n["lon"], n["lat"]) for n in layers["street_furniture"]
                                  if n["tags"].get("natural") == "tree"]
     reader.hatch_all()

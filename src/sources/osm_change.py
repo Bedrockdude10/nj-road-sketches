@@ -24,7 +24,8 @@ PROPOSALS_DIR = Path(__file__).resolve().parents[2] / "proposals"
 
 @dataclass(frozen=True)
 class NewNode:
-    """A node the change creates: negative id, and tags only where the node is a feature."""
+    """A node the change creates (negative id, tags only where the node is a feature) or moves
+    (an existing node's positive id, with its FULL tag set, as an osmChange modify carries)."""
     id: int
     lon: float
     lat: float
@@ -55,12 +56,12 @@ _ACTIONS = ("create", "modify", "delete")
 
 
 def _canonical(change: OsmChange) -> OsmChange:
-    """Nodes -1, -2...; creates by id descending, then modifies, then deletes, by id ascending -
-    so a change written and loaded again is the same change."""
+    """Created nodes -1, -2..., then moved ones by id ascending; creates by id descending, then
+    modifies, then deletes, by id ascending - so a change written and loaded again is the same."""
     def order(way: WayChange) -> tuple[int, int]:
         return _ACTIONS.index(way.action), -way.id if way.action == "create" else way.id
 
-    return OsmChange(tuple(sorted(change.nodes, key=lambda node: -node.id)),
+    return OsmChange(tuple(sorted(change.nodes, key=lambda node: (node.id > 0, abs(node.id)))),
                      tuple(sorted(change.ways, key=order)))
 
 
@@ -107,9 +108,10 @@ def load_change(path: Path) -> OsmChange:
         if section.tag not in _ACTIONS:
             raise ValueError(f"{path}: unsupported <{section.tag}>")
         for element in section:
-            if element.tag == "node" and section.tag == "create":
-                if _id(element) >= 0:
-                    raise ValueError(f"create node/{_id(element)}: a created node has a negative id")
+            if element.tag == "node" and section.tag in ("create", "modify"):
+                if (_id(element) < 0) != (section.tag == "create"):
+                    raise ValueError(f"{section.tag} node/{_id(element)}: a created node has a negative "
+                                     f"id, a moved one its existing positive id")
                 nodes.append(NewNode(_id(element), float(_attr(element, "lon")),
                                      float(_attr(element, "lat")), _tags(element)))
             elif element.tag == "way":
@@ -129,7 +131,8 @@ def write_change(change: OsmChange, path: Path) -> None:
     change = _canonical(change)
     root = ET.Element("osmChange", version="0.6", generator="nj-road-sketches")
     for action in _ACTIONS:
-        nodes = change.nodes if action == "create" else ()
+        nodes = [node for node in change.nodes
+                 if (action == "create" and node.id < 0) or (action == "modify" and node.id > 0)]
         ways = [way for way in change.ways if way.action == action]
         if not nodes and not ways:
             continue

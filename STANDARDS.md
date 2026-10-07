@@ -1133,6 +1133,52 @@ Recorded here because it is routinely mistaken for one.
 
 ---
 
+## 6a. NJDOT / N.J.A.C. — kerb heights — *as cited*
+
+The reveal above the gutter each `kerb=*` value is drawn at where OSM gives no `kerb:height`.
+Encoded in `KERB_HEIGHT_M` / `RAMP_HEIGHT_M` ([`src/osm_world.py`](src/osm_world.py)); the
+sidewalk is drawn at the raised kerb's top (`RAISED_KERB_M`, `scripts/blender/blender_scene.py`).
+Supplied by Danny, 2026-10-07, citing the sources below; none opened here.
+
+| kerb | figure | constant | value | source |
+|---|---|---|---|---|
+| `raised` / `regular` | vertical face where sidewalks are built — the standard | `KERB_HEIGHT_M` | 6 in | [NJDOT Roadway Design Manual](https://www.nj.gov/transportation/eng/documents/BDC/pdf/BDC20MR-01_ATTACHMENT.pdf) |
+| `rolled` | sloping (mountable) kerb, overall height at most | `KERB_HEIGHT_M` | 4 in | NJDOT Roadway Design Manual |
+| `lowered`, at a driveway | depressed kerb top above, and parallel to, the gutter line | `KERB_HEIGHT_M` | 1.5 in | [N.J.A.C. 16:47-3.9](https://www.law.cornell.edu/regulations/new-jersey/N-J-A-C-16-47-3-9) |
+| `lowered` + `wheelchair=yes`: a curb ramp | ADA curb ramp: bottom flush with the roadway | `RAMP_HEIGHT_M` | 0 in | [NJDOT CD-606-1](https://www.nj.gov/transportation/eng/CADD/v8/v8RoadwayDetails/pdf/051_CD-606-1PublicSidewalk.pdf), N.J.A.C. 16:47-3.9 |
+| `flush` | — | `KERB_HEIGHT_M` | 0 in | wiki Key:kerb |
+| `tactile_paving=yes` | detectable warning surface, depth in the direction of travel | `TACTILE_DEPTH_M` | 24 in | ADA 2010 Standards §705.1 |
+| `tactile_paving=yes` | …across the ramp's full width, flares excluded; a curb ramp is at least 4 ft wide, so pads are typically 24 × 48 in (or 24 × 60 in) | `RAMP_WIDTH_M` | 48 in | NJDOT minimum curb ramp width, per Danny 2026-10-07 |
+
+| signal pole, pedestrian signal post | lateral clearance behind the face of the kerb | `SIGNAL_CLEARANCE_M` | 2 ft | MUTCD (from memory - §4D.15 / §2A.19 territory; **check the section before relying on it**) |
+
+The pad's dark red is Danny's choice (2026-10-07), not a standard: the ADA asks only that a
+detectable warning contrast visually with what is beside it.
+
+Not encoded: the 4 in *desirable* face on streets ≤ 40 mph (6 in is permitted where sidewalks are
+built, which is every kerbed street drawn here), the 8 in face to discourage border parking, and the
+4 in maximum on roads > 40 mph - none applies to a Hopewell street, and OSM's `maxspeed` would be
+the input if one did.
+
+---
+
+## 6b. MUTCD — diagonal crosshatch — *as cited*
+
+Hatched shoulders and restriction areas (`src/osm_world.py`, `_Reader.hatch_all` / `strokes`; stroke
+widths in `scripts/blender/blender_scene.py`). Supplied by Danny, 2026-10-07, citing
+[MUTCD chevron and diagonal crosshatch markings](https://up.codes/s/chevron-and-diagonal-crosshatch-markings);
+not opened here.
+
+| figure | value | constant | note |
+|---|---|---|---|
+| stroke angle to the longitudinal lines | 30–45° | — (45° in `strokes`) | |
+| stroke width, posted < 45 mph | 8 in | `TWO_POINT_WIDTHS_M` | by OSM `maxspeed` |
+| stroke width, posted ≥ 45 mph | 12 in | `TWO_POINT_WIDTHS_M`, `HATCH_WIDE_MPH` | its own channel, `lane_narrowing_hatch_wide_lines` |
+| longitudinal spacing, low-speed urban | 10–20 ft, engineering judgment | `HATCH_SPACING_M` = 10 ft | the dense end, so a short stretch between driveways still shows strokes - **a choice within the range** |
+| longitudinal spacing, high-speed | up to 40 ft | — | not encoded: 10 ft is used everywhere |
+
+---
+
 ## 7. Numbers that are ours, not anyone's — **Modelled**
 
 Listed so nobody goes looking for a standard behind them.
