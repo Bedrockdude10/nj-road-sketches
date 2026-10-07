@@ -19,6 +19,11 @@ Everything drawn is something OSM maps, placed where OSM puts it:
   parking      `parking:<side>=lane`, an edge line `parking:<side>:width` inside that edge;
                 where `parking:<side>:markings=yes`, its `parking:<side>:capacity` stalls marked,
                 in equal stalls along each run of parked pieces joined end to end
+                `street_side` bays paved beside the carriageway, `on_kerb` parking on the
+                pavement beyond it, `half_on_kerb` half on each (_Reader.street_parking)
+  lane lines    white where two `lanes` running the same way meet, the travel way shared
+                equally unless `width:lanes` places them; broken, solid where `change:lanes`
+                keeps traffic from crossing; none where `lane_markings=no`
   centre line   two-way ways with 2+ lanes, or with `overtaking*` or `lane_markings=yes` tagged
                 (has_centre_line), unless `lane_markings=no` - so where it stops is
                 where the way is split and tagged, never decided here. Double yellow where
@@ -149,7 +154,9 @@ PAINT_LINES = ("bike_lane_edge_lines", "parking_edge_lines", "bike_lane_contrafl
                "yellow_hatch_edge_lines", "yellow_hatch_lines",
                "parking_stall_divider_lines",
                "cycle_crossing_edge_lines",
-               "cycle_crossing_divider_lines")
+               "cycle_crossing_divider_lines", "lane_lines")
+# Street parking positions off the carriageway (wiki Street_parking, "Parking position").
+OFF_CARRIAGEWAY = ("street_side", "on_kerb", "half_on_kerb")
 
 _WIDTH = re.compile(r"""^\s*(?:(?P<ft>\d+(?:\.\d+)?)\s*'\s*(?:(?P<in>\d+(?:\.\d+)?)\s*")?
                        |(?P<num>\d+(?:\.\d+)?)\s*(?P<unit>m|ft)?)\s*$""", re.VERBOSE)
@@ -292,7 +299,7 @@ class _Reader:
             "pavement": [], "pavement_concrete": [], "pavement_gravel": [], "pavement_dirt": [], "sidewalks": [], "sidewalks_asphalt": [], "buildings": [], "kerbs": [], "paved_surfaces": [],
             "surveyed_crossings": [], "bike_lane_surface_polygons": [], "bike_lane_edge_lines": [],
             "turn_box_surface_polygons": [], "turn_box_edge_lines": [], "bike_lane_symbol_polygons": [],
-            "parking_edge_lines": [], "bike_lane_contraflow_lines": [], "lane_narrowing_edge_lines": [],
+            "parking_edge_lines": [], "lane_lines": [], "bike_lane_contraflow_lines": [], "lane_narrowing_edge_lines": [],
             "lane_narrowing_hatch_lines": [], "lane_narrowing_hatch_wide_lines": [],
             "yellow_hatch_edge_lines": [], "yellow_hatch_lines": [],
             "tree_points": [], "props": [],
@@ -441,9 +448,18 @@ class _Reader:
         parking lane against the last lane; the far side's shoulder is laid from its own edge."""
         lanes = _int(tags.get("lanes")) or 0
         widths = [width_m(w) for w in (tags.get("width:lanes") or "").split("|")]
+        backward = backward_lanes(tags, lanes)
         if len(widths) != lanes or None in widths:
-            for side in ("left", "right"):
-                self.kerbside(tags, stations, side, edges[side])
+            left, right = (self.kerbside(tags, stations, side, edges[side]) for side in ("left", "right"))
+            # Each direction's lanes share its half of the travel way equally; a oneway's share
+            # all of it. Lane j's left boundary, counting lanes left to right from 0.
+            if tags.get("oneway") in ("yes", "-1"):
+                bounds = {j: left - j * (left + right) / lanes for j in range(1, lanes)}
+            else:
+                forward = lanes - backward
+                bounds = ({j: left - j * left / backward for j in range(1, backward)}
+                          | {backward + j: -j * right / forward for j in range(1, forward)})
+            self.lane_lines(tags, stations, lanes, backward, bounds)
             return line
         def lane(i: int):
             def theirs(t: dict) -> float | None:
@@ -457,8 +473,11 @@ class _Reader:
         sign = 1 if anchor == "left" else -1
         inner = self.kerbside(tags, stations, anchor, edges[anchor])
         self.kerbside(tags, stations, far, edges[far], parking=False)
-        backward = _int(tags.get("lanes:backward")) or lanes // 2
         near = widths[:backward] if anchor == "left" else widths[backward:]
+        leftmost = sign * inner + (sum(widths) if anchor == "right" else 0)
+        self.lane_lines(tags, stations, lanes, backward,
+                        {j: leftmost - sum(widths[:j]) for j in range(1, lanes)
+                         if tags.get("oneway") in ("yes", "-1") or j != backward})
         if (tags.get(f"parking:{far}") or tags.get("parking:both")) == "lane":
             lane_edge = inner - sum(widths)
             self.out["parking_edge_lines"].append(stations.line(sign * lane_edge))
@@ -483,6 +502,7 @@ class _Reader:
         """Draw one side's shoulder, cycleway, its buffer (with its posts) and, if `parking`, its
         parking lane, edge inward, and return the travel way's edge on that side."""
         sign = 1 if side == "left" else -1
+        edge = self.street_parking(tags, side, stations, edge)
         if (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes":
             # A shoulder at the edge (wiki Key:shoulder), `shoulder:<side>:width` wide; hatched
             # where `shoulder:<side>:markings=hatched` - a project convention, as OSM has no tag
@@ -552,6 +572,46 @@ class _Reader:
         self.out["parking_edge_lines"].append(stations.line(sign * edge))
         self.stalls(tags, side, stations, sign * edge, sign * outer)
         return edge
+
+    def street_parking(self, tags: dict, side: str, stations: Stations, edge: np.ndarray) -> np.ndarray:
+        """Street parking that is not a lane on the carriageway, by its position (wiki
+        Street_parking): `street_side` bays paved beside the carriageway, `on_kerb` on the
+        pavement beyond it, `half_on_kerb` half on each - as deep as parking_depth_m says. Return
+        the carriageway's edge left for the rest of the section: half the depth in, for parking
+        astride the kerb."""
+        position = _parking(tags, side)
+        if position not in OFF_CARRIAGEWAY:
+            return edge
+        sign = 1 if side == "left" else -1
+        depth = parking_depth_m(tags, side)
+        depth = (self.along(depth, lambda t: parking_depth_m(t, side), stations) if depth
+                 else self.eased(tags, f"parking:{side}:width", "parking", stations))
+        inside = depth / 2 if position == "half_on_kerb" else np.zeros_like(depth)
+        rings = stations.strips(sign * edge, sign * (edge + depth - inside))
+        if position == "street_side":
+            surface = tags.get(f"parking:{side}:surface") or tags.get("parking:both:surface")
+            self.out["paved_surfaces"] += [_paving(ring, {"surface": surface}) for ring in rings]
+        else:
+            self.out["sidewalks"] += rings
+        self.stats[f"parking={position} (way sides)"] += 1
+        if (tags.get(f"parking:{side}:markings") or tags.get("parking:both:markings")) == "yes":
+            # Paint is kept on the carriageway (on_carriageway), so stalls off it are not drawn.
+            self.stats[f"parking={position} markings: not drawn off the carriageway"] += 1
+        return edge - inside
+
+    def lane_lines(self, tags: dict, stations: Stations, lanes: int, backward: int,
+                   bounds: dict[int, np.ndarray]) -> None:
+        """A lane line where two lanes running the same way meet - lane j's left boundary at
+        signed offset `bounds[j]`, lanes counted left to right - white (MUTCD 3B.06, STANDARDS.md):
+        broken, solid where either lane's `change:lanes` keeps traffic from crossing it."""
+        if tags.get("lane_markings") == "no":
+            return
+        changes = lane_changes(tags, lanes, backward)
+        for j, offset in bounds.items():
+            line = LineString(stations.line(offset))
+            solid = changes[j - 1] in NO_CHANGE_RIGHT or changes[j] in NO_CHANGE_LEFT
+            self.out["lane_lines"] += _lines(line) if solid else _dashes(line)
+            self.stats[f"lane lines ({'solid' if solid else 'broken'}, pieces of way)"] += 1
 
     def stalls(self, tags: dict, side: str, stations: Stations, one: np.ndarray,
                other: np.ndarray) -> None:
@@ -1160,7 +1220,59 @@ def carriageway_width_m(tags: dict) -> tuple[float, str]:
     if tags.get("highway") == "service":
         return DEFAULT_WIDTHS_M["service"], "DEFAULTED (service)"
     lanes = _int(tags.get("lanes")) or (1 if tags.get("oneway") == "yes" else 2)
-    return lanes * DEFAULT_WIDTHS_M["lane"], "DEFAULTED (lanes x lane)"
+    # Everything the way's tags put on its carriageway, each as wide as _Reader.kerbside lays it:
+    # `width` includes lane parking and never street-side parking (wiki Street_parking).
+    section = lanes * DEFAULT_WIDTHS_M["lane"]
+    for side in ("left", "right"):
+        if (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes":
+            section += width_m(tags.get(f"shoulder:{side}:width")) or DEFAULT_WIDTHS_M["shoulder"]
+        if _has_cycleway(tags, side):
+            section += (width_m(tags.get(f"cycleway:{side}:width")) or DEFAULT_WIDTHS_M["cycleway"]) \
+                + (width_m(tags.get(f"cycleway:{side}:buffer")) or 0.0)
+        position = _parking(tags, side)
+        if position in ("lane", "half_on_kerb"):
+            depth = parking_depth_m(tags, side) or DEFAULT_WIDTHS_M["parking"]
+            section += depth if position == "lane" else depth / 2
+    return section, "DEFAULTED (its tagged section summed)"
+
+
+def backward_lanes(tags: dict, lanes: int) -> int:
+    """How many of a two-way way's `lanes` run against it: `lanes:backward`, else what
+    `lanes:forward` leaves, else half."""
+    backward, forward = _int(tags.get("lanes:backward")), _int(tags.get("lanes:forward"))
+    if backward is not None:
+        return backward
+    return lanes - forward if forward is not None else lanes // 2
+
+
+# `change:lanes` values that keep traffic in a lane from crossing to its right / its left
+# (wiki Key:change; `only_left` is `not_right`, `only_right` is `not_left`).
+NO_CHANGE_RIGHT = ("no", "not_right", "only_left")
+NO_CHANGE_LEFT = ("no", "not_left", "only_right")
+_SWAP_CHANGE = {"not_left": "not_right", "not_right": "not_left",
+                "only_left": "only_right", "only_right": "only_left"}
+
+
+def lane_changes(tags: dict, lanes: int, backward: int) -> list[str | None]:
+    """Each lane's `change:lanes` value, lanes left to right across the way; None where untagged.
+    A list is read only where it has one value per lane it covers. A oneway's is `change:lanes`;
+    a two-way way's is `change:lanes:backward` then `change:lanes:forward`. Lanes run against
+    the way (`:backward`, `oneway=-1`) are listed as their drivers see them, so they are reversed
+    and their left and right swapped into the way's frame."""
+    def values(key: str, count: int, against: bool) -> list[str | None]:
+        found = (tags.get(key) or "").split("|")
+        if len(found) != count:
+            return [None] * count
+        return [_SWAP_CHANGE.get(v, v) for v in reversed(found)] if against else found
+    if tags.get("oneway") in ("yes", "-1"):
+        return values("change:lanes", lanes, tags.get("oneway") == "-1")
+    return (values("change:lanes:backward", backward, True)
+            + values("change:lanes:forward", lanes - backward, False))
+
+
+def _parking(tags: dict, side: str) -> str | None:
+    """`side`'s street parking position (wiki Street_parking)."""
+    return tags.get(f"parking:{side}") or tags.get("parking:both")
 
 
 def _orientation(tags: dict, side: str) -> str:

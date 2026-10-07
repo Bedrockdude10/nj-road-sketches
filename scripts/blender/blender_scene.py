@@ -699,6 +699,11 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     for line in data.get("bike_lane_contraflow_lines", []):
         for ring in polyline_rings(line, CENTERLINE_WIDTH_M):
             yellow.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
+    # A lane line between two lanes running the same way: white, the centre stripe's normal width
+    # (MUTCD 3B.06(05)). Already cut into dashes upstream where it is broken.
+    for line in data.get("lane_lines", []):
+        for ring in polyline_rings(line, CENTERLINE_WIDTH_M):
+            white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     white.build()
     yellow.build()
 
