@@ -242,6 +242,7 @@ SURVEYED_CROSSING_LINE_WIDTH_M = 0.25
 SAMPLED_POLYLINE_CHANNELS = (
     ("lane_narrowing_edge_lines", 0.25),
     ("yellow_hatch_edge_lines", 0.25),
+    ("blue_hatch_edge_lines", 0.25),
     ("lane_narrowing_taper_lines", 0.15),
     ("parking_edge_lines", 0.25),
     ("left_edge_lines", 0.25),
@@ -254,7 +255,8 @@ SAMPLED_POLYLINE_CHANNELS = (
 # Two-point strokes: a hatch stroke runs edge to edge of its zone and a stall tick lies across the
 # kerbside strip. Only their two ends exist, so the chord IS the line.
 TWO_POINT_CHANNELS = (
-    "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines", "yellow_hatch_lines",
+    "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines", "yellow_hatch_stroke_lines",
+    "blue_hatch_stroke_lines",
     "corner_hatching_lines",
     "parking_stall_divider_lines",
     "parking_buffer_hatch_lines", "bike_lane_hatch_lines",
@@ -262,7 +264,8 @@ TWO_POINT_CHANNELS = (
 TWO_POINT_WIDTH_M = 0.15
 # Diagonal crosshatch strokes at MUTCD's widths (as cited; STANDARDS.md 6b): 8 in below 45 mph,
 # 12 in at or above - src/osm_world.py sorts each street's strokes by its OSM `maxspeed`.
-TWO_POINT_WIDTHS_M = {"lane_narrowing_hatch_lines": 8 * 0.0254, "yellow_hatch_lines": 8 * 0.0254,
+TWO_POINT_WIDTHS_M = {"lane_narrowing_hatch_lines": 8 * 0.0254, "yellow_hatch_stroke_lines": 8 * 0.0254,
+                      "blue_hatch_stroke_lines": 8 * 0.0254,
                       "lane_narrowing_hatch_wide_lines": 12 * 0.0254}
 # THE CHANNELS DRAWN IN THE YELLOW MATERIAL. Every other paint channel is white, so this is the
 # whole of what makes a stripe yellow at this end - which is why a yellow marking gets its own
@@ -271,7 +274,9 @@ TWO_POINT_WIDTHS_M = {"lane_narrowing_hatch_lines": 8 * 0.0254, "yellow_hatch_li
 # edge of a ONE-WAY roadway (MUTCD 3B.09 P3) and `bike_lane_contraflow_lines` divides riders
 # going opposite ways. Yellow means "do not cross to the other side of this".
 YELLOW_CHANNELS = ("left_edge_lines", "bike_lane_contraflow_lines", "yellow_hatch_edge_lines",
-                   "yellow_hatch_lines")
+                   "yellow_hatch_stroke_lines")
+# A `colour=blue` restriction area's outline and strokes (src/osm_world.py:HATCH_COLOURS).
+BLUE_CHANNELS = ("blue_hatch_edge_lines", "blue_hatch_stroke_lines")
 # The centerline styles drawn in the WHITE marking material rather than the yellow one - a
 # broken lane line between two lanes running the same way. Blender runs under its own bundled
 # Python and cannot import src, so this mirrors src/geometry/treatments/base.py:
@@ -463,6 +468,7 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     # numbers. Rough like the asphalt it is painted on rather than glossy like fresh stripes.
     bike_surface_mat = make_material("BikeLaneSurface", (0.13, 0.45, 0.28), roughness=0.85)
     centerline_mat = make_material("Centerline", (0.85, 0.7, 0.15), roughness=0.4)
+    blue_paint_mat = make_material("BluePaint", (0.1, 0.25, 0.7), roughness=0.4)
     building_mats = [make_material(f"Building{i}", c, roughness=0.75) for i, c in enumerate(BUILDING_PALETTE)]
     pole_mat = make_material("Pole", SIGN_POST_GRAY, roughness=0.5)
     trunk_mat = make_material("TreeTrunk", (0.32, 0.22, 0.15), roughness=0.9)
@@ -680,10 +686,14 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     # enough to pull the painted lane edge inside the 11 ft it marks.
     white = MeshBatch("paint_white", marking_mat)
     yellow = MeshBatch("paint_yellow", centerline_mat)
+    blue = MeshBatch("paint_blue", blue_paint_mat)
+
+    def paint(key: str) -> MeshBatch:
+        return yellow if key in YELLOW_CHANNELS else blue if key in BLUE_CHANNELS else white
     # (channel, stripe width) - the two widths are a drawn-scale choice, not a standard: a solid
     # edge line reads at 0.25 m here and a hatch stroke at 0.15 m.
     for key, width in SAMPLED_POLYLINE_CHANNELS:
-        batch = yellow if key in YELLOW_CHANNELS else white
+        batch = paint(key)
         for line in data.get(key, []):
             for ring in polyline_rings(line, width):
                 batch.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
@@ -692,7 +702,7 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
         for line in data.get(key, []):
             ring = line_ring(line[0], line[-1], TWO_POINT_WIDTHS_M.get(key, TWO_POINT_WIDTH_M))
             if ring is not None:
-                (yellow if key in YELLOW_CHANNELS else white).add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
+                paint(key).add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     # A TWO-WAY LANE'S CENTRE STRIPE IS YELLOW, and the channel is what decides that - see
     # YELLOW_CHANNELS. Its own loop rather than a row in SAMPLED_POLYLINE_CHANNELS because it is
     # laid at CENTERLINE_WIDTH_M, not at an edge line's width. Already cut into dashes upstream.
@@ -706,6 +716,7 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
             white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     white.build()
     yellow.build()
+    blue.build()
 
     for i, ring in enumerate(data.get("corner_apron_polygons", [])):
         extrude_polygon(f"corner_apron_{i}", ring, 0.01, apron_mat, z_base=marking_z)

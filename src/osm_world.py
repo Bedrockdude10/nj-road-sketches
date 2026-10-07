@@ -147,11 +147,15 @@ ZEBRA_BAR_M = 0.5            # a continental crossing's bar width, and the gap b
 # 8 in wide below 45 mph, 12 in at or above (by OSM `maxspeed`: the wide strokes' own channel).
 HATCH_SPACING_M = 10 * FT_TO_M
 HATCH_WIDE_MPH = 45
+# The `colour`s a `road_marking=restriction` area is hatched in other than white, each in its own
+# channels (`<colour>_hatch_edge_lines`, `<colour>_hatch_stroke_lines`) - the channel is what
+# decides a stripe's colour in 3D (scripts/blender/blender_scene.py:PAINT_COLOUR_CHANNELS).
+HATCH_COLOURS = ("yellow", "blue")
 SEAM_M = 0.05                # hatching laid way by way leaves mm seams where consecutive ways turn
 # The line channels that are paint, kept on the street surface (_Reader.on_carriageway).
 PAINT_LINES = ("bike_lane_edge_lines", "parking_edge_lines", "bike_lane_contraflow_lines",
                "lane_narrowing_edge_lines", "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
-               "yellow_hatch_edge_lines", "yellow_hatch_lines",
+               *(f"{c}_hatch_{k}_lines" for c in HATCH_COLOURS for k in ("edge", "stroke")),
                "parking_stall_divider_lines",
                "cycle_crossing_edge_lines",
                "cycle_crossing_divider_lines", "lane_lines")
@@ -276,7 +280,8 @@ class _Reader:
         self.areas = areas
         self._own: dict[str, BaseGeometry] = {}
         self.hatched: list[tuple[Polygon, str | None]] = []   # (area, street): hatch_all draws them
-        self.hatched_yellow: list[Polygon] = []                # `colour=yellow` restriction areas
+        # restriction areas hatched in a colour other than white, by HATCH_COLOURS colour
+        self.hatched_coloured: dict[str, list[Polygon]] = defaultdict(list)
         self.parking: list[dict] = []        # marked parking lanes, piece by piece: stall_all draws them
         self._way: dict = {}                 # the way being drawn
         # Each named street's centrelines and widest carriageway: what its hatching is struck along.
@@ -301,7 +306,7 @@ class _Reader:
             "turn_box_surface_polygons": [], "turn_box_edge_lines": [], "bike_lane_symbol_polygons": [],
             "parking_edge_lines": [], "lane_lines": [], "bike_lane_contraflow_lines": [], "lane_narrowing_edge_lines": [],
             "lane_narrowing_hatch_lines": [], "lane_narrowing_hatch_wide_lines": [],
-            "yellow_hatch_edge_lines": [], "yellow_hatch_lines": [],
+            **{f"{c}_hatch_{k}_lines": [] for c in HATCH_COLOURS for k in ("edge", "stroke")},
             "tree_points": [], "props": [],
             "cycle_crossing_surface_polygons": [], "cycle_crossing_edge_lines": [],
             "cycle_crossing_divider_lines": [], "parking_stall_divider_lines": [],
@@ -809,7 +814,7 @@ class _Reader:
                        for part in _lines(LineString(line).intersection(lined))]
             self.out[key] = ([[part[0], part[-1]] for part in clipped]
                              if key in ("lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
-                                        "yellow_hatch_lines",
+                                        *(f"{c}_hatch_stroke_lines" for c in HATCH_COLOURS),
                                         "parking_stall_divider_lines")
                              else clipped)
         for key in ("bike_lane_surface_polygons", "cycle_crossing_surface_polygons",
@@ -846,8 +851,8 @@ class _Reader:
             self.out["surveyed_crossings"].append({"bars": _rings(bar)})
 
     def restriction(self, way: dict) -> None:
-        """A `road_marking=restriction` area, hatched - in yellow where `colour=yellow` (the
-        crosshatch the MUTCD gives an area between opposing traffic), else white."""
+        """A `road_marking=restriction` area, hatched in its `colour` - one of HATCH_COLOURS, else
+        white, the colour of a marking with none tagged."""
         line = self.frame.line(way["coords_wgs84"])
         if line is not None and len(line.coords) >= 4:
             # On a street - its centre inside that street's own surface - it is struck along that
@@ -856,9 +861,12 @@ class _Reader:
             name = next((street for street, own in self.areas.items() if street and polygons
                          and any(a.contains(polygons[0].representative_point()) for a in own)), None)
             parts = [(part, name) for part in polygons]
-            if way["tags"].get("colour") == "yellow":
-                self.hatched_yellow += [part for part, _name in parts]
+            colour = way["tags"].get("colour")
+            if colour in HATCH_COLOURS:
+                self.hatched_coloured[colour] += [part for part, _name in parts]
             else:
+                if colour not in (None, "white"):
+                    self.stats[f"restriction areas colour={colour}: no such paint, hatched white"] += 1
                 self.hatched += parts
 
     def hatch_all(self) -> None:
@@ -888,15 +896,16 @@ class _Reader:
             for line in getattr(linemerge(self.street_lines[name]), "geoms", None) or [
                     linemerge(self.street_lines[name])]:
                 self.strokes(line, area, self.street_width[name], wide=self.street_mph[name] >= HATCH_WIDE_MPH)
-        # Yellow restriction areas: their own outline and strokes, in the yellow channels.
-        for piece in _polygons(_seamless(self.hatched_yellow)) if self.hatched_yellow else []:
-            self.out["yellow_hatch_edge_lines"] += _lines(piece.exterior)
-            corners = np.asarray(piece.minimum_rotated_rectangle.exterior.coords)
-            sides = np.diff(corners[:3], axis=0)
-            long = sides[np.argmax(np.linalg.norm(sides, axis=1))]
-            middle = np.asarray(piece.centroid.coords[0])
-            self.strokes(LineString([middle - long, middle + long]), piece, float(np.linalg.norm(long)),
-                         wide=False, channel="yellow_hatch_lines")
+        # Coloured restriction areas: their own outline and strokes, in their colour's channels.
+        for colour, parts in self.hatched_coloured.items():
+            for piece in _polygons(_seamless(parts)):
+                self.out[f"{colour}_hatch_edge_lines"] += _lines(piece.exterior)
+                corners = np.asarray(piece.minimum_rotated_rectangle.exterior.coords)
+                sides = np.diff(corners[:3], axis=0)
+                long = sides[np.argmax(np.linalg.norm(sides, axis=1))]
+                middle = np.asarray(piece.centroid.coords[0])
+                self.strokes(LineString([middle - long, middle + long]), piece,
+                             float(np.linalg.norm(long)), wide=False, channel=f"{colour}_hatch_stroke_lines")
 
     def strokes(self, along: LineString, area: BaseGeometry, reach: float, wide: bool,
                 channel: str | None = None) -> None:
