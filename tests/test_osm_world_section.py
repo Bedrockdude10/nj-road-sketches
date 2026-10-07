@@ -35,8 +35,9 @@ def _offsets(lines: list) -> list[float]:
 
 
 def _y_span(rings: list) -> tuple[float, float]:
-    shape = unary_union([Polygon(ring) for ring in rings])
-    return round(shape.bounds[1], 2), round(shape.bounds[3], 2)
+    """The north-south extent of drawn rings (paved_surfaces wraps each as {"coords": ring})."""
+    shape = unary_union([Polygon(r["coords"] if isinstance(r, dict) else r) for r in rings])
+    return pytest.approx((shape.bounds[1], shape.bounds[3]), abs=0.01)
 
 
 # --- the carriageway's width where OSM gives none: the section it is tagged with, summed ----------
@@ -158,8 +159,7 @@ def test_diagonal_on_kerb_parking_is_as_deep_as_a_diagonal_bay():
     depth = parking_depth_m(tags, "left")
     out = _draw(tags).out
     shape = unary_union([Polygon(ring) for ring in out["sidewalks"]])
-    assert round(shape.bounds[1], 2) == round(-3 - depth, 2)
-    assert round(shape.bounds[3], 2) == round(3 + depth, 2)
+    assert (shape.bounds[1], shape.bounds[3]) == pytest.approx((-3 - depth, 3 + depth), abs=0.01)
 
 
 def test_street_side_parking_is_paved_ground_beside_the_carriageway():
