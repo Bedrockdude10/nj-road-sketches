@@ -26,7 +26,10 @@ The governing law for every no-parking setback drawn here. NJ has no statute cal
 "daylighting"; it gets there through the ordinary parking prohibitions.
 
 Encoded in [`src/geometry/daylighting.py`](src/geometry/daylighting.py), whose module docstring
-is the long-form version of this section.
+is the long-form version of this section. The OSM wrapper applies clause (e)'s two arms as
+`NO_STANDING_FT` in [`src/osm_osc.py`](src/osm_osc.py): each leg split at the further arm and the
+piece tagged `parking:<side>:restriction=no_standing` + `:reason=junction`. Its crosswalk arm reads
+mapped crossings only, so where none is mapped the side-line arm stands in for it (a shorter zone).
 
 **R.S. 39:4-138**, as amended by P.L. 2009 c.257 — parking prohibited: *(as cited)*
 
@@ -1176,6 +1179,25 @@ not opened here.
 | stroke width, posted ≥ 45 mph | 12 in | `TWO_POINT_WIDTHS_M`, `HATCH_WIDE_MPH` | its own channel, `lane_narrowing_hatch_wide_lines` |
 | longitudinal spacing, low-speed urban | 10–20 ft, engineering judgment | `HATCH_SPACING_M` = 10 ft | the dense end, so a short stretch between driveways still shows strokes - **a choice within the range** |
 | longitudinal spacing, high-speed | up to 40 ft | — | not encoded: 10 ft is used everywhere |
+
+---
+
+## 6c. Narrow stretches and re-centring — *as cited* / **Local**
+
+Where the kerbs stand closer than a block's section, the way is split and that piece narrowed;
+the street is re-centred on the stretch's midline over a taper, and a `placement=transition` piece
+leads into and out of it, along which the reader interpolates the layout (`src/osm_osc.py`:
+`_narrow`, `_narrowed`, `_recentred`, `_tag_pieces`; `src/osm_world.py`: `taper_rate`,
+`DEFAULT_MPH`, `_Reader.transition`). The kerbs are measured every 2 m and at every kerb vertex.
+
+| figure | value | constant | source |
+|---|---|---|---|
+| taper length for a lateral shift, ≤ 40 mph | L = W·S²/60 | `taper_rate` | MUTCD (as cited, from memory - check §3B / Table 6C-4) |
+| taper length for a lateral shift, > 40 mph | L = W·S | `taper_rate` | MUTCD (as cited) |
+| speed where `maxspeed` is not tagged | 25 mph | `DEFAULT_MPH` | N.J.S.A. 39:4-98, residence / business district (as cited) |
+| the order a too-narrow section gives in | buffer, track, parking, lanes | `_narrowed` | **Local** - Danny, 2026-10-07 |
+| how far the buffer gives | 3 ft → 2 ft | `MIN_BUFFER_FT` | **Local** - Danny, 2026-10-07 |
+| how far the track gives | 10 ft → 8 ft | `CONSTRAINED_TRACK_FT` | the old design ladder's constrained rung |
 
 ---
 
