@@ -80,7 +80,8 @@ def test_a_change_that_cannot_apply_is_refused(way):
 @pytest.mark.parametrize("body", [
     '<create><way id="-1"><nd ref="1"/><nd ref="2"/><tag k="highway" v="service"/></way></create>',
     '<create><relation id="-1"><tag k="type" v="route"/></relation></create>',
-    '<modify><node id="1" lat="40.39" lon="-74.77"/></modify>',
+    '<modify><node id="-1" lat="40.39" lon="-74.77"/></modify>',
+    '<create><node id="1" lat="40.39" lon="-74.77"/></create>',
     '<create><way id="5"><nd ref="1"/><nd ref="2"/><tag k="note" v="x"/></way></create>',
     '<modify><way id="-3"><nd ref="1"/><nd ref="2"/><tag k="note" v="x"/></way></modify>',
     '<create><way id="-1"><nd ref="1"/><tag k="note" v="x"/></way></create>',
@@ -88,6 +89,23 @@ def test_a_change_that_cannot_apply_is_refused(way):
 def test_a_file_outside_what_is_supported_is_refused(tmp_path, body):
     with pytest.raises(ValueError):
         load_change(_osc(tmp_path, body))
+
+
+def test_a_moved_node_is_a_modify_that_keeps_its_tags_and_moves_what_uses_it(tmp_path):
+    """The proposal re-centres a street on its kerbs by moving its existing nodes (positive ids):
+    each goes under <modify> with its full tags, loads back unchanged, and moves every way that
+    shares it."""
+    moved = NewNode(2, -74.7690, 40.3901, {"highway": "crossing"})
+    change = OsmChange((moved,), ())
+    path = tmp_path / "moved.osc"
+    write_change(change, path)
+    sections = {section.tag: section for section in ET.parse(path).getroot()}
+    assert list(sections) == ["modify"]
+    node = sections["modify"].find("node")
+    assert (node.get("id"), node.find("tag").get("v")) == ("2", "crossing")
+    assert load_change(path) == change
+    road = apply_change(_layers(), change)["roads"][0]
+    assert road["coords_wgs84"][1] == [-74.7690, 40.3901]
 
 
 def test_a_change_written_and_loaded_is_the_same_change(tmp_path):

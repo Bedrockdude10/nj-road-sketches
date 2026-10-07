@@ -162,6 +162,21 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
               and len(way["node_ids"]) == len(way.get("coords_wgs84") or ())
               for node_id, coord in zip(way["node_ids"], way["coords_wgs84"], strict=True)}
     coords |= {node.id: [node.lon, node.lat] for node in change.nodes}
+    # A moved node moves everything that uses it - every way through it the change does not itself
+    # rewrite, and the node itself where a layer holds it (a kerb, a signal) - so nothing joined to
+    # a re-centred street is left behind at the old spot.
+    moved = {node.id: node for node in change.nodes if node.id > 0}
+    if moved:
+        def placed(item):
+            if not isinstance(item, dict):
+                return item
+            ids = item.get("node_ids") or []
+            if ids and len(ids) == len(item.get("coords_wgs84") or ()) and moved.keys() & set(ids):
+                return {**item, "coords_wgs84": [coords[node_id] for node_id in ids]}
+            if item.get("id") in moved and "lon" in item and not item.get("coords_wgs84"):
+                return {**item, "lon": moved[item["id"]].lon, "lat": moved[item["id"]].lat}
+            return item
+        out = {name: [placed(item) for item in items] for name, items in out.items()}
 
     for change_way in _canonical(change).ways:
         if change_way.action != "create":
