@@ -15,8 +15,8 @@ Everything drawn is something OSM maps, placed where OSM puts it:
   shoulder      `shoulder:<side>=yes`, `shoulder:<side>:width` at the edge; where
                 `shoulder:<side>:markings=hatched` (a project convention), hatched from its inner
                 line out to its street's own `area:highway` edge - everything the kerb as built
-                leaves outside the markings
-  parking       `parking:<side>=lane`, an edge line `parking:<side>:width` inside that edge;
+                leaves outside the markings; not hatched (a driveway), its lane edge dotted
+  parking      `parking:<side>=lane`, an edge line `parking:<side>:width` inside that edge;
                 where `parking:<side>:markings=yes`, its `parking:<side>:capacity` stalls marked,
                 in equal stalls along each run of parked pieces joined end to end
   centre line   two-way ways with 2+ lanes, or with `overtaking*` or `lane_markings=yes` tagged
@@ -28,7 +28,8 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 where `surface:colour=green`; where `crossing:markings=dashes`, edged in
                 CROSSBIKE_DASH_M dots and the green in skip bars of the same pattern; a dashed
                 yellow divider where `oneway=no`
-  sidewalks     `footway=sidewalk` ways, buffered to their `width`
+  sidewalks     `footway=sidewalk` ways, and paved footpaths (_footpath), buffered to their
+                `width`, concrete unless `surface=asphalt`
   crossings     `footway=crossing` ways, painted as their `crossing:markings` says, on the
                 carriageway only
   markings      `road_marking=stop_line` bars (STOP_BAR_M wide), `road_marking=restriction`
@@ -44,6 +45,13 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 a lowered kerb's driveway mouth (_Reader.mouths), and any mapped driveway
                 surface (`area:highway=service` + `service=driveway`)
   buildings     their footprints, at `height` / `building:levels`
+  surface       a street, its `area:highway`, paved ground or an unpaved path is drawn in its
+                `surface`'s material (SURFACE_MATERIAL): concrete, gravel, dirt, else asphalt
+  turn boxes    `area:highway=cycleway` + `cycleway=two_stage_box` areas (MUTCD 9E.11): green,
+                outlined in white, a bicycle symbol and a through arrow into the bikeway; the
+                track's divider stops at the box
+  bollards      `barrier=bollard`: a post at a node, and along a way (a row) one at each end
+                and evenly between, at most BOLLARD_SPACING_M apart
 
 Where OSM records no width, DEFAULT_WIDTHS_M stands in, and every use of it is counted in
 `stats` so a render says how much of it is OSM and how much is the fallback.
@@ -61,13 +69,22 @@ import shapely
 from shapely import unary_union
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import linemerge, split
+from shapely.ops import linemerge, nearest_points, split
 
 from src.geometry.model.crs import NJ_STATE_PLANE_FT, WGS84
 from src.sources.osm_change import OsmChange, apply_change, load_change
 from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
 
 FT_TO_M = 0.3048
+
+# What each `surface` value (wiki Key:surface) is drawn in - its material, and the texture
+# src/render/theme.py fetches for it. Any other value, or none, is asphalt.
+SURFACE_MATERIAL = {**dict.fromkeys(("concrete", "concrete:plates", "concrete:lanes"), "concrete"),
+                    **dict.fromkeys(("gravel", "fine_gravel", "compacted", "pebblestone"), "gravel"),
+                    **dict.fromkeys(("unpaved", "ground", "dirt", "earth", "mud", "sand"), "dirt")}
+UNPAVED = ("gravel", "dirt")
+PAVEMENT_KEYS = ("pavement", "pavement_concrete", "pavement_gravel", "pavement_dirt")
+ON_FOOT = ("footway", "pedestrian", "path", "track", "bridleway")
 
 # Vehicular highway values (wiki Key:highway, "Roads" and "Link roads"), plus non-driveway service.
 CARRIAGEWAY = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified",
@@ -109,6 +126,9 @@ BOLLARD_SPACING_M = 8 * FT_TO_M   # flex posts down a buffer's centre, as the ol
 # A conflict area's dotted line, and the green skip-paint that follows its pattern: 2 ft dashes,
 # 2 ft gaps (MUTCD 3B.08 dotted lines, IA-14 green colored pavement - as cited).
 CROSSBIKE_DASH_M = 2 * FT_TO_M
+# A bicycle symbol's / arrow's painted footprint - schematic, as the old pipeline drew them
+# (MUTCD 9E.11(05) names the markings, not a size).
+SYMBOL_LENGTH_M, SYMBOL_WIDTH_M = 5.5 * FT_TO_M, 2.4 * FT_TO_M
 ZEBRA_BAR_M = 0.5            # a continental crossing's bar width, and the gap between bars
 # Diagonal crosshatch (MUTCD 3B, as cited; STANDARDS.md 6b): strokes 30-45 degrees to the lines
 # they meet (45 here), spaced along the street by engineering judgment - 10-20 ft on low-speed
@@ -251,6 +271,7 @@ class _Reader:
         self.street_width: dict[str, float] = defaultdict(float)
         self.street_mph: dict[str, float] = defaultdict(float)     # its highest posted `maxspeed`
         self.crosswalk_bands: list[BaseGeometry] = []   # kept clear of other paint (on_carriageway)
+        self.turn_boxes: list[Polygon] = []              # likewise, bar their own markings
         # Per road way: its nodes, drawn surface and edges - what a crossing is painted on.
         self.road_nodes: dict[int, set[int]] = {}
         self.road_ways: dict[int, tuple[LineString, list[int], dict]] = {}   # signals() reads them
@@ -262,8 +283,9 @@ class _Reader:
         self.node_xy: dict[int, list[float]] = {}
         self.stats: Counter[str] = Counter()
         self.out: dict[str, list] = {
-            "pavement": [], "sidewalks": [], "buildings": [], "kerbs": [], "paved_surfaces": [],
+            "pavement": [], "pavement_concrete": [], "pavement_gravel": [], "pavement_dirt": [], "sidewalks": [], "sidewalks_asphalt": [], "buildings": [], "kerbs": [], "paved_surfaces": [],
             "surveyed_crossings": [], "bike_lane_surface_polygons": [], "bike_lane_edge_lines": [],
+            "turn_box_surface_polygons": [], "turn_box_edge_lines": [], "bike_lane_symbol_polygons": [],
             "parking_edge_lines": [], "bike_lane_contraflow_lines": [], "lane_narrowing_edge_lines": [],
             "lane_narrowing_hatch_lines": [], "lane_narrowing_hatch_wide_lines": [],
             "yellow_hatch_edge_lines": [], "yellow_hatch_lines": [],
@@ -386,7 +408,8 @@ class _Reader:
         edges = {"left": half, "right": half}
         surface = stations.strips(-half, half)
         if tags.get("name") not in self.areas or tags.get("highway") == "service":
-            self.out["pavement"] += surface      # where its street is mapped, the area is the pavement
+            # where its street is mapped, the area is the pavement
+            self.out[_pavement_key(tags)] += surface
         self.road_nodes[way["id"]] = set(nodes)
         self.road_ways[way["id"]] = (line, list(nodes), tags)
         self.road_names[way["id"]] = tags.get("name")
@@ -437,13 +460,14 @@ class _Reader:
                         sign * (lane_edge - self.eased(tags, f"parking:{far}:width", "parking", stations)))
         # Each side's lane edge, where nothing else marks it: a hatched shoulder's outline and a
         # parking lane's edge already do, and a track's buffer line does. That leaves a shoulder
-        # whose hatching breaks where traffic crosses the kerb - the edge line carries on across a
-        # driveway, as it is painted.
+        # whose hatching breaks where traffic crosses the kerb - the edge line is maintained across
+        # a driveway (MUTCD 3B.11(09)), dotted as through a conflict area (3B.11(10)), so a solid
+        # line is never mistaken for a parking lane's or a hatched area's edge.
         for side, edge_at in ((anchor, inner), (far, inner - sum(widths))):
             marked = (tags.get(f"shoulder:{side}:markings") == "hatched" or _has_cycleway(tags, side)
                       or (tags.get(f"parking:{side}") or tags.get("parking:both")) == "lane")
             if not marked and (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes":
-                self.out["lane_narrowing_edge_lines"].append(stations.line(sign * edge_at))
+                self.out["lane_narrowing_edge_lines"] += _dotted(LineString(stations.line(sign * edge_at)))
                 self.stats["lane edge lines carried across an opening (pieces)"] += 1
         self.stats["cross-section laid by width:lanes (ways)"] += 1
         return LineString(stations.line(sign * (inner - sum(near))))
@@ -565,11 +589,69 @@ class _Reader:
         if tags.get("oneway") == "no":
             self.out["cycle_crossing_divider_lines"] += _dashes(line)
 
+    def bollard(self, item: dict) -> None:
+        """`barrier=bollard`: a post at a node; along a way (a row of them), a post at each end
+        and as many between, evenly, as keep them at most BOLLARD_SPACING_M apart."""
+        if not item.get("coords_wgs84"):
+            if "lon" in item:
+                self.out["props"].append({"type": "bollard", "heading_deg": 0.0,
+                                          "position_m": list(self.frame.point(item["lon"], item["lat"]))})
+            return
+        line = self.frame.line(item["coords_wgs84"])
+        if line is None:
+            return
+        count = max(2, math.ceil(line.length / BOLLARD_SPACING_M) + 1)
+        self.out["props"] += [{"type": "bollard", "heading_deg": 0.0,
+                               "position_m": list(line.interpolate(at).coords[0])}
+                              for at in np.linspace(0.0, line.length, count)]
+        self.stats["bollard rows (barrier=bollard ways)"] += 1
+
     def sidewalk(self, way: dict) -> None:
+        """A sidewalk or paved footpath, at kerb height: concrete unless `surface=asphalt`."""
         line = self.frame.line(way["coords_wgs84"])
         if line is not None:
             half = self.width(way["tags"], "width", "sidewalk") / 2
-            self.out["sidewalks"] += _strip(line, half)
+            key = "sidewalks_asphalt" if way["tags"].get("surface") == "asphalt" else "sidewalks"
+            self.out[key] += _strip(line, half)
+
+    def turn_box(self, box: Polygon) -> None:
+        """A two-stage turn box (`cycleway=two_stage_box`, MUTCD 9E.11): green all over (12), a
+        solid white line on all four sides (07), and a bicycle symbol beside a THROUGH arrow (05,
+        06 - through, for a two-way bikeway), both pointing along its length into the bikeway: the
+        way the nearest of the track's green outside it lies. Drawn after the roads."""
+        self.turn_boxes.append(box)
+        self.out["turn_box_surface_polygons"] += _rings(box)
+        self.out["turn_box_edge_lines"] += _lines(box.exterior)
+        corners = np.asarray(box.minimum_rotated_rectangle.exterior.coords)[:3]
+        sides = np.diff(corners, axis=0)
+        along = sides[np.argmax(np.linalg.norm(sides, axis=1))]
+        along = along / np.linalg.norm(along)
+        centre = np.asarray(box.centroid.coords[0])
+        green = unary_union([Polygon(r).buffer(0) for r in self.out["bike_lane_surface_polygons"]
+                             if len(r) >= 4]).difference(box.buffer(STATION_STEP_M))
+        if not green.is_empty:
+            toward = np.asarray(nearest_points(box.centroid, green)[1].coords[0]) - centre
+            along = along if float(np.dot(toward, along)) >= 0 else -along
+        across = np.array([-along[1], along[0]])
+        width = float(np.min(np.linalg.norm(sides, axis=1)))
+        nose, half = SYMBOL_LENGTH_M / 2, SYMBOL_WIDTH_M / 2
+        symbol = [(nose, 0.0), (0.0, half), (0.0, half / 3), (-nose, half / 3), (-nose, -half / 3),
+                  (0.0, -half / 3), (0.0, -half)]
+        arrow = [(nose, 0.0), (nose * 0.1, half), (nose * 0.1, half / 4), (-nose, half / 4),
+                 (-nose, -half / 4), (nose * 0.1, -half / 4), (nose * 0.1, -half)]
+        for outline, side in ((symbol, 1), (arrow, -1)):
+            middle = centre + across * side * width / 4
+            self.out["bike_lane_symbol_polygons"].append(
+                [list(middle + a * along + c * across) for a, c in [*outline, outline[0]]])
+        self.stats["two-stage turn boxes"] += 1
+
+    def trail(self, way: dict) -> None:
+        """An unpaved path or track, at grade: its ground (gravel or dirt) to its `width`."""
+        line = self.frame.line(way["coords_wgs84"])
+        if line is not None:
+            default = "service" if way["tags"].get("highway") == "track" else "sidewalk"
+            half = self.width(way["tags"], "width", default) / 2
+            self.out["paved_surfaces"] += [_paving(ring, way["tags"]) for ring in _strip(line, half)]
 
     def crossing(self, way: dict) -> None:
         tags, line = way["tags"], self.frame.line(way["coords_wgs84"])
@@ -621,7 +703,8 @@ class _Reader:
     def carriageway(self) -> BaseGeometry:
         """The drawn street surface, as one shape. Built once, after the roads."""
         if not hasattr(self, "_carriageway"):
-            self._carriageway = unary_union([part for ring in self.out["pavement"] if len(ring) >= 4
+            self._carriageway = unary_union([part for key in PAVEMENT_KEYS
+                                             for ring in self.out[key] if len(ring) >= 4
                                              for part in _polygons(Polygon(ring).buffer(0))])
             shapely.prepare(self._carriageway)
         return self._carriageway
@@ -633,17 +716,24 @@ class _Reader:
         under its bars, the bikeway's green and lines stopping either side."""
         road = self.carriageway().difference(unary_union(self.crosswalk_bands))
         shapely.prepare(road)
+        # Inside a turn box, nothing but the box's own line, symbol and arrow: the lines along
+        # its sides stay (a hair inside them is cut), the track's divider stops at it.
+        lined = road.difference(unary_union([box.buffer(-SEAM_M) for box in self.turn_boxes]))
+        shapely.prepare(lined)
         for key in PAINT_LINES:
             clipped = [part for line in self.out[key] if len(line) >= 2
-                       for part in _lines(LineString(line).intersection(road))]
+                       for part in _lines(LineString(line).intersection(lined))]
             self.out[key] = ([[part[0], part[-1]] for part in clipped]
                              if key in ("lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
                                         "yellow_hatch_lines",
                                         "parking_stall_divider_lines")
                              else clipped)
-        for key in ("bike_lane_surface_polygons", "cycle_crossing_surface_polygons"):
+        for key in ("bike_lane_surface_polygons", "cycle_crossing_surface_polygons",
+                    "turn_box_surface_polygons", "bike_lane_symbol_polygons"):
             self.out[key] = [ring for poly in self.out[key] if len(poly) >= 4
                              for ring in _rings(Polygon(poly).buffer(0).intersection(road))]
+        self.out["turn_box_edge_lines"] = [part for line in self.out["turn_box_edge_lines"]
+                                           for part in _lines(LineString(line).intersection(road))]
         self.out["props"] = [prop for prop in self.out["props"] if prop["type"] != "bollard"
                              or road.contains(Point(prop["position_m"]))]
 
@@ -764,7 +854,7 @@ class _Reader:
             return
         rings = (_rings(Polygon(line.coords).buffer(0)) if closed and len(line.coords) >= 4
                  else _strip(line, self.width(way["tags"], "width", "service") / 2))
-        self.out["paved_surfaces"] += [{"coords": ring} for ring in rings]
+        self.out["paved_surfaces"] += [_paving(ring, way["tags"]) for ring in rings]
 
     def sidewalks_off_the_street(self) -> None:
         """Sidewalks stop where the street, or a ramp's tactile pad, begins: they stand at kerb
@@ -774,10 +864,15 @@ class _Reader:
         paving = unary_union([self.carriageway(), *(
             part for ring in self.out["tactile_paving_polygons"] if len(ring) >= 4
             for part in _polygons(Polygon(ring).buffer(0)))])
-        walks = unary_union([part for ring in self.out["sidewalks"] if len(ring) >= 4
-                             for part in _polygons(Polygon(ring).buffer(0))])
-        self.out["sidewalks"] = [ring for part in _hole_free(walks.difference(paving))
-                                 for ring in _rings(part)]
+        def walks(key: str) -> BaseGeometry:
+            return unary_union([part for ring in self.out[key] if len(ring) >= 4
+                                for part in _polygons(Polygon(ring).buffer(0))])
+
+        # Where an asphalt walk meets a concrete one, each keeps its own slab: no two overlap.
+        asphalt = walks("sidewalks_asphalt").difference(paving)
+        concrete = walks("sidewalks").difference(paving).difference(asphalt)
+        for key, shape in (("sidewalks", concrete), ("sidewalks_asphalt", asphalt)):
+            self.out[key] = [ring for part in _hole_free(shape) for ring in _rings(part)]
 
     def away(self, line: LineString) -> tuple[np.ndarray, np.ndarray] | None:
         """A kerb's middle, and the unit normal there pointing away from the nearest street."""
@@ -1039,6 +1134,34 @@ def carriageway_width_m(tags: dict) -> tuple[float, str]:
     return lanes * DEFAULT_WIDTHS_M["lane"], "DEFAULTED (lanes x lane)"
 
 
+def _footpath(tags: dict) -> bool:
+    """A paved way on foot that is not a sidewalk or a crossing (those have their own layers):
+    `highway=footway` / `pedestrian` unless its `surface` is unpaved, and `highway=path` - a
+    generic way, often a trail - only where its `surface` says it is paved."""
+    if tags.get("footway") in ("sidewalk", "crossing") or _trail(tags):
+        return False
+    if tags.get("highway") == "path":
+        return tags.get("surface") in ("asphalt", "concrete", "concrete:plates", "concrete:lanes")
+    return tags.get("highway") in ("footway", "pedestrian")
+
+
+def _trail(tags: dict) -> bool:
+    """A way on foot or a track whose `surface` is unpaved: drawn as that ground, at grade."""
+    return tags.get("highway") in ON_FOOT and SURFACE_MATERIAL.get(tags.get("surface")) in UNPAVED
+
+
+def _pavement_key(tags: dict) -> str:
+    """The output a street's surface goes to, by its material."""
+    material = SURFACE_MATERIAL.get(tags.get("surface"), "asphalt")
+    return "pavement" if material == "asphalt" else f"pavement_{material}"
+
+
+def _paving(ring: list, tags: dict) -> dict:
+    """A paved-ground ring, and its material where that is not asphalt."""
+    material = SURFACE_MATERIAL.get(tags.get("surface"), "asphalt")
+    return {"coords": ring} if material == "asphalt" else {"coords": ring, "surface": material}
+
+
 def _has_cycleway(tags: dict, side: str) -> bool:
     return (tags.get(f"cycleway:{side}") or tags.get("cycleway:both")
             or tags.get("cycleway")) in ("lane", "track")
@@ -1149,27 +1272,41 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
         layers = apply_change(layers, change)
     frame = LocalFrame(SNAPSHOT_AREAS[area])
     areas: dict[str | None, list[Polygon]] = defaultdict(list)
-    mouths: list[Polygon] = []
+    mouths: list[dict] = []
+    boxes: list[Polygon] = []
+    pavement: dict[str, list] = defaultdict(list)
     for way in layers.get("road_areas", []):
         line = frame.line(way["coords_wgs84"])
         if line is not None and len(line.coords) >= 4:
+            polygons = _polygons(Polygon(line.coords).buffer(0))
+            if way["tags"].get("cycleway") == "two_stage_box":
+                boxes += polygons          # paint on the street, drawn by _Reader.turn_box
+                continue
             # A driveway's surface (`area:highway=service` + `service=driveway`) is paved ground
             # beside the street, not its carriageway.
-            driveway = way["tags"].get("area:highway") == "service" and way["tags"].get("service") == "driveway"
-            (mouths if driveway else areas[way["tags"].get("name")]).extend(
-                _polygons(Polygon(line.coords).buffer(0)))
+            if way["tags"].get("area:highway") == "service" and way["tags"].get("service") == "driveway":
+                mouths += [_paving(ring, way["tags"]) for p in polygons for ring in _rings(p)]
+                continue
+            areas[way["tags"].get("name")].extend(polygons)
+            pavement[_pavement_key(way["tags"])] += [
+                ring for p in polygons for ring in _rings(p)]
     reader = _Reader(frame, dict(areas))
-    reader.out["paved_surfaces"] += [{"coords": ring} for p in mouths for ring in _rings(p)]
-    reader.out["pavement"] += [ring for polygons in areas.values() for p in polygons
-                               for ring in _rings(p)]
+    reader.out["paved_surfaces"] += mouths
+    for key, rings in pavement.items():
+        reader.out[key] += rings
     reader.index_ends(layers["roads"])
     for way in layers["roads"]:
         if way["tags"].get("highway") == "cycleway" and way["tags"].get("cycleway") == "crossing":
             reader.cycle_crossing(way)
         else:
             reader.road(way)
-    for way in layers["sidewalks"]:
+    for box in boxes:
+        reader.turn_box(box)
+    for way in layers["sidewalks"] + [w for w in layers["roads"] if _footpath(w["tags"])]:
         reader.sidewalk(way)
+    for way in layers["roads"]:
+        if _trail(way["tags"]):
+            reader.trail(way)
     for way in layers["crossings"]:
         reader.crossing(way)
     for way in layers["stop_lines"]:
@@ -1188,6 +1325,8 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
     reader.mouths(layers)
     reader.sidewalks_off_the_street()
     reader.signals(layers["traffic_control"], layers["crossings"])
+    for item in layers.get("bollards", []):
+        reader.bollard(item)
     reader.out["tree_points"] = [frame.point(n["lon"], n["lat"]) for n in layers["street_furniture"]
                                  if n["tags"].get("natural") == "tree"]
     reader.hatch_all()

@@ -18,6 +18,10 @@ STREETLIGHT_SLUG = "street_lamp_01"
 # Mountable-apron surface (Proposal B: "stamped/colored concrete, distinct texture from
 # travel lane"). Has real Diffuse/Rough/nor_gl maps at 2k/4k, like the other two.
 APRON_SLUG = "patterned_concrete_pavers"
+# Unpaved ground (src/osm_world.py:SURFACE_MATERIAL): `surface=gravel` and kin, and dirt -
+# `unpaved` / `ground` / `dirt`. Both CC0, Diffuse/Rough/nor_gl at 2k/4k.
+GRAVEL_SLUG = "gravel_road"
+DIRT_SLUG = "park_dirt"
 
 NEAR_RESOLUTION = "4k"
 FAR_RESOLUTION = "2k"
@@ -53,7 +57,8 @@ def _texture_paths(slug: str, resolution: str) -> dict[str, str] | None:
 @lru_cache(maxsize=1)
 def build_default_theme() -> dict:
     """{"asphalt_near": {...} | None, "asphalt_far", "concrete_near", "concrete_far",
-    "apron_near", "apron_far", "streetlight_gltf": str | None}.
+    "apron_near", "apron_far", "gravel_near", "gravel_far", "dirt_near", "dirt_far",
+    "streetlight_gltf": str | None}.
 
     Every path is REPO-RELATIVE (see _portable) because these are serialized into the geometry
     JSON and read back by another interpreter on possibly another machine; blender_scene.py's
@@ -70,5 +75,9 @@ def build_default_theme() -> dict:
         "concrete_far": _texture_paths(CONCRETE_SLUG, FAR_RESOLUTION),
         "apron_near": _texture_paths(APRON_SLUG, NEAR_RESOLUTION),
         "apron_far": _texture_paths(APRON_SLUG, FAR_RESOLUTION),
+        "gravel_near": _texture_paths(GRAVEL_SLUG, NEAR_RESOLUTION),
+        "gravel_far": _texture_paths(GRAVEL_SLUG, FAR_RESOLUTION),
+        "dirt_near": _texture_paths(DIRT_SLUG, NEAR_RESOLUTION),
+        "dirt_far": _texture_paths(DIRT_SLUG, FAR_RESOLUTION),
         "streetlight_gltf": (lambda p: _portable(p) if p else None)(fetch_polyhaven_model(STREETLIGHT_SLUG)),
     }

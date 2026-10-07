@@ -366,8 +366,9 @@ def world_extent(data: dict):
             xs.append(p[0])
             ys.append(p[1])
 
-    for key in ("pavement", "pavement_near", "pavement_far",
-                "sidewalks", "sidewalks_near", "sidewalks_far"):
+    for key in ("pavement", "pavement_near", "pavement_far", "pavement_concrete",
+                "pavement_gravel", "pavement_dirt",
+                "sidewalks", "sidewalks_near", "sidewalks_far", "sidewalks_asphalt"):
         for ring in data.get(key, []):
             take(ring)
     for b in data.get("buildings", []):
@@ -447,6 +448,9 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
         concrete_near = tex("ConcreteNear", "concrete", "near", concrete_rgb, 0.85)
         concrete_far = tex("ConcreteFar", "concrete", "far", concrete_rgb, 0.85)
     apron_mat = tex("Apron", "apron", tier if world else "near", (0.65, 0.6, 0.55), 0.8)
+    # Unpaved ground, by the surface the reader names (src/osm_world.py:SURFACE_MATERIAL).
+    gravel_mat = tex("Gravel", "gravel", tier if world else "far", (0.46, 0.43, 0.38), 0.95)
+    dirt_mat = tex("Dirt", "dirt", tier if world else "far", (0.38, 0.30, 0.22), 1.0)
     lot = make_material("Lot", (0.55, 0.6, 0.48), roughness=0.9)
     grass = make_material("Grass", (0.3, 0.48, 0.24), roughness=1.0)
     refuge_mat = make_material("Refuge", (0.22, 0.5, 0.26), roughness=0.8)
@@ -576,8 +580,14 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     for name, rings, height, mat in (
             ("pavement_near", pavement_near_rings, PAVEMENT_HEIGHT_M, asphalt_near),
             ("pavement_far", pavement_far_rings, PAVEMENT_HEIGHT_M, asphalt_far),
+            # streets by their `surface` (src/osm_world.py:SURFACE_MATERIAL), at road height
+            ("pavement_concrete", data.get("pavement_concrete", []), PAVEMENT_HEIGHT_M, concrete_far),
+            ("pavement_gravel", data.get("pavement_gravel", []), PAVEMENT_HEIGHT_M, gravel_mat),
+            ("pavement_dirt", data.get("pavement_dirt", []), PAVEMENT_HEIGHT_M, dirt_mat),
             ("sidewalk_near", sidewalk_near_rings, SIDEWALK_HEIGHT_M, concrete_near),
-            ("sidewalk_far", sidewalk_far_rings, SIDEWALK_HEIGHT_M, concrete_far)):
+            ("sidewalk_far", sidewalk_far_rings, SIDEWALK_HEIGHT_M, concrete_far),
+            # `surface=asphalt` sidewalks (src/osm_world.py:ASPHALT_SURFACES), at kerb height
+            ("sidewalk_asphalt", data.get("sidewalks_asphalt", []), SIDEWALK_HEIGHT_M, asphalt_far)):
         batch = MeshBatch(name, mat)
         for ring in rings:
             batch.add_prism(ring, height)
@@ -593,12 +603,17 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     # road. A driveway running off past the modelled legs is drawn where it really is; that it
     # ends in grass is our road model stopping, not the driveway being wrong.
     # One mesh, not one object each: a world carries every driveway in the borough.
-    paved = MeshBatch("paved_surfaces", asphalt_far)
+    # Asphalt unless the reader names another surface (src/osm_world.py:_paving).
+    paved = {"asphalt": MeshBatch("paved_surfaces", asphalt_far),
+             "concrete": MeshBatch("paved_surfaces_concrete", concrete_far),
+             "gravel": MeshBatch("paved_surfaces_gravel", gravel_mat),
+             "dirt": MeshBatch("paved_surfaces_dirt", dirt_mat)}
     for drive in data.get("paved_surfaces", data.get("driveways", [])):
         coords = drive.get("coords") or []
         if len(coords) >= 3:
-            paved.add_prism(coords, PAVEMENT_HEIGHT_M)
-    paved.build(uv_tile_m=2.0)
+            paved[drive.get("surface", "asphalt")].add_prism(coords, PAVEMENT_HEIGHT_M)
+    for batch in paved.values():
+        batch.build(uv_tile_m=2.0)
 
     # The traced kerbs, at the height their OSM kerb= tag calls for (src/render/export.py:
     # KERB_HEIGHT_M). There was no kerb in this scene before - the road slab simply met the

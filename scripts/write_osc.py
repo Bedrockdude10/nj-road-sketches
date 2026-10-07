@@ -3,6 +3,10 @@
 
     proposals/<area>/existing.osc          where OSM's tags do not yet say what is painted
     proposals/<area>/two_way_bikeway.osc   existing.osc plus the Broad St two-way bikeway
+    proposals/<area>/two_way_bikeway_daylighting.osc
+                                           the same with a painted curb extension, edged in
+                                           flexible posts, at each parked corner - so the
+                                           statute's no-standing zone is 10 ft, not 25
 
     .venv/bin/python scripts/write_osc.py hopewell_borough
 
@@ -18,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.osm_osc import existing_markings, two_way_bikeway
+from src.osm_osc import NO_STANDING_WITH_EXTENSION_FT, existing_markings, two_way_bikeway
 from src.sources.osm_change import OsmChange, proposal_path, write_change
 
 
@@ -46,6 +50,12 @@ def main() -> None:
     bikeway, report = two_way_bikeway(args.area, existing)
     write_change(bikeway, proposal_path(args.area, "two_way_bikeway"))
     print(f"two_way_bikeway.osc: {describe(bikeway)}")
+    for key, feet in sorted(report.items()):
+        print(f"    Broad St, {key}: {feet}")
+    extended, _found = existing_markings(args.area, no_standing_ft=NO_STANDING_WITH_EXTENSION_FT)
+    daylit, report = two_way_bikeway(args.area, extended, kerb_extensions=True)
+    write_change(daylit, proposal_path(args.area, "two_way_bikeway_daylighting"))
+    print(f"two_way_bikeway_daylighting.osc: {describe(daylit)}")
     for key, feet in sorted(report.items()):
         print(f"    Broad St, {key}: {feet}")
 

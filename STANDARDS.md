@@ -30,6 +30,10 @@ is the long-form version of this section. The OSM wrapper applies clause (e)'s t
 `NO_STANDING_FT` in [`src/osm_osc.py`](src/osm_osc.py): each leg split at the further arm and the
 piece tagged `parking:<side>:restriction=no_standing` + `:reason=junction`. Its crosswalk arm reads
 mapped crossings only, so where none is mapped the side-line arm stands in for it (a shorter zone).
+The daylighting proposal (`two_way_bikeway(..., kerb_extensions=True)`) takes the bulbout rows'
+10 ft, `NO_STANDING_WITH_EXTENSION_FT`, for a painted extension edged in flexible posts. **Whether
+paint and posts are a curb extension "constructed" in the statute's sense is not established**:
+the Borough's engineer or attorney has to say so before that proposal's extra stalls are real.
 
 **R.S. 39:4-138**, as amended by P.L. 2009 c.257 — parking prohibited: *(as cited)*
 

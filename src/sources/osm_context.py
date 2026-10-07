@@ -364,6 +364,11 @@ def is_street_furniture(tags: dict) -> bool:
             or tags.get("natural") == "tree")
 
 
+def is_bollard(tags: dict) -> bool:
+    """barrier=bollard - a post on a node, a row of them on a way (wiki Tag:barrier=bollard)."""
+    return tags.get("barrier") == "bollard"
+
+
 def is_kerb(tags: dict) -> bool:
     """barrier=kerb - the most direct geometry this project can get: a traced kerb IS the curb."""
     return tags.get("barrier") == "kerb"
@@ -378,10 +383,10 @@ WAY_LAYERS: tuple[tuple[str, Callable[[dict], bool], int], ...] = (
     ("parking_aisles", is_parking_aisle, 2), ("parking_lots", is_parking_lot, 4),
     ("kerbs", is_kerb, 2), ("roads", is_road, 2), ("stop_lines", is_stop_line, 2),
     ("road_markings", is_restriction_marking, 4), ("road_areas", is_road_area, 4),
-    ("highway_areas", is_highway_area, 4))
+    ("highway_areas", is_highway_area, 4), ("bollards", is_bollard, 2))
 NODE_LAYERS: tuple[tuple[str, Callable[[dict], bool]], ...] = (
     ("traffic_control", is_traffic_control), ("street_furniture", is_street_furniture),
-    ("kerbs", is_kerb))
+    ("kerbs", is_kerb), ("bollards", is_bollard))
 
 
 def height_from_tags(tags: dict) -> tuple[float, str] | None:
@@ -411,7 +416,8 @@ class UnknownAreaError(KeyError):
 #: Every layer `osm_layers` returns. The names are the ones consumers already know them by.
 OSM_LAYERS = ("buildings", "crossings", "sidewalks", "driveways", "parking_aisles",
               "parking_lots", "traffic_control", "street_furniture", "kerbs", "roads",
-              "stop_lines", "road_markings", "road_areas", "highway_areas", "municipalities")
+              "stop_lines", "road_markings", "road_areas", "highway_areas", "bollards",
+              "municipalities")
 
 _AREA_LAYERS_MEMO: dict[str, tuple] = {}
 
@@ -460,7 +466,8 @@ def osm_layers(area: str) -> dict[str, list]:
 
     layers = {name: ways_where(predicate, min_coords) for name, predicate, min_coords in WAY_LAYERS}
     for name, predicate in NODE_LAYERS:
-        # A kerb is mapped as a way or as a node, so its layer holds both; a node has no coords.
+        # A kerb or bollard is mapped as a way or as a node, so its layer holds both; a node has
+        # no coords.
         found = nodes_where(predicate)
         layers[name] = ([*layers[name], *({"coords_wgs84": None, **node} for node in found)]
                         if name in layers else found)
