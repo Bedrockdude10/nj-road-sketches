@@ -1180,7 +1180,8 @@ def _stall_layout(network: _Network, applied: pd.DataFrame,
     entries += [(w, side, k, False) for (w, side), spans in free.items() for k in range(len(spans))
                 if k < len(spans) - 1 or onward(w, side, -1) is None]
     entries += [(w, side, k, True) for (w, side), spans in free.items() for k in range(len(spans))]
-    for w, side, k, forward in entries:
+    for start in entries:
+        w, side, k, forward = start
         chain = []
         while (w, side, k) not in seen:
             seen.add((w, side, k))

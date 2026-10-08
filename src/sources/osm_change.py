@@ -18,7 +18,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 PROPOSALS_DIR = Path(__file__).resolve().parents[2] / "proposals"
 
@@ -179,7 +179,7 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
     moved = {node.id: node for node in change.nodes if node.id > 0}
     if moved:
 
-        def placed(item):
+        def placed(item: Any) -> Any:
             if not isinstance(item, dict):
                 return item
             ids = item.get("node_ids") or []
@@ -187,7 +187,7 @@ def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, 
                 return {**item, "coords_wgs84": [coords[node_id] for node_id in ids]}
             return item
 
-        def a_node(item) -> bool:
+        def a_node(item: Any) -> bool:
             return isinstance(item, dict) and "lon" in item and not item.get("coords_wgs84")
 
         # A modified node is its whole new self, as a modified way is: dropped from every node
