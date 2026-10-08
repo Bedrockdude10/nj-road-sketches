@@ -50758,7 +50758,6 @@
       <tag k="name" v="Seminary Avenue" />
       <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
       <tag k="oneway" v="yes" />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="surface" v="asphalt" />
@@ -50799,10 +50798,8 @@
       <tag k="name" v="Seminary Avenue" />
       <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
       <tag k="oneway" v="yes" />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="surface" v="asphalt" />
@@ -54072,10 +54069,8 @@
       <tag k="maxspeed" v="30 mph" />
       <tag k="name" v="Louellen Street" />
       <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="CR 518" />
@@ -70205,10 +70200,8 @@
       <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
       <tag k="old_name" v="Cook Avenue" />
       <tag k="oneway" v="yes" />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="surface" v="asphalt" />
@@ -70786,10 +70779,8 @@
       <tag k="name" v="Seminary Avenue" />
       <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
       <tag k="oneway" v="yes" />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="surface" v="asphalt" />
@@ -71899,10 +71890,8 @@
       <tag k="maxspeed" v="30 mph" />
       <tag k="name" v="Louellen Street" />
       <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="CR 518" />
@@ -71914,10 +71903,8 @@
       <tag k="highway" v="residential" />
       <tag k="name" v="Midland Avenue" />
       <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
     </way>
@@ -72305,10 +72292,8 @@
       <tag k="highway" v="tertiary" />
       <tag k="name" v="Louellen Street" />
       <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
-      <tag k="parking:left" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
-      <tag k="parking:right" v="no" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="CR 518" />

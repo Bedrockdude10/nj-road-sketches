@@ -92,7 +92,7 @@ import shapely
 from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 
-from src.osm_world import (BOLLARD_SPACING_M, CARRIAGEWAY, DEFAULT_WIDTHS_M, FT_TO_M, LocalFrame,
+from src.osm_world import (BOLLARD_SPACING_M, CARRIAGEWAY, PROHIBITIONS, DEFAULT_WIDTHS_M, FT_TO_M, LocalFrame,
                            STATION_STEP_M, TANGENT_M, Stations, beyond, carriageway_width_m, ease,
                            has_centre_line, street_ends, taper_rate, width_m)
 from src.sources.osm_change import NewNode, OsmChange, WayChange, apply_change
@@ -951,20 +951,20 @@ def existing_markings(area: str, kerb_extensions: bool = False) -> tuple[OsmChan
 
 # --- the Broad St proposal ---------------------------------------------------------------------
 
-PROHIBITIONS = ("no_parking", "no_standing", "no_stopping")
 
 
 def _no_standing(tags: dict, sides=("left", "right")) -> dict:
-    """`tags` with the kerbs on `sides` not to be stood at by law: each `parking:<side>=no` and
+    """`tags` with the kerbs on `sides` not to be stood at by law: each side's
     `:restriction=no_standing` for `:reason=junction` - a side already `no_stopping`, the stricter,
-    kept - and any `parking:both:*` written out per side so nothing contradicts it."""
+    kept - and any `parking:both:*` written out per side so nothing contradicts it. The side's
+    position (`parking:<side>=lane`, ...) is left as it is: the bay is still there, and only
+    standing in it is not allowed (wiki Street parking)."""
     both = {k[len("parking:both"):]: v for k, v in tags.items() if k.startswith("parking:both")}
     out = {k: v for k, v in tags.items() if not k.startswith("parking:both")}
     for side in ("left", "right"):
         for rest, value in both.items():
             out.setdefault(f"parking:{side}{rest}", value)
     for side in sides:
-        out[f"parking:{side}"] = "no"
         if out.get(f"parking:{side}:restriction") != "no_stopping":
             out[f"parking:{side}:restriction"] = "no_standing"
             out[f"parking:{side}:restriction:reason"] = "junction"
@@ -1494,7 +1494,8 @@ def _section_tags(osm: dict, row) -> dict:
     return tags
 
 
-def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = False) -> OsmChange:
+def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = False,
+               narrowing: bool = True) -> OsmChange:
     """`base` with every street re-centred between its kerbs.
 
     A way runs down the middle of its carriageway (wiki Key:placement, the default) and every
@@ -1509,15 +1510,19 @@ def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = 
       kerbs that pinch it, shifting in and out over the MUTCD taper for its speed (taper_rate),
       with a node added at each end of each taper and of the stretch.
     Junction nodes stay: the cross street shares them. A block with no kerb pair mapped stays
-    where OSM has it. Only the proposal moves ways: the existing render draws OSM as it is."""
+    where OSM has it. Without `narrowing` (existing.osc) only the blocks move: there is no section
+    to fit, so no stretch is narrow."""
     layers = apply_change(osm_layers(area), base)
     frame = LocalFrame(SNAPSHOT_AREAS[area])
     network = _Network(layers, frame)
     kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
     raw = fetch_borough_osm(bbox=SNAPSHOT_AREAS[area])
     raw_nodes = raw["nodes"] if isinstance(raw["nodes"], dict) else {n["id"]: n for n in raw["nodes"]}
-    design = _design(network, {w["id"] for w in _route(network)}, resign)
-    need = {way_id: ft * FT_TO_M for way_id, (ft, _least) in _blocks(network, kerbs, design[design["applies"]]).items()}
+    need: dict[int, float] = {}
+    if narrowing:
+        design = _design(network, {w["id"] for w in _route(network)}, resign)
+        need = {way_id: ft * FT_TO_M
+                for way_id, (ft, _least) in _blocks(network, kerbs, design[design["applies"]]).items()}
     ids = _ids_below(base)
     moves: dict[int, np.ndarray] = {}
     added: dict[int, list[tuple[int, float, int]]] = defaultdict(list)   # way -> (after index, d, node)
@@ -1910,6 +1915,7 @@ def write_changes(area: str, proposals: bool = True) -> dict[str, Counter[str]]:
     from src.sources.osm_change import proposal_path, write_change
 
     existing, found = existing_markings(area)
+    existing = _recentred(area, existing, found, narrowing=False)
     write_change(existing, proposal_path(area, "existing"))
     reports = {"existing": found}
     for name, build in PROPOSALS.items():

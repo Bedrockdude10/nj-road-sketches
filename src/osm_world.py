@@ -144,6 +144,12 @@ PAINT_LINES = ("bike_lane_edge_lines", "parking_edge_lines", "bike_lane_contrafl
                "parking_stall_divider_lines",
                "cycle_crossing_edge_lines",
                "cycle_crossing_divider_lines", "lane_lines")
+# A street's own longitudinal paint, which stops where another street's surface begins (_Reader.
+# off_other_streets): not across a junction or a side street's mouth.
+STREET_PAINT = ("bike_lane_edge_lines", "parking_edge_lines", "lane_lines", "bike_lane_contraflow_lines",
+                "lane_narrowing_edge_lines", "bike_lane_surface_polygons")
+# Parking restrictions that forbid parking in a bay (wiki Street parking, "Restrictions").
+PROHIBITIONS = ("no_parking", "no_standing", "no_stopping")
 # Street parking positions off the carriageway (wiki Street_parking, "Parking position").
 OFF_CARRIAGEWAY = ("street_side", "on_kerb", "half_on_kerb")
 
@@ -318,6 +324,8 @@ class _Reader:
         self.stop_bars: list[BaseGeometry] = []          # what a lane's arrows are held clear of
         self.turns: list[dict] = []          # turn:lanes, piece by piece: markings_all draws them
         self.bike_lanes: list[dict] = []     # cycleway=lane, piece by piece: markings_all draws them
+        # Per road way: (id, street, {channel: (first, end) index of its paint}, carried across)
+        self.paint_of: list[tuple[int, str | None, dict[str, tuple[int, int]], bool]] = []
         # Per road way: its nodes, drawn surface and edges - what a crossing is painted on.
         self.road_nodes: dict[int, set[int]] = {}
         self.road_ways: dict[int, tuple[LineString, list[int], dict]] = {}   # signals() reads them
@@ -449,9 +457,14 @@ class _Reader:
                                                   carriageway_width_m(tags)[0])
         self.road_surfaces[way["id"]] = [Polygon(ring) for ring in surface]
         self.edges[way["id"]] = (stations, half, half)
+        marks = {key: len(self.out[key]) for key in STREET_PAINT}
         centre = self.cross_section(tags, line, stations, edges)
         if has_centre_line(tags):
             self.stripe_centre(tags, centre)
+        carried = any(k.startswith("cycleway:") and k.endswith(":crossing:markings") and v == "dashes"
+                      for k, v in tags.items())
+        self.paint_of.append((way["id"], tags.get("name"),
+                              {key: (marks[key], len(self.out[key])) for key in STREET_PAINT}, carried))
 
     def cross_section(self, tags: dict, line: LineString, stations: Stations,
                       edges: dict[str, np.ndarray]) -> LineString:
@@ -707,8 +720,9 @@ class _Reader:
         """A marked parking lane on this way's piece, kept for stall_all: its two edges and its
         `parking:<side>:capacity`."""
         markings = tags.get(f"parking:{side}:markings") or tags.get("parking:both:markings")
+        restriction = tags.get(f"parking:{side}:restriction") or tags.get("parking:both:restriction")
         nodes = self._way.get("node_ids") or []
-        if markings != "yes" or len(nodes) < 2:
+        if markings != "yes" or restriction in PROHIBITIONS or len(nodes) < 2:
             return
         # Which way traffic passes this kerb, along the way: a diagonal stall leans with it.
         oneway = tags.get("oneway")
@@ -722,8 +736,9 @@ class _Reader:
 
     def stall_all(self) -> None:
         """Every marked parking lane's stalls, run by run: its pieces - a way split for any other
-        reason - joined end to end, and the run's capacity, summed, laid in equal stalls along it,
-        a divider across the lane at each end of each."""
+        reason - joined end to end, and the run's capacity, summed (else as many standard stalls as
+        it holds, stall_pitch_m), laid in equal stalls along it, a divider across the lane at each
+        end of each."""
         after = {(p["street"], p["side"], p["first"]): p for p in self.parking}
         has_before = {(p["street"], p["side"], p["last"]) for p in self.parking}
         for start in self.parking:
@@ -734,11 +749,15 @@ class _Reader:
                 seen.add(id(piece))
                 run.append(piece)
                 piece = after.get((piece["street"], piece["side"], piece["last"]))
-            capacity = sum(p["capacity"] or 0 for p in run)
-            if not capacity:
-                continue
             one = LineString([c for k, p in enumerate(run) for c in p["one"][(k > 0):]])
             other = LineString([c for k, p in enumerate(run) for c in p["other"][(k > 0):]])
+            capacity = sum(p["capacity"] or 0 for p in run)
+            if not capacity:
+                # Marked, with no `capacity`: as many standard stalls as the kerb holds.
+                capacity = int(one.length // stall_pitch_m(run[0]["orientation"]))
+                self.stats["marked parking with no capacity: standard stalls (runs)"] += 1
+            if not capacity:
+                continue
             for k in range(capacity + 1):
                 at = k / capacity
                 self.out["parking_stall_divider_lines"].append(
@@ -1020,6 +1039,39 @@ class _Reader:
                                              for part in _polygons(Polygon(ring).buffer(0))])
             shapely.prepare(self._carriageway)
         return self._carriageway
+
+    def off_other_streets(self) -> None:
+        """Each way's own lines and green (STREET_PAINT) cut out of every other street's surface,
+        so a street's markings stop where the street it meets begins - none across a junction or
+        a side street's mouth. Not a piece tagged as carried across the conflict
+        (`cycleway:<side>:crossing:markings=dashes`), whose dotted lines are drawn there on purpose.
+        Another way of the same street is not another street."""
+        surfaces = [(way_id, polygon) for way_id, polygons in self.road_surfaces.items()
+                    for polygon in polygons]
+        if not surfaces:
+            return
+        tree = STRtree([polygon for _way_id, polygon in surfaces])
+        replaced: dict[str, dict[int, list]] = defaultdict(dict)
+        for way_id, street, spans, carried in self.paint_of:
+            if carried:
+                continue
+            for key, (first, end) in spans.items():
+                for i in range(first, end):
+                    item = self.out[key][i]
+                    shape = Polygon(item) if key.endswith("_polygons") else LineString(item)
+                    if not shape.is_valid or shape.is_empty:
+                        continue
+                    others = [surfaces[k][1] for k in tree.query(shape)
+                              if surfaces[k][0] != way_id
+                              and (street is None or self.road_names[surfaces[k][0]] != street)]
+                    if not others:
+                        continue
+                    left = shape.difference(unary_union(others))
+                    replaced[key][i] = _rings(left) if key.endswith("_polygons") else _lines(left)
+                    self.stats["markings cut where another street begins (pieces)"] += 1
+        for key, parts in replaced.items():
+            self.out[key] = [piece for i, item in enumerate(self.out[key])
+                             for piece in parts.get(i, [item])]
 
     def on_carriageway(self) -> None:
         """Paint is on the street and off the crosswalks: every marking clipped to the drawn
@@ -1537,6 +1589,16 @@ def _parking(tags: dict, side: str) -> str | None:
     return tags.get(f"parking:{side}") or tags.get("parking:both")
 
 
+def stall_pitch_m(orientation: str) -> float:
+    """How much kerb one standard stall takes: a parallel stall's length; an angled stall's width
+    across the kerb, W / sin(angle) - a diagonal bay at stall.diagonal_angle, a perpendicular one
+    square to it."""
+    if orientation == "parallel":
+        return PARALLEL_STALL_M
+    angle = DIAGONAL_DEG if orientation == "diagonal" else 90.0
+    return STALL_WIDTH_M / math.sin(math.radians(angle))
+
+
 def _orientation(tags: dict, side: str) -> str:
     return tags.get(f"parking:{side}:orientation") or tags.get("parking:both:orientation") or "parallel"
 
@@ -1566,9 +1628,13 @@ def kerbward(tags: dict, side: str) -> str:
 
 def parking_at_the_kerb(tags: dict, side: str) -> bool:
     """Whether `side`'s parking lies between its cycle lane and the kerb - the lane outside it -
-    as `cycleway:<side>:traffic_mode:<kerb side>=parking` says (Proposal:Separation); else the
-    lane is at the kerb and the parking outside it, protecting it."""
-    return tags.get(f"cycleway:{side}:traffic_mode:{kerbward(tags, side)}") == "parking"
+    as `cycleway:<side>:traffic_mode:<kerb side>` says (Proposal:Separation: `parking` there).
+    Where it says nothing: a painted `lane` runs outside the parked cars, as a bike lane beside
+    parking does (Danny, 2026-10-08); a `track` is at the kerb, the parking outside protecting it."""
+    mode = tags.get(f"cycleway:{side}:traffic_mode:{kerbward(tags, side)}")
+    if mode is not None:
+        return mode == "parking"
+    return (tags.get(f"cycleway:{side}") or tags.get("cycleway:both") or tags.get("cycleway")) == "lane"
 
 
 def _footpath(tags: dict) -> bool:
@@ -1832,6 +1898,7 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
     reader.hatch_all()
     reader.stall_all()
     reader.markings_all()
+    reader.off_other_streets()
     reader.on_carriageway()
     return layers, reader
 
