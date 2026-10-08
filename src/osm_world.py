@@ -635,13 +635,20 @@ class _Reader:
                    bounds: dict[int, np.ndarray]) -> None:
         """A lane line where two lanes running the same way meet - lane j's left boundary at
         signed offset `bounds[j]`, lanes counted left to right - white (MUTCD 3B.06):
-        broken, solid where either lane's `change:lanes` keeps traffic from crossing it."""
+        broken, solid where either lane's `change:lanes` keeps traffic from crossing it, or with no
+        `change:lanes`, between a turn-only lane (its `turn:lanes` excludes `through`) and one that
+        is not."""
         if tags.get("lane_markings") == "no":
             return
         changes = lane_changes(tags, lanes, backward)
+        turns = [_turn_only(v) for v in lane_turns(tags, lanes, backward)]
         for j, offset in bounds.items():
             line = LineString(stations.line(offset))
             solid = changes[j - 1] in NO_CHANGE_RIGHT or changes[j] in NO_CHANGE_LEFT
+            if changes[j - 1] is None and changes[j] is None:
+                # With no `change:lanes` to say: solid between a turn-only lane and one that is not
+                # (MUTCD 3B.04(25), a through lane beside an added mandatory turn lane).
+                solid = turns[j - 1] != turns[j]
             self.out["lane_lines"] += _lines(line) if solid else _dashes(line)
             self.stats[f"lane lines ({'solid' if solid else 'broken'}, pieces of way)"] += 1
 
@@ -809,7 +816,8 @@ class _Reader:
                       both_ends: bool) -> None:
         """One lane's marking (markings_all): `parts` in metres, x along the lane from the tail and
         y to its left, laid along `lane`, its centre line in the direction of travel, `width_m`
-        wide, and scaled down to that width where it is wider (MUTCD 3B.20(11)). At the run's
+        wide, and scaled down to that width where it is wider (MUTCD 3B.20(11)); all of it on the
+        street as drawn, which the way's `width` can overstate where the kerbs close in. At the run's
         upstream end and, `both_ends`, its downstream end; each held arrow.clearance along the lane
         clear of anything across it - a crosswalk, a stop line, another road's surface (`ids` are
         the ways the lane runs on, whose own surface is no obstacle)."""
@@ -828,7 +836,13 @@ class _Reader:
         if obstacle is not None:
             shapely.prepare(obstacle)
 
+        street = self.carriageway().buffer(SEAM_M)
+        shapely.prepare(street)
+
         def clear(tail: float) -> bool:
+            # All of it on the street as drawn - paint is kept on the street - and held clear.
+            if not street.contains(_substring(lane, tail, tail + length).buffer(half, cap_style="flat")):
+                return False
             if obstacle is None:
                 return True
             under = _substring(lane, max(0.0, tail - TURN_ARROW_CLEAR_M),
@@ -844,7 +858,12 @@ class _Reader:
             return
         placed = [upstream]
         if both_ends:
-            downstream = next((t for t in lane.length - length - steps if clear(t)), None)
+            # A stop line across this lane - one crossing its centre line - is what the arrow
+            # nearest the junction stands upstream of (MUTCD 3B.20(21)), not the gap beyond it.
+            stop = min((lane.project(Point(c)) for bar in self.stop_bars if bar.intersects(lane)
+                        for piece in _lines(bar.intersection(lane)) for c in piece), default=lane.length)
+            last = min(lane.length, stop - TURN_ARROW_CLEAR_M) - length
+            downstream = next((t for t in last - steps if t >= 0 and clear(t)), None)
             if downstream is not None and downstream >= upstream + length:
                 placed.append(downstream)
             else:
@@ -1490,6 +1509,27 @@ def lane_changes(tags: dict, lanes: int, backward: int) -> list[str | None]:
         return values("change:lanes", lanes, tags.get("oneway") == "-1")
     return (values("change:lanes:backward", backward, True)
             + values("change:lanes:forward", lanes - backward, False))
+
+
+def lane_turns(tags: dict, lanes: int, backward: int) -> list[str | None]:
+    """Each lane's `turn:lanes` value, lanes left to right across the way, as lane_changes reads
+    `change:lanes`: a oneway's `turn:lanes`, a two-way way's `:backward` (reversed into the way's
+    order) then `:forward`; None where a list is absent or not one value per lane."""
+    def values(key: str, count: int, against: bool) -> list[str | None]:
+        found: list[str | None] = list((tags.get(key) or "").split("|"))
+        if len(found) != count:
+            return [None] * count
+        return found[::-1] if against else found
+    if tags.get("oneway") in ("yes", "-1"):
+        return values("turn:lanes", lanes, tags.get("oneway") == "-1")
+    return (values("turn:lanes:backward", backward, True)
+            + values("turn:lanes:forward", lanes - backward, False))
+
+
+def _turn_only(value: str | None) -> bool:
+    """A mandatory turn lane: indications, and `through` not among them (wiki Key:turn)."""
+    indications = {v for v in (value or "").split(";") if v not in ("", "none")}
+    return bool(indications) and "through" not in indications
 
 
 def _parking(tags: dict, side: str) -> str | None:

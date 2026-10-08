@@ -343,9 +343,14 @@ class _Network:
             half = kerbs.least_offset(neighbour.street, cross, leg.length + neighbour.length,
                                       here, start, span)
             if half is None:
-                # No kerb of it mapped in the corner: its edge where it is drawn, half its width.
+                # No kerb of it mapped in the corner: its own surface as drawn, half its width
+                # either side of it - not carried across the junction, which on a street meeting
+                # this one at a shallow angle would reach far down this one.
                 half = carriageway_width_m(self.streets[neighbour.steps[0][0]]["tags"])[0] / 2
-            inside = [LineString(p) for p in _lines(line.intersection(cross.buffer(half)))]
+                edge = neighbour.line().buffer(half, cap_style="flat")
+            else:
+                edge = cross.buffer(half)
+            inside = [LineString(p) for p in _lines(line.intersection(edge))]
             for piece in inside:
                 at = sorted((line.project(Point(piece.coords[0])), line.project(Point(piece.coords[-1]))))
                 if at[0] <= NODE_MATCH_M:

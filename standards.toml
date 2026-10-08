@@ -654,12 +654,12 @@ figures = ["line.width", "line.dash", "line.dash_cycle"]
 wiki = "Key:change"
 convention = "wiki"
 means = "whether traffic may cross from each lane; the line between two lanes is solid where it may not"
-absent = "broken lane lines"
+absent = "broken lane lines; solid between a turn-only lane and one that is not (MUTCD 3B.04(25))"
 
 [tag."turn:lanes"]
 wiki = "Key:turn"
 convention = "wiki"
-means = "each lane's turn indications, left to right, :backward lanes as their drivers see them"
+means = "each lane's turn indications, left to right, :backward lanes as their drivers see them; arrows, upstream of the stop line across the lane; a turn-only lane's line solid where change:lanes is absent"
 absent = "no arrows"
 figures = ["arrow.through_length", "arrow.turn_through_length",
            "arrow.through_outline", "arrow.left_outline", "arrow.clearance", "arrow.search_step"]
