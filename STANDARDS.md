@@ -1194,6 +1194,7 @@ not opened here.
 | stroke width, posted ≥ 45 mph | 12 in | `TWO_POINT_WIDTHS_M`, `HATCH_WIDE_MPH` | its own channel, `lane_narrowing_hatch_wide_lines` |
 | longitudinal spacing, low-speed urban | 10–20 ft, engineering judgment | `HATCH_SPACING_M` = 10 ft | the dense end, so a short stretch between driveways still shows strokes - **a choice within the range** |
 | longitudinal spacing, high-speed | up to 40 ft | — | not encoded: 10 ft is used everywhere |
+| a flush median between opposing traffic | yellow crosshatch inside yellow lines, which carry the centre line past it | — (`_Reader.on_carriageway` cuts the centre line out of a `colour=yellow` area) | **as cited, from memory - not opened**; the proposal deletes OSM's restriction areas on a street it restripes (`two_way_bikeway`) |
 
 ---
 

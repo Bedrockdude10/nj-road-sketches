@@ -834,6 +834,13 @@ class _Reader:
         under its bars, the bikeway's green and lines stopping either side."""
         road = self.carriageway().difference(unary_union(self.crosswalk_bands))
         shapely.prepare(road)
+        # A flush median (`colour=yellow` restriction area) is outlined by its own yellow lines
+        # (MUTCD 3B.24, as cited), which carry the centre line past it: no centre line across it.
+        if self.hatched_yellow:
+            median = unary_union(self.hatched_yellow)
+            self.out["bike_lane_contraflow_lines"] = [
+                part for line in self.out["bike_lane_contraflow_lines"] if len(line) >= 2
+                for part in _lines(LineString(line).difference(median))]
         # Inside a turn box, nothing but the box's own line, symbol and arrow: the lines along
         # its sides stay (a hair inside them is cut), the track's divider stops at it.
         lined = road.difference(unary_union([box.buffer(-SEAM_M) for box in self.turn_boxes]))

@@ -320,14 +320,17 @@ def is_stop_line(tags: dict) -> bool:
 
 def is_restriction_marking(tags: dict) -> bool:
     """A hatched area on the carriageway - wiki Key:road_marking, `restriction`: "Neutral areas
-    or restriction markings, like gore chevron or no-parking markings". Mapped as a closed way;
-    the way IS the painted area, as a stop_line way is the painted bar."""
-    return tags.get("road_marking") == "restriction"
+    or restriction markings, like gore chevron or no-parking markings" - or wiki
+    Tag:area:highway=prohibited, "an area of a road surface that vehicles are not supposed to stop
+    on or traverse", painted hatching. Mapped as a closed way; the way IS the painted area, as a
+    stop_line way is the painted bar."""
+    return tags.get("road_marking") == "restriction" or tags.get("area:highway") == "prohibited"
 
 
 def is_road_area(tags: dict) -> bool:
-    """`area:highway=*` - a road's surface mapped as its outline, drawn along its kerbs."""
-    return "area:highway" in tags
+    """`area:highway=*` - a road's surface mapped as its outline, drawn along its kerbs. Not
+    `area:highway=prohibited`, which is hatching on that surface (is_restriction_marking)."""
+    return "area:highway" in tags and tags["area:highway"] != "prohibited"
 
 
 # `highway=*` values that are always an area, never a line (wiki Key:highway, "areas").

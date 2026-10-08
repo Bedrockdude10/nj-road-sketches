@@ -1842,6 +1842,22 @@ def two_way_bikeway(area: str, base: OsmChange,
     if kerb_extensions:
         _extensions(layers, network, kerbs, applied, frame, ids, nodes, created, report)
 
+    # A street restriped is restriped whole: paint OSM maps on its carriageway - a hatched area
+    # (`road_marking=restriction`, `area:highway=prohibited`) within half its `width` of a
+    # restriped way, a flush median say - gives way to the new section, so it is deleted.
+    lines_of = [network.lines[w] for w in applied.index]
+    halves = [row.width_ft * FT_TO_M / 2 for row in applied.itertuples()]
+    on_street = STRtree(lines_of)
+    deleted = []
+    for marking in layers["road_markings"]:
+        area = frame.line(marking["coords_wgs84"])
+        if marking["id"] < 0 or area is None or len(area.coords) < 4:
+            continue
+        middle = Polygon(area.coords).representative_point()
+        if any(lines_of[k].distance(middle) <= halves[k] for k in on_street.query(middle.buffer(max(halves)))):
+            deleted.append(WayChange(marking["id"], "delete", (), {}))
+            report["painted areas on restriped streets, deleted"] += 1
+
     # Continental crossings, everywhere: every marked crosswalk, every crossing a junction claims,
     # and every crossing of the bikeway's route.
     crossing_of = {n: c for c in layers["crossings"] for n in c["node_ids"]}
@@ -1867,4 +1883,4 @@ def two_way_bikeway(area: str, base: OsmChange,
         else:
             by_id[way_id] = WayChange(way_id, "modify",
                                       node_ids or tuple(in_layers[way_id]["node_ids"]), tags)
-    return OsmChange((*base.nodes, *nodes), (*by_id.values(), *created)), report
+    return OsmChange((*base.nodes, *nodes), (*by_id.values(), *created, *deleted)), report
