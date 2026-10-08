@@ -198,3 +198,9 @@ data/
 output/
 
 .DS_Store
+
+# Per-machine git worktrees (each is a checkout of a branch, already tracked through it), and
+# the data/output symlinks a worktree points back at the main checkout with.
+.claude/worktrees/
+/data
+/output
