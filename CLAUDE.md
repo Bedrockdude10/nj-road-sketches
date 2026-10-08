@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-A router, not a summary. README.md is the architecture, STANDARDS.md is the figures register,
+A router, not a summary. README.md is the architecture, standards.toml is every figure and OSM key the code reads,
 and `.claude/SKILLS.md` (imported below) is the list of what agents here actually get wrong.
 
 ## Answer at the quantitative layer
@@ -56,7 +56,8 @@ locally with `scripts/verify.py`.
 ## Prose
 
 One home per fact: keep the trap, the datum, the invariant and why not the obvious alternative;
-cut the discovery story, the session archaeology, and anything the code already says. Published
-figures live as rows in STANDARDS.md, not as inline comments.
+cut the discovery story, the session archaeology, and anything the code already says. Every
+figure lives in standards.toml - value, unit, source, status - and code reads it from there
+(`src/standards.py`), never as a literal or an inline comment.
 
 @.claude/SKILLS.md

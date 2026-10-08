@@ -16,9 +16,8 @@ from shapely.geometry import Point, Polygon
 import requests
 
 from src.sources.overpass import OVERPASS_USER_AGENT, query_overpass
+from src.standards import si
 
-DEFAULT_BUILDING_HEIGHT_M = 7.0  # ~2 stories, typical for small-borough Main St buildings
-METERS_PER_LEVEL = 3.0
 # Where fetched OSM responses are cached. Overridable so the test suite can point at a
 # committed fixture set and run hermetically - see tests/conftest.py and ROAD_SKETCHES_OFFLINE.
 CACHE_DIR = Path(os.environ.get(
@@ -395,7 +394,7 @@ NODE_LAYERS: tuple[tuple[str, Callable[[dict], bool]], ...] = (
 def height_from_tags(tags: dict) -> tuple[float, str] | None:
     """(height in metres, which tag said so) if a mapper recorded one, else None.
 
-    None rather than DEFAULT_BUILDING_HEIGHT_M: "nobody said" is a different answer from
+    None rather than building.default_height: "nobody said" is a different answer from
     "7 m", and the caller looks elsewhere (src/sources/assessor.py). Returning the default
     here made every building the same height.
     """
@@ -406,7 +405,7 @@ def height_from_tags(tags: dict) -> tuple[float, str] | None:
             pass
     if tags.get("building:levels"):
         try:
-            return float(tags["building:levels"]) * METERS_PER_LEVEL, "osm_levels"
+            return float(tags["building:levels"]) * si("building.level_height"), "osm_levels"
         except ValueError:
             pass
     return None

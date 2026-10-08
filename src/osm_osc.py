@@ -93,26 +93,27 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 
 from src.osm_world import (BOLLARD_SPACING_M, CARRIAGEWAY, DEFAULT_WIDTHS_M, FT_TO_M, LocalFrame,
-                           STATION_STEP_M, Stations, beyond, carriageway_width_m, ease,
+                           STATION_STEP_M, TANGENT_M, Stations, beyond, carriageway_width_m, ease,
                            has_centre_line, street_ends, taper_rate, width_m)
 from src.sources.osm_change import NewNode, OsmChange, WayChange, apply_change
 from src.sources.osm_context import SNAPSHOT_AREAS, fetch_borough_osm, osm_layers
+from src.standards import in_unit, si
 
-# NOT OSM: Danny's rule for a junction leg with no stop line, no crosswalk, and no kerb of any
-# cross street mapped - the centre line stops this far from the junction node.
-UNMARKED_MOUTH_FT = 11.0
-NODE_MATCH_M = 0.001              # numerical only: a cut this close to a node is at that node
-ACROSS_M = 0.01                   # numerical only: a kerb hit this much nearer its street is still across
+# Every figure is declared in standards.toml; these are in feet, the unit the section is designed in.
+UNMARKED_MOUTH_FT = in_unit("junction.unmarked_mouth", "ft")
+NODE_MATCH_M, ACROSS_M = si("numerical.node_match"), si("numerical.across")
+OVERSHOOT_M = si("numerical.overshoot")
 
 BROAD_STREET = ("West Broad Street", "East Broad Street")
-TRACK_FT, CONSTRAINED_TRACK_FT, BUFFER_FT, LANE_FT = 10.0, 8.0, 3.0, 11.0
-MIN_STALL_FT = 7.0                # spare narrower than this is hatched, not parked
-PARKING_LANE_FT = 8.0             # a parking lane's depth, where the spare allows
-MIN_HATCH_FT = 0.5                # spare narrower than this is left unmarked
-STALL_LENGTH_M = 20 * FT_TO_M     # a piece shorter than one parallel stall is not parked
-DRIVEWAY_CLEARANCE_FT = 5.0       # no stall this near a driveway's return - municipal, STANDARDS.md 1
-NO_STANDING_FT = 25.0             # R.S. 39:4-138 (e), STANDARDS.md 1: no standing this near an intersection
-NO_STANDING_WITH_EXTENSION_FT = 10.0   # ...and this near, where a curb extension is built (same row)
+TRACK_FT, CONSTRAINED_TRACK_FT = in_unit("track.width", "ft"), in_unit("track.constrained_width", "ft")
+BUFFER_FT, LANE_FT = in_unit("track.buffer", "ft"), in_unit("lane.width", "ft")
+MIN_STALL_FT = in_unit("parking.min_stall", "ft")          # spare narrower than this is hatched, not parked
+PARKING_LANE_FT = in_unit("parking.lane_depth", "ft")
+MIN_HATCH_FT = in_unit("hatch.min_width", "ft")            # spare narrower than this is left unmarked
+STALL_LENGTH_M = si("stall.parallel_length")             # a piece shorter than one stall is not parked
+DRIVEWAY_CLEARANCE_FT = in_unit("parking.driveway_clearance", "ft")
+NO_STANDING_FT = in_unit("no_standing.from_crosswalk", "ft")
+NO_STANDING_WITH_EXTENSION_FT = in_unit("no_standing.with_extension", "ft")
 
 AREA_NOTE = ("Existing conditions: the street's surface out to its mapped kerbs (each kerb the edge "
              "of the street nearest it), and half its block's width where a side has none, by "
@@ -305,7 +306,7 @@ class _Network:
             if not 0 < d < line.length:
                 continue
             here = np.asarray(line.interpolate(d).coords[0])
-            toward = np.asarray(line.interpolate(max(d - 0.5, 0.0)).coords[0]) - here
+            toward = np.asarray(line.interpolate(max(d - TANGENT_M, 0.0)).coords[0]) - here
             if float(np.dot(np.asarray(middle.coords[0]) - here, [toward[1], -toward[0]])) > 0:
                 found.append(float(d))
         return min(found, default=None)
@@ -315,8 +316,9 @@ class _Network:
         mouth, crosses it. On each side of the leg the next leg round the junction, where it is
         another street's; that street's kerb in the corner between the two, at its least distance
         from that street's centreline (carried back across the junction along its first segment);
-        and where the leg leaves that distance. The further side; None where neither corner has
-        the cross street's kerb mapped."""
+        and where the leg leaves that distance - where the corner has none of its kerb mapped, half
+        its width, which is where its edge is drawn. The further side; None where neither side of
+        the leg is another street's."""
         legs = [other for other in self.legs(leg.junction) if other.direction() is not None]
         if leg not in legs:
             return None
@@ -341,7 +343,8 @@ class _Network:
             half = kerbs.least_offset(neighbour.street, cross, leg.length + neighbour.length,
                                       here, start, span)
             if half is None:
-                continue
+                # No kerb of it mapped in the corner: its edge where it is drawn, half its width.
+                half = carriageway_width_m(self.streets[neighbour.steps[0][0]]["tags"])[0] / 2
             inside = [LineString(p) for p in _lines(line.intersection(cross.buffer(half)))]
             for piece in inside:
                 at = sorted((line.project(Point(piece.coords[0])), line.project(Point(piece.coords[-1]))))
@@ -555,8 +558,8 @@ def _junction_face(network: _Network, kerbs: _Kerbs, junction: int) -> Polygon |
         i = both[0]
         # Run on just past each kerb, so the line crosses the kerb it ends on; the face it
         # closes is the same for any length that does.
-        closing.append(LineString([stations.xy[i] + stations.left[i] * (left[i] + 0.5),
-                                   stations.xy[i] - stations.left[i] * (right[i] + 0.5)]))
+        closing.append(LineString([stations.xy[i] + stations.left[i] * (left[i] + OVERSHOOT_M),
+                                   stations.xy[i] - stations.left[i] * (right[i] + OVERSHOOT_M)]))
     if len(closing) < 2:
         return None
     centre = Point(network.node_xy[junction])
@@ -601,8 +604,8 @@ def _pieces(count: int, at: list[int]) -> list[tuple[int, int]]:
 
 
 def _tangent(line: LineString, s: float) -> np.ndarray:
-    a = np.asarray(line.interpolate(max(s - 0.5, 0.0)).coords[0])
-    b = np.asarray(line.interpolate(min(s + 0.5, line.length)).coords[0])
+    a = np.asarray(line.interpolate(max(s - TANGENT_M, 0.0)).coords[0])
+    b = np.asarray(line.interpolate(min(s + TANGENT_M, line.length)).coords[0])
     return (b - a) / np.linalg.norm(b - a)
 
 
@@ -654,8 +657,8 @@ def _datums(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops, frame
             report: Counter[str]) -> list[tuple[_Leg, dict[str, float], int | None]]:
     """Each junction leg, how far out along it R.S. 39:4-138(e)'s setback is measured from on
     each kerb (left and right looking out from the junction), and the node of the crosswalk it
-    claims (None where it has none). On each kerb, the further of the statute's two arms
-    (STANDARDS.md 1): the crosswalk's side line - any mapped crossing, a crosswalk in law, marked
+    claims (None where it has none). On each kerb, the further of the statute's two arms: the
+    crosswalk's side line - any mapped crossing, a crosswalk in law, marked
     or not - where its band (the crossing way, its `width` wide) meets that kerb's mapped
     `barrier=kerb` (_Kerbs.band_reach), so a skewed crosswalk is measured where it is; and the
     cross street's side line (its kerb line, else half its width)."""
@@ -1018,13 +1021,12 @@ def _openings(way: dict, line: LineString, sign: int, kerbs: _Kerbs, branches: l
     return _merged(out, line.length)
 
 
-# Where a street is narrower than its section, what gives and how far: the buffer first, to this
-# (Danny, 2026-10-07; STANDARDS.md 6c), then the track to CONSTRAINED_TRACK_FT, then parking, then
-# the lanes.
-MIN_BUFFER_FT = 2.0
-# A two-stage turn box's length along the track: two bicycles nose to tail. MUTCD 9E.11(10) gives no
-# dimension - Modelled, STANDARDS.md 7 (BICYCLE_LENGTH_FT, TURN_BOX_QUEUE_BICYCLES).
-BICYCLE_LENGTH_FT, TURN_BOX_QUEUE_BICYCLES = 6.0, 2
+# Where a street is narrower than its section, what gives and how far: the buffer first, to this,
+# then the track to CONSTRAINED_TRACK_FT, then parking, then the lanes.
+MIN_BUFFER_FT = in_unit("track.min_buffer", "ft")
+# A two-stage turn box's length along the track: its queue of bicycles nose to tail.
+BICYCLE_LENGTH_FT = in_unit("turn_box.bicycle_length", "ft")
+TURN_BOX_QUEUE_BICYCLES = int(in_unit("turn_box.queue", "1"))
 TURN_BOX_LENGTH_FT = BICYCLE_LENGTH_FT * TURN_BOX_QUEUE_BICYCLES
 
 
@@ -1416,7 +1418,7 @@ def _design(network: _Network, route: set[int], resign: bool = False) -> pd.Data
     The section, kerb to kerb: two LANE_FT lanes everywhere it is applied; on `route` (Broad St's
     ways) the widest
     track that leaves them at exactly that - TRACK_FT, else CONSTRAINED_TRACK_FT - and its
-    BUFFER_FT buffer, which gives first (the give order, STANDARDS.md 6c) down to MIN_BUFFER_FT
+    BUFFER_FT buffer, which gives first (the give order) down to MIN_BUFFER_FT
     before a block loses its track, on the north kerb, with all the spare to the south; elsewhere the spare
     halved between the kerbs. Each kerb's spare, lane outward: a parking lane against the lane, up
     to PARKING_LANE_FT, where OSM lets that kerb be parked and the spare holds MIN_STALL_FT; then
@@ -1884,3 +1886,29 @@ def two_way_bikeway(area: str, base: OsmChange,
             by_id[way_id] = WayChange(way_id, "modify",
                                       node_ids or tuple(in_layers[way_id]["node_ids"]), tags)
     return OsmChange((*base.nodes, *nodes), (*by_id.values(), *created, *deleted)), report
+
+
+# --- writing an area's changes ------------------------------------------------------------------
+
+# Each proposal's change, built on the change it starts from. An area has a proposal where its
+# .osc already exists (proposals/<area>/): the file is what says the proposal is made there.
+PROPOSALS = {
+    "two_way_bikeway": lambda area: two_way_bikeway(area, existing_markings(area)[0]),
+    "two_way_bikeway_daylighting": lambda area: two_way_bikeway(
+        area, existing_markings(area, kerb_extensions=True)[0], kerb_extensions=True),
+}
+
+
+def write_changes(area: str, proposals: bool = True) -> dict[str, Counter[str]]:
+    """Write `area`'s existing.osc - every area has one - and, with `proposals`, each proposal
+    this area already has a file for, all from the pull now cached; what each found, by file."""
+    from src.sources.osm_change import proposal_path, write_change
+
+    existing, found = existing_markings(area)
+    write_change(existing, proposal_path(area, "existing"))
+    reports = {"existing": found}
+    for name, build in PROPOSALS.items():
+        if proposals and proposal_path(area, name).exists():
+            change, reports[name] = build(area)
+            write_change(change, proposal_path(area, name))
+    return reports

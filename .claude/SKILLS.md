@@ -4,8 +4,8 @@ Read this before changing geometry, adding a marking, or "fixing" a number. It i
 of README.md — it is the list of things an agent in this repo gets wrong, written from the ones
 that actually happened, with the place each answer already lives.
 
-README.md explains how the pipeline works. STANDARDS.md records every published figure and
-whether it has been checked. **This file is about the failure modes**, because knowing the
+README.md explains how the pipeline works. standards.toml declares every figure and OSM key,
+and whether each has been checked. **This file is about the failure modes**, because knowing the
 architecture did not stop any of the mistakes below.
 
 ---
@@ -300,12 +300,12 @@ by `phase3_treatments.py` still saved a picture; that does not mean it passed.
 | a fact about the street as it exists | on `IntersectionModel`, resolved once at load |
 | a decision a proposal makes | a `Treatment` subclass, geometry as a *method* |
 | a way of drawing something decided | a `PaintKind`, or a prop |
-| a published figure | a row in **STANDARDS.md**, with its provenance tier |
+| a figure | an entry in **standards.toml**, with its source and status |
 
 **The last row is not optional and I skipped it.** Six standards constants went into code comments
-from memory in one session — the exact failure STANDARDS.md's preamble describes. If you write a
-number and cite NACTO/AASHTO/MUTCD for it, add the row in the same commit, and mark it *as cited*
-unless you actually opened the document.
+from memory in one session. If you need a number, add it to standards.toml and read it with
+`src.standards.si`; mark it `as_cited` unless you actually opened the document. `src/standards.py`
+refuses to load a cited figure with no source.
 
 ---
 

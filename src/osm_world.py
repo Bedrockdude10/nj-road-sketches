@@ -11,7 +11,9 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 dotted edges where `cycleway:<side>:crossing:markings=dashes` - then
                 `cycleway:<side>:buffer`, with a bollard every BOLLARD_SPACING_M down its centre
                 where `cycleway:<side>:separation:*=flex_post`;
-                `cycleway:<side>:oneway=no` adds the dashed yellow divider down its middle
+                `cycleway:<side>:oneway=no` adds the dashed yellow divider down its middle;
+                a `lane` (not a `track`) gets MUTCD's bicycle symbol and arrow at the start of
+                each block (_Reader.markings_all)
   shoulder      `shoulder:<side>=yes`, `shoulder:<side>:width` at the edge; where
                 `shoulder:<side>:markings=hatched` (a project convention), hatched from its inner
                 line out to its street's own `area:highway` edge - everything the kerb as built
@@ -22,13 +24,14 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 `street_side` bays paved beside the carriageway, `on_kerb` parking on the
                 pavement beyond it, `half_on_kerb` half on each (_Reader.street_parking)
   lane lines    white where two `lanes` running the same way meet, the travel way shared
-                equally unless `width:lanes` places them; broken, solid where `change:lanes`
-                keeps traffic from crossing; none where `lane_markings=no`
+                equally among all of them unless `width:lanes` places them; broken, solid where
+                `change:lanes` keeps traffic from crossing; none where `lane_markings=no`
   centre line   two-way ways with 2+ lanes, or with `overtaking*` or `lane_markings=yes` tagged
                 (has_centre_line), unless `lane_markings=no` - so where it stops is
                 where the way is split and tagged, never decided here. Double yellow where
-                `overtaking[:forward|:backward]=no`, dashed where `=yes`. On the way itself, or
-                where `width:lanes` puts it - see _Reader.cross_section
+                `overtaking[:forward|:backward]=no`, dashed where `=yes`. Where the backward
+                lanes meet the forward ones - the lanes equal, or as `width:lanes` has them, so
+                off the way beside a turn lane - see _Reader.cross_section
   cycle crossings `highway=cycleway` + `cycleway=crossing` ways: a band of their `width`, green
                 where `surface:colour=green`; where `crossing:markings=dashes`, edged in
                 CROSSBIKE_DASH_M dots and the green in skip bars of the same pattern; a dashed
@@ -36,9 +39,13 @@ Everything drawn is something OSM maps, placed where OSM puts it:
   sidewalks     `footway=sidewalk` ways, and paved footpaths (_footpath), buffered to their
                 `width`, concrete unless `surface=asphalt`
   crossings     `footway=crossing` ways, painted as their `crossing:markings` says, on the
-                carriageway only
+                carriageway only: two edge lines for `lines`/`dashes`/`dots`, bars for `zebra`,
+                both for `ladder`; any other kind - `yes` among them - drawn as zebra and counted
   markings      `road_marking=stop_line` bars (STOP_BAR_M wide), `road_marking=restriction`
                 hatched areas
+  lane arrows   `turn:lanes[:forward|:backward]`: in each lane, MUTCD's arrow for its `left`,
+                `through` and `right` - two to a run of ways with the same indications up to a
+                junction, one at each end, held clear of what crosses the lane (_Reader.markings_all)
   transitions   a `placement=transition` way (wiki Key:placement) interpolates every width of
                 its section from the piece before to the piece after, on an S-curve; every
                 other way's layout is constant along it, as its tags are
@@ -71,7 +78,9 @@ from pathlib import Path
 import numpy as np
 import pyproj
 import shapely
-from shapely import unary_union
+import shapely.affinity
+from shapely import STRtree, unary_union
+from shapely.affinity import scale as _mirror
 from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import linemerge, nearest_points, split
@@ -79,8 +88,9 @@ from shapely.ops import linemerge, nearest_points, split
 from src.geometry.model.crs import NJ_STATE_PLANE_FT, WGS84
 from src.sources.osm_change import OsmChange, apply_change, load_change
 from src.sources.osm_context import SNAPSHOT_AREAS, osm_layers
+from src.standards import FIGURES, TO_SI, si
 
-FT_TO_M = 0.3048
+FT_TO_M = TO_SI["ft"]
 
 # What each `surface` value (wiki Key:surface) is drawn in - its material, and the texture
 # src/render/theme.py fetches for it. Any other value, or none, is asphalt.
@@ -96,62 +106,37 @@ CARRIAGEWAY = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclass
                "residential", "living_street", "service", "motorway_link", "trunk_link",
                "primary_link", "secondary_link", "tertiary_link", "busway"}
 
+# Every figure below is declared in standards.toml, with its source and status; read in SI.
 # NOT OSM: what is drawn where a way carries no width tag. Counted every time it is used.
-DEFAULT_WIDTHS_M = {"lane": 3.0, "service": 3.5, "cycleway": 1.5, "parking": 2.2,
-                    "sidewalk": 6 * FT_TO_M, "crossing": 3.0,
-                    "shoulder": 1.0}
-DEFAULT_BUILDING_HEIGHT_M = 7.0
-
-# Kerb reveals above the gutter for `kerb=*` (wiki Key:kerb), where `kerb:height` is absent - the
-# NJDOT Roadway Design Manual and N.J.A.C. 16:47 figures in STANDARDS.md 6a (as cited): a 6 in
-# vertical face where sidewalks are built, a mountable kerb at most 4 in, a driveway's depressed
-# kerb 1.5 in. A lowered kerb that is a curb ramp is flush instead (RAMP_HEIGHT_M, _Reader.kerb).
-IN_TO_M = 0.0254
-KERB_HEIGHT_M = {"raised": 6 * IN_TO_M, "regular": 6 * IN_TO_M, "rolled": 4 * IN_TO_M,
-                 "lowered": 1.5 * IN_TO_M, "flush": 0.0}
-RAMP_HEIGHT_M = 0.0
-# A detectable warning surface's depth in the direction of travel, across the ramp's full width
-# (ADA 2010 Standards 705.1, as cited; STANDARDS.md 6a).
-TACTILE_DEPTH_M = 24 * IN_TO_M
-# A curb ramp's width, flares excluded - NJDOT's minimum (as cited; STANDARDS.md 6a). OSM maps
-# where a ramp is, not how wide, so each detectable warning pad is this wide.
-RAMP_WIDTH_M = 48 * IN_TO_M
-# A traffic-control support's lateral clearance behind the face of the kerb (MUTCD, as cited;
-# STANDARDS.md 6a): where a signal pole or pedestrian signal post stands, off the drawn street.
-SIGNAL_CLEARANCE_M = 2 * FT_TO_M
-
-STATION_STEP_M = 2.0     # spacing of the cross-sections a road's edges are sampled at
-CHUNK_M = 50.0           # a road is drawn in pieces this long, so a looped road encloses nothing
-# A centre line's stripes (MUTCD 3A.05-3A.06, as cited): 4-6 in wide, a double line's two
-# stripes one stripe-width apart, a broken line 10 ft dashes in 40 ft cycles.
-CENTRE_PAIR_OFFSET_M = 0.15
-DASH_M, DASH_CYCLE_M = 3.0, 12.0
-STOP_BAR_M = 2 * FT_TO_M
-BOLLARD_SPACING_M = 8 * FT_TO_M   # flex posts down a buffer's centre, as the old design spaced them
-# A conflict area's dotted line, and the green skip-paint that follows its pattern: 2 ft dashes,
-# 2 ft gaps (MUTCD 3B.08 dotted lines, IA-14 green colored pavement - as cited).
-CROSSBIKE_DASH_M = 2 * FT_TO_M
-# An angled stall, N.J.A.C. 5:21-4.14 (STANDARDS.md 1a): 9 ft across, 18 ft along, in its own frame.
-# OSM has no key for a diagonal stall's angle, so `orientation=diagonal` is drawn at one: 60 degrees
-# from the kerb, the angle observed on Grand Central Ave (Danny, 2026-09-10) and 1a's worked row.
-STALL_WIDTH_M, STALL_BODY_M, DIAGONAL_DEG = 9 * FT_TO_M, 18 * FT_TO_M, 60.0
-# A parallel stall along the kerb (STANDARDS.md 3), where a marked lane gives no capacity.
-PARALLEL_STALL_M = 20 * FT_TO_M
-# A bicycle symbol's / arrow's painted footprint - schematic, as the old pipeline drew them
-# (MUTCD 9E.11(05) names the markings, not a size).
-SYMBOL_LENGTH_M, SYMBOL_WIDTH_M = 5.5 * FT_TO_M, 2.4 * FT_TO_M
-ZEBRA_BAR_M = 0.5            # a continental crossing's bar width, and the gap between bars
-# Diagonal crosshatch (MUTCD 3B, as cited; STANDARDS.md 6b): strokes 30-45 degrees to the lines
-# they meet (45 here), spaced along the street by engineering judgment - 10-20 ft on low-speed
-# urban streets, the dense end taken so a short stretch between driveways still shows strokes - and
-# 8 in wide below 45 mph, 12 in at or above (by OSM `maxspeed`: the wide strokes' own channel).
-HATCH_SPACING_M = 10 * FT_TO_M
-HATCH_WIDE_MPH = 45
+DEFAULT_WIDTHS_M = {"lane": si("lane.width"), "service": si("default_width.service"),
+                    "cycleway": si("cycleway.width"), "parking": si("parking.lane_depth"),
+                    "sidewalk": si("default_width.sidewalk"), "crossing": si("default_width.crossing"),
+                    "shoulder": si("default_width.shoulder")}
+DEFAULT_BUILDING_HEIGHT_M = si("building.default_height")
+# A kerb's reveal above the gutter by `kerb=*`, where `kerb:height` is absent; a curb ramp's.
+KERB_HEIGHT_M = {"raised": si("kerb.raised"), "regular": si("kerb.raised"), "rolled": si("kerb.rolled"),
+                 "lowered": si("kerb.lowered"), "flush": si("kerb.flush")}
+RAMP_HEIGHT_M = si("kerb.ramp")
+TACTILE_DEPTH_M, RAMP_WIDTH_M = si("tactile.depth"), si("tactile.width")
+SIGNAL_CLEARANCE_M = si("signal.clearance")
+STATION_STEP_M, CHUNK_M = si("numerical.station_step"), si("numerical.chunk")
+CENTRE_PAIR_OFFSET_M = si("line.double_offset")
+DASH_M, DASH_CYCLE_M = si("line.dash"), si("line.dash_cycle")
+STOP_BAR_M = si("stop_line.width")
+BOLLARD_SPACING_M = si("bollard.spacing")
+CROSSBIKE_DASH_M = si("line.dot")
+STALL_WIDTH_M, STALL_BODY_M, DIAGONAL_DEG = si("stall.width"), si("stall.length"), si("stall.diagonal_angle")
+PARALLEL_STALL_M = si("stall.parallel_length")
+SYMBOL_LENGTH_M, SYMBOL_WIDTH_M = si("symbol.length"), si("symbol.width")
+TURN_ARROW_CLEAR_M, TURN_ARROW_STEP_M = si("arrow.clearance"), si("arrow.search_step")
+ZEBRA_BAR_M = si("crosswalk.bar_width")
+HATCH_ANGLE_DEG, HATCH_SPACING_M = si("hatch.angle"), si("hatch.spacing")
+HATCH_WIDE_MPH = si("hatch.wide_speed")
+SEAM_M, TANGENT_M = si("numerical.seam"), si("numerical.tangent_probe")
 # The `colour`s a `road_marking=restriction` area is hatched in other than white, each in its own
 # channels (`<colour>_hatch_edge_lines`, `<colour>_hatch_stroke_lines`) - the channel is what
 # decides a stripe's colour in 3D (scripts/blender/blender_scene.py:PAINT_COLOUR_CHANNELS).
 HATCH_COLOURS = ("yellow", "blue")
-SEAM_M = 0.05                # hatching laid way by way leaves mm seams where consecutive ways turn
 # The line channels that are paint, kept on the street surface (_Reader.on_carriageway).
 PAINT_LINES = ("bike_lane_edge_lines", "parking_edge_lines", "bike_lane_contraflow_lines",
                "lane_narrowing_edge_lines", "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
@@ -268,7 +253,7 @@ def beyond(way: dict, ends: dict[tuple[str | None, int], list[dict]],
         if other is None:
             out.append(None)
             continue
-        at = min(0.5, other.length)
+        at = min(TANGENT_M, other.length)
         out.append(other.interpolate(at if others[0]["node_ids"][0] == node
                                      else other.length - at).coords[0])
     return (out[0], out[1]) if out else (None, None)
@@ -287,8 +272,8 @@ class Stations:
         path = LineString([*([before] if before is not None else []), *line.coords,
                            *([after] if after is not None else [])])
         lead = math.dist(before, line.coords[0]) if before is not None else 0.0
-        ahead = np.array([path.interpolate(min(lead + at + 0.5, path.length)).coords[0] for at in self.s])
-        behind = np.array([path.interpolate(max(lead + at - 0.5, 0.0)).coords[0] for at in self.s])
+        ahead = np.array([path.interpolate(min(lead + at + TANGENT_M, path.length)).coords[0] for at in self.s])
+        behind = np.array([path.interpolate(max(lead + at - TANGENT_M, 0.0)).coords[0] for at in self.s])
         tangent = ahead - behind
         tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-9)
         self.left = np.column_stack([-tangent[:, 1], tangent[:, 0]])
@@ -330,6 +315,9 @@ class _Reader:
         self.street_mph: dict[str, float] = defaultdict(float)     # its highest posted `maxspeed`
         self.crosswalk_bands: list[BaseGeometry] = []   # kept clear of other paint (on_carriageway)
         self.turn_boxes: list[Polygon] = []              # likewise, bar their own markings
+        self.stop_bars: list[BaseGeometry] = []          # what a lane's arrows are held clear of
+        self.turns: list[dict] = []          # turn:lanes, piece by piece: markings_all draws them
+        self.bike_lanes: list[dict] = []     # cycleway=lane, piece by piece: markings_all draws them
         # Per road way: its nodes, drawn surface and edges - what a crossing is painted on.
         self.road_nodes: dict[int, set[int]] = {}
         self.road_ways: dict[int, tuple[LineString, list[int], dict]] = {}   # signals() reads them
@@ -350,7 +338,7 @@ class _Reader:
             "tree_points": [], "props": [],
             "cycle_crossing_surface_polygons": [], "cycle_crossing_edge_lines": [],
             "cycle_crossing_divider_lines": [], "parking_stall_divider_lines": [],
-            "tactile_paving_polygons": []}
+            "tactile_paving_polygons": [], "lane_arrow_polygons": []}
 
     def width(self, tags: dict, key: str, default: str) -> float:
         found = width_m(tags.get(key))
@@ -470,7 +458,8 @@ class _Reader:
         """Draw the way's side features and return its centre line.
 
         Without `width:lanes` each side's shoulder, cycleway, buffer and parking are laid from its
-        edge inward, and the centre line is the way. With every lane's width (wiki Key:width:lanes,
+        edge inward, every lane shares what is left equally, and the centre line is where the
+        backward lanes meet the forward ones. With every lane's width (wiki Key:width:lanes,
         left to right) the section is laid IN ORDER from the edge whose side carries a cycleway
         (else the left): its cycleway, buffer and parking, then the lanes, then the far side's
         parking lane against the last lane, and its shoulder from there out - so the shoulder's
@@ -481,16 +470,21 @@ class _Reader:
         backward = backward_lanes(tags, lanes)
         if len(widths) != lanes or None in widths:
             left, right = (self.kerbside(tags, stations, side, edges[side]) for side in ("left", "right"))
-            # Each direction's lanes share its half of the travel way equally; a oneway's share
-            # all of it. Lane j's left boundary, counting lanes left to right from 0.
-            if tags.get("oneway") in ("yes", "-1"):
-                bounds = {j: left - j * (left + right) / lanes for j in range(1, lanes)}
-            else:
-                forward = lanes - backward
-                bounds = ({j: left - j * left / backward for j in range(1, backward)}
-                          | {backward + j: -j * right / forward for j in range(1, forward)})
-            self.lane_lines(tags, stations, lanes, backward, bounds)
-            return line
+            if lanes < 1:
+                return line
+            # Every lane shares the travel way equally - nothing says otherwise without
+            # `width:lanes` - so a two-way way's centre line is where its backward lanes meet its
+            # forward ones: off the way where more run one way than the other (a turn lane), or
+            # where the two sides' kerbside features differ. Lane j's left edge, counting lanes left
+            # to right from 0; the last lane's right edge is `every[lanes]`.
+            oneway = tags.get("oneway") in ("yes", "-1")
+            every = [left - j * (left + right) / lanes for j in range(lanes + 1)]
+            self.lane_lines(tags, stations, lanes, backward,
+                            {j: every[j] for j in range(1, lanes) if oneway or j != backward})
+            self.turn_lanes(tags, stations, lanes, backward, every)
+            if oneway or not 0 < backward < lanes:
+                return line
+            return LineString(stations.line(every[backward]))
         def lane(i: int):
             def theirs(t: dict) -> float | None:
                 values = [width_m(v) for v in (t.get("width:lanes") or "").split("|")]
@@ -512,9 +506,11 @@ class _Reader:
                       shoulder_from=None if _has_cycleway(tags, far) else -outer)
         near = widths[:backward] if anchor == "left" else widths[backward:]
         leftmost = sign * inner + (sum(widths) if anchor == "right" else 0)
+        lefts = [leftmost - sum(widths[:j]) for j in range(lanes + 1)]   # each lane's left edge
         self.lane_lines(tags, stations, lanes, backward,
-                        {j: leftmost - sum(widths[:j]) for j in range(1, lanes)
+                        {j: lefts[j] for j in range(1, lanes)
                          if tags.get("oneway") in ("yes", "-1") or j != backward})
+        self.turn_lanes(tags, stations, lanes, backward, lefts)
         # Each side's lane edge, where nothing else marks it: a hatched shoulder's outline and a
         # parking lane's edge already do, and a track's buffer line does. That leaves a shoulder
         # whose hatching breaks where traffic crosses the kerb - the edge line is maintained across
@@ -577,6 +573,8 @@ class _Reader:
             if tags.get(f"cycleway:{side}:oneway") == "no":
                 self.out["bike_lane_contraflow_lines"] += _dashes(
                     LineString(stations.line(sign * (edge + inner) / 2)))
+            if (tags.get(f"cycleway:{side}") or tags.get("cycleway:both") or tags.get("cycleway")) == "lane":
+                self.bike_lane(tags, side, stations, sign * (edge + inner) / 2, float(np.min(edge - inner)))
             edge = inner
             buffer = width_m(tags.get(f"cycleway:{side}:buffer"))
             if buffer:
@@ -636,7 +634,7 @@ class _Reader:
     def lane_lines(self, tags: dict, stations: Stations, lanes: int, backward: int,
                    bounds: dict[int, np.ndarray]) -> None:
         """A lane line where two lanes running the same way meet - lane j's left boundary at
-        signed offset `bounds[j]`, lanes counted left to right - white (MUTCD 3B.06, STANDARDS.md):
+        signed offset `bounds[j]`, lanes counted left to right - white (MUTCD 3B.06):
         broken, solid where either lane's `change:lanes` keeps traffic from crossing it."""
         if tags.get("lane_markings") == "no":
             return
@@ -646,6 +644,56 @@ class _Reader:
             solid = changes[j - 1] in NO_CHANGE_RIGHT or changes[j] in NO_CHANGE_LEFT
             self.out["lane_lines"] += _lines(line) if solid else _dashes(line)
             self.stats[f"lane lines ({'solid' if solid else 'broken'}, pieces of way)"] += 1
+
+    def bike_lane(self, tags: dict, side: str, stations: Stations, centre: np.ndarray,
+                  width_m: float) -> None:
+        """A `cycleway:<side>=lane` piece, kept for markings_all: its centre line in the direction
+        its riders travel - the traffic's on that side of the way, unless `cycleway:<side>:oneway`
+        says otherwise - and its width. A two-way lane (`:oneway=no`) gets its symbol, no arrow."""
+        nodes = self._way.get("node_ids") or []
+        if len(nodes) < 2:
+            return
+        oneway, own = tags.get("oneway"), tags.get(f"cycleway:{side}:oneway")
+        along = oneway == "yes" or (oneway != "-1" and side == "right")
+        along = not along if own == "-1" else along
+        line = stations.line(centre)
+        self.bike_lanes.append({
+            "street": tags.get("name"), "id": self._way["id"], "values": ("bike lane", own == "no"),
+            "first": nodes[0] if along else nodes[-1], "last": nodes[-1] if along else nodes[0],
+            "centres": [line if along else line[::-1]], "widths": [width_m]})
+
+    def turn_lanes(self, tags: dict, stations: Stations, lanes: int, backward: int,
+                   bounds: list[np.ndarray]) -> None:
+        """This way's `turn:lanes` (wiki Key:turn), kept for markings_all: in each direction that has
+        them, its lanes as their drivers see them, left to right - each lane's indications, its
+        centre line in the direction of travel and its width. `bounds[j]` is lane j's left edge,
+        lanes counted left to right across the way, `bounds[lanes]` the last one's right edge.
+        A oneway's are `turn:lanes`; a two-way way's `turn:lanes:forward` and `:backward`, the
+        backward lanes listed from the point of view of their drivers, as the wiki has it."""
+        nodes = self._way.get("node_ids") or []
+        if len(nodes) < 2 or lanes < 1:
+            return
+        if tags.get("oneway") in ("yes", "-1"):
+            groups = [("turn:lanes", list(range(lanes)), tags["oneway"] == "-1")]
+        else:
+            groups = [("turn:lanes:forward", list(range(backward, lanes)), False),
+                      ("turn:lanes:backward", list(range(backward)), True)]
+            if "turn:lanes" in tags:
+                self.stats["turn:lanes on a two-way way, no :forward/:backward: not drawn"] += 1
+        for key, here, against in groups:
+            if key not in tags:
+                continue
+            values = tags[key].split("|")
+            if len(values) != len(here):
+                self.stats[f"{key} not one value per lane: not drawn"] += 1
+                continue
+            order = here[::-1] if against else here
+            centres = [stations.line((bounds[i] + bounds[i + 1]) / 2) for i in order]
+            self.turns.append({
+                "street": tags.get("name"), "id": self._way["id"], "values": tuple(values),
+                "first": nodes[-1] if against else nodes[0], "last": nodes[0] if against else nodes[-1],
+                "centres": [c[::-1] if against else c for c in centres],
+                "widths": [float(np.min(bounds[i] - bounds[i + 1])) for i in order]})
 
     def stalls(self, tags: dict, side: str, stations: Stations, one: np.ndarray,
                other: np.ndarray) -> None:
@@ -689,6 +737,128 @@ class _Reader:
                 self.out["parking_stall_divider_lines"].append(
                     [list(one.interpolate(at, normalized=True).coords[0]),
                      list(other.interpolate(at, normalized=True).coords[0])])
+
+    def runs(self, pieces: list[dict]) -> list[list[dict]]:
+        """`pieces` joined end to end into runs: the same street and `values`, past nodes that are
+        not junctions - no road but the two of them through it - so a run ends at a junction,
+        which is how far the wiki's turn indication reaches ("from the first indication ... to the
+        junction") and where a bike lane begins again (MUTCD 9C.04(03))."""
+        through: dict[int, set[int]] = defaultdict(set)   # node -> the drawn roads through it
+        for way_id, (_line, nodes, _tags) in self.road_ways.items():
+            for node in nodes:
+                through[node].add(way_id)
+        starting: dict[tuple, list[dict]] = defaultdict(list)
+        for piece in pieces:
+            starting[(piece["street"], piece["values"], piece["first"])].append(piece)
+
+        def following(piece: dict) -> dict | None:
+            nexts = [p for p in starting[(piece["street"], piece["values"], piece["last"])]
+                     if p["id"] != piece["id"]]
+            if len(nexts) == 1 and through[piece["last"]] == {piece["id"], nexts[0]["id"]}:
+                return nexts[0]
+            return None
+
+        continued = {id(nxt) for piece in pieces if (nxt := following(piece)) is not None}
+        runs = []
+        for start in pieces:
+            if id(start) in continued:
+                continue
+            run: list[dict] = []
+            current: dict | None = start
+            while current is not None and all(current is not p for p in run):
+                run.append(current)
+                current = following(current)
+            runs.append(run)
+        return runs
+
+    def markings_all(self) -> None:
+        """Every lane's markings, run by run (runs), drawn after the crossings and stop lines that
+        they are held clear of (lane_markings):
+          turn:lanes   each lane's lane-use arrow (MUTCD 3B.20(21)), one at the run's upstream end,
+                       its first indication, and one at its downstream end; where the run holds
+                       only one, the upstream one (3B.20(22): a short lane may omit the other)
+          cycleway=lane  the bike lane symbol and its arrow at the run's upstream end - the
+                       beginning of the lane (MUTCD 9C.04(03))."""
+        surfaces = [(way_id, polygon) for way_id, polygons in self.road_surfaces.items()
+                    for polygon in polygons]
+        tree = STRtree([polygon for _way_id, polygon in surfaces])
+
+        def along(run: list[dict], k: int) -> LineString:
+            return LineString([c for n, p in enumerate(run) for c in p["centres"][k][(n > 0):]])
+
+        for run in self.runs(self.turns):
+            ids = {p["id"] for p in run}
+            for k, value in enumerate(run[0]["values"]):
+                indications = {v for v in value.split(";") if v not in ("", "none")}
+                if not indications:
+                    continue
+                glyph = lane_use_arrow(indications)
+                if glyph is None:
+                    self.stats[f"turn:lanes `{value}`: no arrow drawn for it (lanes)"] += 1
+                    continue
+                self.lane_markings(_polygons(glyph), along(run, k), min(p["widths"][k] for p in run),
+                                   ids, tree, surfaces, "lane_arrow_polygons", "lane-use arrows",
+                                   both_ends=True)
+        for run in self.runs(self.bike_lanes):
+            self.lane_markings(bike_lane_marking(arrow=not run[0]["values"][1]), along(run, 0),
+                               min(p["widths"][0] for p in run), {p["id"] for p in run}, tree, surfaces,
+                               "bike_lane_symbol_polygons", "bike lane symbols", both_ends=False)
+
+    def lane_markings(self, parts: list[Polygon], lane: LineString, width_m: float, ids: set[int],
+                      tree: STRtree, surfaces: list[tuple[int, Polygon]], channel: str, label: str,
+                      both_ends: bool) -> None:
+        """One lane's marking (markings_all): `parts` in metres, x along the lane from the tail and
+        y to its left, laid along `lane`, its centre line in the direction of travel, `width_m`
+        wide, and scaled down to that width where it is wider (MUTCD 3B.20(11)). At the run's
+        upstream end and, `both_ends`, its downstream end; each held arrow.clearance along the lane
+        clear of anything across it - a crosswalk, a stop line, another road's surface (`ids` are
+        the ways the lane runs on, whose own surface is no obstacle)."""
+        min_x, min_y, max_x, max_y = unary_union(parts).bounds
+        to_m = min(1.0, width_m / (max_y - min_y))
+        if to_m < 1.0:
+            self.stats[f"{label} scaled to their lane's width"] += 1
+        length, half = (max_x - min_x) * to_m, (max_y - min_y) * to_m / 2
+        if lane.length < length:
+            self.stats[f"{label}: lanes too short for one"] += 1
+            return
+        reach = lane.buffer(half, cap_style="flat")
+        across = [shape for shape in (*self.crosswalk_bands, *self.stop_bars) if shape.intersects(reach)]
+        across += [surfaces[i][1] for i in tree.query(reach) if surfaces[i][0] not in ids]
+        obstacle = unary_union(across) if across else None
+        if obstacle is not None:
+            shapely.prepare(obstacle)
+
+        def clear(tail: float) -> bool:
+            if obstacle is None:
+                return True
+            under = _substring(lane, max(0.0, tail - TURN_ARROW_CLEAR_M),
+                               min(lane.length, tail + length + TURN_ARROW_CLEAR_M))
+            return not obstacle.intersects(under.buffer(half, cap_style="flat"))
+
+        # Searched from each end of the run, starting AT it, so a marking with nothing to clear is
+        # at the end exactly.
+        steps = np.arange(0.0, lane.length - length + 1e-9, TURN_ARROW_STEP_M)
+        upstream = next((t for t in steps if clear(t)), None)
+        if upstream is None:
+            self.stats[f"{label}: lanes with no room clear of the junction"] += 1
+            return
+        placed = [upstream]
+        if both_ends:
+            downstream = next((t for t in lane.length - length - steps if clear(t)), None)
+            if downstream is not None and downstream >= upstream + length:
+                placed.append(downstream)
+            else:
+                self.stats[f"{label}: one, a short lane (MUTCD 3B.20(22))"] += 1
+        middle = (min_y + max_y) / 2
+        for tail in placed:
+            a = np.asarray(lane.interpolate(tail).coords[0])
+            b = np.asarray(lane.interpolate(tail + length).coords[0])
+            ahead = (b - a) / max(float(np.linalg.norm(b - a)), 1e-9)
+            left = np.array([-ahead[1], ahead[0]])
+            for part in parts:
+                self.out[channel].append([list(a + (x - min_x) * to_m * ahead + (y - middle) * to_m * left)
+                                          for x, y in part.exterior.coords])
+            self.stats[label] += 1
 
     def cycle_crossing(self, way: dict) -> None:
         tags, line = way["tags"], self.frame.line(way["coords_wgs84"])
@@ -753,10 +923,8 @@ class _Reader:
         across = np.array([-along[1], along[0]])
         width = float(np.min(np.linalg.norm(sides, axis=1)))
         nose, half = SYMBOL_LENGTH_M / 2, SYMBOL_WIDTH_M / 2
-        symbol = [(nose, 0.0), (0.0, half), (0.0, half / 3), (-nose, half / 3), (-nose, -half / 3),
-                  (0.0, -half / 3), (0.0, -half)]
-        arrow = [(nose, 0.0), (nose * 0.1, half), (nose * 0.1, half / 4), (-nose, half / 4),
-                 (-nose, -half / 4), (nose * 0.1, -half / 4), (nose * 0.1, -half)]
+        symbol, arrow = ([(a * nose, c * half) for a, c in si(f"symbol.{name}_outline")]
+                         for name in ("bicycle", "arrow"))
         for outline, side in ((symbol, 1), (arrow, -1)):
             middle = centre + across * side * width / 4
             self.out["bike_lane_symbol_polygons"].append(
@@ -794,11 +962,18 @@ class _Reader:
         chord = LineString([line.interpolate(at[0]), line.interpolate(at[-1])])
         # Its band is the road's own asphalt under the bars: no other paint is laid in it.
         self.crosswalk_bands.append(chord.buffer(half, cap_style="flat").intersection(road))
+        # The two lines along its edges: all of a `lines` / `dashes` / `dots` crossing, and a
+        # `ladder`'s rails either side of its bars (wiki Key:crossing:markings).
+        edges = [c for g in (chord.offset_curve(half).intersection(road),
+                             chord.offset_curve(-half).intersection(road)) for c in _lines(g)]
         if markings in ("lines", "dashes", "dots"):
-            lines = [chord.offset_curve(half).intersection(road),
-                     chord.offset_curve(-half).intersection(road)]
-            self.out["surveyed_crossings"].append({"lines": [c for g in lines for c in _lines(g)]})
+            self.out["surveyed_crossings"].append({"lines": edges})
             return
+        if markings not in ("zebra", "ladder"):
+            # `yes` (marked, kind unknown) and kinds not drawn here (`zebra:paired`, ...)
+            self.stats[f"crossings crossing:markings={markings}: drawn as zebra"] += 1
+        elif "crossing:markings" not in tags:
+            self.stats[f"crossings crossing={tags.get('crossing')}, no crossing:markings: drawn as zebra"] += 1
         # zebra and its variants: bars square to the chord, one bar width apart, as many as fit,
         # centred on it so the gaps at either kerb are equal.
         count = int((chord.length + ZEBRA_BAR_M) // (2 * ZEBRA_BAR_M))
@@ -808,7 +983,7 @@ class _Reader:
             piece = _substring(chord, start + 2 * i * ZEBRA_BAR_M, start + (2 * i + 1) * ZEBRA_BAR_M)
             bars += [ring for bar in _strip(piece, half)
                      for ring in _rings(Polygon(bar).intersection(road))]
-        self.out["surveyed_crossings"].append({"bars": bars})
+        self.out["surveyed_crossings"].append({"bars": bars, **({"lines": edges} if markings == "ladder" else {})})
 
     def own_surface(self, name: str | None) -> BaseGeometry | None:
         """A named street's own `area:highway` polygons, as one shape - not the junctions'."""
@@ -854,7 +1029,7 @@ class _Reader:
                                         "parking_stall_divider_lines")
                              else clipped)
         for key in ("bike_lane_surface_polygons", "cycle_crossing_surface_polygons",
-                    "turn_box_surface_polygons", "bike_lane_symbol_polygons"):
+                    "turn_box_surface_polygons", "bike_lane_symbol_polygons", "lane_arrow_polygons"):
             self.out[key] = [ring for poly in self.out[key] if len(poly) >= 4
                              for ring in _rings(Polygon(poly).buffer(0).intersection(road))]
         self.out["turn_box_edge_lines"] = [part for line in self.out["turn_box_edge_lines"]
@@ -884,6 +1059,7 @@ class _Reader:
         line = self.frame.line(way["coords_wgs84"])
         if line is not None:
             bar = line.buffer(STOP_BAR_M / 2, cap_style="flat").intersection(self.carriageway())
+            self.stop_bars.append(bar)
             self.out["surveyed_crossings"].append({"bars": _rings(bar)})
 
     def restriction(self, way: dict) -> None:
@@ -951,10 +1127,11 @@ class _Reader:
         channel = channel or ("lane_narrowing_hatch_wide_lines" if wide else "lane_narrowing_hatch_lines")
         for at in np.arange(HATCH_SPACING_M / 2, along.length, HATCH_SPACING_M):
             p = np.asarray(along.interpolate(at).coords[0])
-            ahead = np.asarray(along.interpolate(min(at + 0.5, along.length)).coords[0])
-            behind = np.asarray(along.interpolate(max(at - 0.5, 0.0)).coords[0])
+            ahead = np.asarray(along.interpolate(min(at + TANGENT_M, along.length)).coords[0])
+            behind = np.asarray(along.interpolate(max(at - TANGENT_M, 0.0)).coords[0])
             t = (ahead - behind) / max(float(np.linalg.norm(ahead - behind)), 1e-9)
-            d = (t + np.array([-t[1], t[0]])) / math.sqrt(2)      # 45 degrees off the street
+            angle = math.radians(HATCH_ANGLE_DEG)                  # off the street
+            d = math.cos(angle) * t + math.sin(angle) * np.array([-t[1], t[0]])
             stroke = LineString([p - d * reach, p + d * reach])
             for piece in _lines(stroke.intersection(area)):
                 self.out[channel].append([piece[0], piece[-1]])
@@ -1014,8 +1191,8 @@ class _Reader:
         if not streets:
             return None
         middle = np.asarray(line.interpolate(0.5, normalized=True).coords[0])
-        ahead = np.asarray(line.interpolate(min(line.length / 2 + 0.5, line.length)).coords[0])
-        behind = np.asarray(line.interpolate(max(line.length / 2 - 0.5, 0.0)).coords[0])
+        ahead = np.asarray(line.interpolate(min(line.length / 2 + TANGENT_M, line.length)).coords[0])
+        behind = np.asarray(line.interpolate(max(line.length / 2 - TANGENT_M, 0.0)).coords[0])
         t = (ahead - behind) / max(float(np.linalg.norm(ahead - behind)), 1e-9)
         street = min(streets, key=lambda one: one.distance(Point(middle)))
         normal = np.array([-t[1], t[0]])
@@ -1027,7 +1204,7 @@ class _Reader:
         """A curb ramp's detectable warning surface (`tactile_paving=yes`): a pad RAMP_WIDTH_M wide
         and TACTILE_DEPTH_M deep at the foot of each ramp, behind the kerb, away from the street.
         OSM maps where a ramp is - where a footway crossing meets the kerb - not how wide it is,
-        so each pad is centred there at the ramp's minimum width (STANDARDS.md 6a), not spread
+        so each pad is centred there at the ramp's minimum width (tactile.width), not spread
         along a lowered kerb that also carries the ramp's flares or the rest of the corner.
         - a kerb way: a pad along it about each point a crossing meets it, at a node they share or
           across it;
@@ -1065,7 +1242,7 @@ class _Reader:
         if (away := self.away(line)) is None:
             return
         middle, normal = away
-        ahead = np.asarray(line.interpolate(min(line.length / 2 + 0.5, line.length)).coords[0])
+        ahead = np.asarray(line.interpolate(min(line.length / 2 + TANGENT_M, line.length)).coords[0])
         left = np.cross(np.append(ahead - middle, 0.0), np.append(normal, 0.0))[2] > 0
         nodes = set(kerb.get("node_ids") or [])
         ramps = []
@@ -1158,7 +1335,7 @@ class _Reader:
         """The first point from `at` along `outward` (a unit vector) standing SIGNAL_CLEARANCE_M from
         the drawn street - None if there is none before `limit`."""
         road = self.carriageway()
-        for d in np.arange(0.0, limit, 0.05):
+        for d in np.arange(0.0, limit, si("numerical.search_step")):
             if not road.contains(point := Point(at + outward * d)) and road.distance(point) >= SIGNAL_CLEARANCE_M:
                 return at + outward * d
         return None
@@ -1326,7 +1503,7 @@ def _orientation(tags: dict, side: str) -> str:
 
 def parking_depth_m(tags: dict, side: str) -> float | None:
     """How deep a parking lane is off the kerb: its `parking:<side>:width`, else by orientation -
-    a diagonal bay `L sin(a) + W cos(a)`, a perpendicular one the stall's length (STANDARDS.md 1a);
+    a diagonal bay `L sin(a) + W cos(a)`, a perpendicular one the stall's length;
     None for a parallel lane, which takes DEFAULT_WIDTHS_M."""
     tagged = width_m(tags.get(f"parking:{side}:width") or tags.get("parking:both:width"))
     if tagged:
@@ -1439,6 +1616,74 @@ def _skip_bars(line: LineString, half_m: float) -> list[list[list[float]]]:
     return [ring for dash in _dotted(line) for ring in _strip(LineString(dash), half_m)]
 
 
+def _through_arrow(length_m: float) -> Polygon:
+    """A through arrow `length_m` long, in metres (arrow.through_outline: x along the lane from the
+    tail, y to its left); longer than arrow.through_length only as the through part of a
+    turn-and-through arrow, which carries the same head out along a longer shaft."""
+    head = length_m - si("arrow.through_length")
+    return Polygon([(x + head if x > 0 else x, y) for x, y in si("arrow.through_outline")])
+
+
+def _left_arrow() -> Polygon:
+    """A left turn arrow, in metres (arrow.left_outline): a shaft bending left between two arcs
+    whose centres stand apart, so the bend widens into the head."""
+    shape = FIGURES["arrow.left_outline"]
+    half = shape.si(shape.extra["shaft_half_width"])
+    (ox, oy, outer_r), (ix, iy, inner_r) = (shape.si(shape.extra[k]) for k in ("outer_bend", "inner_bend"))
+    bend = np.linspace(0.0, math.pi / 2, 12)
+    outer = [(ox + outer_r * math.sin(t), oy - outer_r * math.cos(t)) for t in bend]
+    inner = [(ix + inner_r * math.sin(t), iy - inner_r * math.cos(t)) for t in bend[::-1]]
+    return Polygon([(0.0, -half), *outer, *shape.si(shape.extra["head"]), *inner, (0.0, half)])
+
+
+# The `turn:lanes` indications a lane-use arrow is drawn for (wiki Key:turn; MUTCD Figure 3B-24).
+LANE_USE_ARROWS = ("left", "through", "right")
+
+
+def lane_use_arrow(indications: set[str]) -> BaseGeometry | None:
+    """The arrow painted in a lane with these `turn:lanes` indications, in metres, x along the lane
+    from the tail and y to its left: a turn arrow for `left` and for `right`, a through arrow for
+    `through`, on one shaft - Figure 3B-24's arrows, and its turn-and-through arrow where a lane has
+    both. None for any other indication: MUTCD has no arrow for a slight, sharp, reverse or merge."""
+    if not indications or not indications <= set(LANE_USE_ARROWS):
+        return None
+    parts = []
+    if "through" in indications:
+        parts.append(_through_arrow(si("arrow.through_length" if len(indications) == 1 else "arrow.turn_through_length")))
+    if "left" in indications:
+        parts.append(_left_arrow())
+    if "right" in indications:
+        parts.append(_mirror(_left_arrow(), 1.0, -1.0, origin=(0.0, 0.0)))
+    return unary_union(parts)
+
+
+def bike_lane_marking(arrow: bool = True) -> list[Polygon]:
+    """A bike lane's marking (MUTCD 9C.04, Figure 9C-3), in metres, x along the lane from its
+    upstream end and y to its left: the bicycle symbol (bike_lane.symbol_shape), and with `arrow`
+    its through arrow beyond it. Pieces, not one shape: a wheel is a ring, which a single outline
+    without holes cannot draw, so each is two half-rings."""
+    length = si("bike_lane.symbol_length")
+    shape = FIGURES["bike_lane.symbol_shape"]
+    stroke = shape.value * length
+    parts: list[Polygon] = []
+    for x, y, along, across in shape.extra["wheels"]:
+        ring = shapely.affinity.scale(Point(x * length, y * length).buffer(1.0), along * length, across * length)
+        hole = shapely.affinity.scale(Point(x * length, y * length).buffer(1.0),
+                                      along * length - stroke, across * length - stroke)
+        band = ring.difference(hole)
+        for half in (shapely.box(-1e3, -1e3, x * length, 1e3), shapely.box(x * length, -1e3, 1e3, 1e3)):
+            parts += _polygons(band.intersection(half))
+    for line in shape.extra["strokes"]:
+        parts.append(LineString([(x * length, y * length) for x, y in line]).buffer(stroke / 2))
+    x, y, r = shape.extra["head"]
+    parts.append(Point(x * length, y * length).buffer(r * length))
+    if arrow:
+        tail = length + si("bike_lane.symbol_to_arrow")
+        scale = si("bike_lane.arrow_length") / si("arrow.through_length")
+        parts.append(Polygon([(tail + x * scale, y * scale) for x, y in si("arrow.through_outline")]))
+    return parts
+
+
 def _mph(value: str | None) -> float:
     """A `maxspeed` in mph: "25 mph", or a bare number, which OSM reads as km/h. 0 where unknown."""
     if not value:
@@ -1449,16 +1694,11 @@ def _mph(value: str | None) -> float:
     return float(number.group(1)) * (1.0 if "mph" in value else 0.621371)
 
 
-# A street with no `maxspeed`: NJ's statutory limit in a residence or business district (N.J.S.A.
-# 39:4-98, as cited; STANDARDS.md 6c) - the speed a lateral shift's taper is sized for.
-DEFAULT_MPH = 25.0
-
-
 def taper_rate(tags: dict) -> float:
-    """How far a marking may shift sideways per unit length: the MUTCD taper, L = W*S^2/60 at
-    40 mph and under, L = W*S above (as cited; STANDARDS.md 6c), at the street's `maxspeed`."""
-    mph = _mph(tags.get("maxspeed")) or DEFAULT_MPH
-    return 60.0 / mph ** 2 if mph <= 40 else 1.0 / mph
+    """How far a marking may shift sideways per unit length: the MUTCD taper, L = W*S^2/D at or
+    below taper.speed_break, L = W*S above, at the street's `maxspeed` (else speed.default)."""
+    mph = _mph(tags.get("maxspeed")) or si("speed.default")
+    return si("taper.low_speed_divisor") / mph ** 2 if mph <= si("taper.speed_break") else 1.0 / mph
 
 
 def ease(x: float | np.ndarray) -> float | np.ndarray:
@@ -1551,6 +1791,7 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
                                  if n["tags"].get("natural") == "tree"]
     reader.hatch_all()
     reader.stall_all()
+    reader.markings_all()
     reader.on_carriageway()
     return layers, reader
 

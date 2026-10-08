@@ -92,9 +92,13 @@ def main() -> None:
     # 2. One world JSON per scenario.
     out = OUTPUT_DIR / args.area
     out.mkdir(parents=True, exist_ok=True)
-    # One scenario per .osc (scripts/write_osc.py). `existing` is raw OSM unless an existing.osc
-    # says what OSM's own tags do not yet say.
-    scenarios: dict[str, Path | None] = {"existing": None}
+    # One scenario per .osc, each written from this same pull first: existing.osc - what OSM's
+    # own tags do not yet say, measured from it (src/osm_osc.py:existing_markings) - in every
+    # area, and each proposal the area has.
+    from src.osm_osc import write_changes
+
+    write_changes(args.area)
+    scenarios: dict[str, Path | None] = {}
     scenarios |= {p.stem: p for p in sorted((PROPOSALS_DIR / args.area).glob("*.osc"))}
     worlds = {}
     for scenario, proposal in scenarios.items():

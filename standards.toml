@@ -1,0 +1,788 @@
+# The one place every figure this project draws with is declared, and the schema of what it reads
+# from OSM. Code reads figures from here (src/standards.py loads it; Blender reads it with tomllib)
+# and nowhere else: a number typed into a module is a second source, and the second source is
+# always the one that drifts.
+#
+# [source.*]   a document a figure comes from.
+# [figure.*]   one figure: its value in the unit its source states it in, and
+#                status      verified   - read in the source, which is linked
+#                            as_cited   - cited and not opened here
+#                            local      - a figure Danny set for this project, with the date
+#                            modelled   - our own choice; no standard stands behind it
+#                            numerical  - not a figure about the street: a step, a tolerance
+#              open        set where the figure is not settled - what has to be decided.
+# [tag.*]      one OSM key the reader acts on: what it means (its wiki page), whether it is the
+#              wiki's or a convention of ours, the figures drawing it uses, and what is drawn when
+#              it is absent. A key not listed here is not read.
+
+schema_version = 1
+
+# --- sources ------------------------------------------------------------------------------------
+
+[source.mutcd_2009]
+title = "Manual on Uniform Traffic Control Devices, 2009 edition (with Revisions 1 and 2)"
+url = "https://mutcd.fhwa.dot.gov/htm/2009/"
+
+[source.shsm]
+title = "Standard Highway Signs and Markings book, pavement markings chapter (ODOT's copy)"
+url = "https://www.odot.org/traffic/mutcd2003/stdHwySigns/englishversion/pdfs/pavement_e.pdf"
+
+[source.njdot_rdm]
+title = "NJDOT Roadway Design Manual"
+url = "https://www.nj.gov/transportation/eng/documents/BDC/pdf/BDC20MR-01_ATTACHMENT.pdf"
+
+[source.njdot_cd_606]
+title = "NJDOT standard detail CD-606-1, curb ramps"
+url = "https://www.nj.gov/transportation/eng/CADD/v8/v8RoadwayDetails/pdf/051_CD-606-1Public.pdf"
+
+[source.njac_16_47]
+title = "N.J.A.C. 16:47-3.9, driveway curb depression"
+url = "https://www.law.cornell.edu/regulations/new-jersey/N-J-A-C-16-47-3-9"
+
+[source.njac_5_21]
+title = "N.J.A.C. 5:21-4.14 / 4.15, Residential Site Improvement Standards, off-street parking"
+
+[source.ada_2010]
+title = "2010 ADA Standards for Accessible Design"
+
+[source.njsa_39_4_98]
+title = "N.J.S.A. 39:4-98, speed limits"
+
+[source.rs_39_4_138]
+title = "R.S. 39:4-138, as amended by P.L. 2009 c.257 - parking prohibited"
+
+[source.aashto]
+title = "AASHTO Guide for the Development of Bicycle Facilities / Green Book"
+
+[source.municipal_driveway]
+title = "St. Louis City Code 17.24; Seattle Municipal Code - parking near a driveway return"
+
+[source.osm_wiki]
+title = "OpenStreetMap wiki"
+url = "https://wiki.openstreetmap.org/"
+
+# --- the carriageway where OSM gives no width ---------------------------------------------------
+
+[figure.lane.width]
+value = 11.0
+unit = "ft"
+status = "local"
+at = "Danny, 2026-10-08; his standing requirement for a restriped street, and NJDOT's truck-route allowance (as cited)"
+note = "a travel lane: where `width` is absent the carriageway is its lanes and kerbside features summed, and the lane a restriped street keeps"
+
+[figure.default_width.service]
+value = 3.5
+unit = "m"
+status = "modelled"
+note = "a `highway=service` way with no `width`"
+
+[figure.cycleway.width]
+value = 5.0
+unit = "ft"
+status = "as_cited"
+source = "aashto"
+at = "Danny, 2026-10-08"
+note = "a bike lane's design width; a `cycleway:<side>` with no `cycleway:<side>:width` is drawn at it"
+
+[figure.default_width.sidewalk]
+value = 6.0
+unit = "ft"
+status = "modelled"
+note = "a `footway=sidewalk` with no `width`"
+
+[figure.default_width.crossing]
+value = 3.0
+unit = "m"
+status = "modelled"
+note = "a `footway=crossing` with no `width`: the band its markings fill"
+
+[figure.default_width.shoulder]
+value = 1.0
+unit = "m"
+status = "modelled"
+note = "a `shoulder:<side>=yes` with no `shoulder:<side>:width`"
+
+# --- buildings ----------------------------------------------------------------------------------
+
+[figure.building.default_height]
+value = 7.0
+unit = "m"
+status = "modelled"
+note = "a building with neither `height` nor `building:levels`: about two storeys"
+
+[figure.building.level_height]
+value = 3.0
+unit = "m"
+status = "modelled"
+note = "one `building:levels`"
+
+# --- kerbs --------------------------------------------------------------------------------------
+
+[figure.kerb.raised]
+value = 6.0
+unit = "in"
+status = "as_cited"
+source = "njdot_rdm"
+note = "`kerb=raised|regular` with no `kerb:height`: the vertical face where sidewalks are built; also the sidewalk's height above the road"
+
+[figure.kerb.rolled]
+value = 4.0
+unit = "in"
+status = "as_cited"
+source = "njdot_rdm"
+note = "`kerb=rolled`: a mountable kerb's overall height, at most"
+
+[figure.kerb.lowered]
+value = 1.5
+unit = "in"
+status = "as_cited"
+source = "njac_16_47"
+note = "`kerb=lowered` at a driveway: the depressed kerb above the gutter"
+
+[figure.kerb.ramp]
+value = 0.0
+unit = "in"
+status = "as_cited"
+source = "njdot_cd_606"
+note = "a curb ramp (`kerb=lowered` a crossing meets): flush with the roadway"
+
+[figure.kerb.flush]
+value = 0.0
+unit = "in"
+status = "verified"
+source = "osm_wiki"
+at = "Key:kerb"
+
+[figure.kerb.top_width]
+value = 0.15
+unit = "m"
+status = "modelled"
+note = "how wide a kerb is built in 3D; reads as an edge at the camera's distance"
+
+[figure.tactile.depth]
+value = 24.0
+unit = "in"
+status = "as_cited"
+source = "ada_2010"
+at = "705.1"
+note = "a detectable warning pad's depth in the direction of travel"
+
+[figure.tactile.width]
+value = 48.0
+unit = "in"
+status = "as_cited"
+source = "njdot_cd_606"
+note = "a curb ramp's width, flares excluded - each pad's width, as OSM maps where a ramp is, not how wide"
+
+[figure.signal.clearance]
+value = 2.0
+unit = "ft"
+status = "verified"
+source = "mutcd_2009"
+at = "4D.16(01)"
+note = "a side-mounted signal face under 15 ft up 'shall have a horizontal offset of not less than 2 feet from the face of a vertical curb' - the face's offset, which the pole carrying it is drawn at"
+
+# --- longitudinal lines -------------------------------------------------------------------------
+
+[figure.line.width]
+value = 6.0
+unit = "in"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3A.05; Danny, 2026-10-08"
+note = "a normal line, 4-6 in: centre, lane, edge, parking and bike lane lines, tapers"
+
+[figure.line.double_offset]
+value = 6.0
+unit = "in"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3A.05"
+note = "each stripe of a double line this far either side of its centre, so the stripes stand one stripe-width apart"
+
+[figure.line.dash]
+value = 10.0
+unit = "ft"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3A.06"
+note = "a broken line's segment"
+
+[figure.line.dash_cycle]
+value = 40.0
+unit = "ft"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3A.06"
+note = "a broken line's segment and gap together"
+
+[figure.line.dot]
+value = 2.0
+unit = "ft"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.08; IA-14"
+note = "a dotted line's segment and its gap; the green skip-paint through a conflict area follows it"
+
+# --- transverse markings ------------------------------------------------------------------------
+
+[figure.stop_line.width]
+value = 24.0
+unit = "in"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.16, from memory: 12-24 in"
+note = "a `road_marking=stop_line`'s bar, the wide end of the range"
+
+[figure.crosswalk.line_width]
+value = 0.25
+unit = "m"
+status = "modelled"
+note = "a crosswalk's edge lines (`lines`, `ladder`); MUTCD 3B.18 gives 6-24 in, from memory"
+
+[figure.crosswalk.bar_width]
+value = 0.5
+unit = "m"
+status = "modelled"
+note = "a zebra or ladder bar's width, and the gap between bars; within MUTCD 3B.18's range, from memory"
+
+# --- hatching -----------------------------------------------------------------------------------
+
+[figure.hatch.angle]
+value = 45.0
+unit = "deg"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.24, via up.codes; Danny, 2026-10-07"
+note = "strokes 30-45 degrees to the lines they meet; the steep end"
+
+[figure.hatch.spacing]
+value = 10.0
+unit = "ft"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.24"
+note = "10-20 ft on low-speed urban streets, by engineering judgment; the dense end, so a short stretch between driveways still shows strokes"
+
+[figure.hatch.stroke_width]
+value = 8.0
+unit = "in"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.24"
+note = "below hatch.wide_speed"
+
+[figure.hatch.stroke_width_wide]
+value = 12.0
+unit = "in"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.24"
+note = "at or above hatch.wide_speed"
+
+[figure.hatch.wide_speed]
+value = 45.0
+unit = "mph"
+status = "as_cited"
+source = "mutcd_2009"
+at = "3B.24"
+
+# --- lane-use arrows ----------------------------------------------------------------------------
+
+[figure.arrow.through_length]
+value = 9.5
+unit = "ft"
+status = "verified"
+source = "mutcd_2009"
+at = "Figure 3B-24; SHSM p. 10-10"
+
+[figure.arrow.turn_through_length]
+value = 12.75
+unit = "ft"
+status = "verified"
+source = "mutcd_2009"
+at = "Figure 3B-24"
+note = "drawn as the through arrow on a longer shaft with the turn arrow at its foot"
+
+[figure.arrow.through_outline]
+value = [[0.0, -0.5], [5.3, -0.5], [4.5, -1.6], [9.5, 0.0], [4.5, 1.6], [5.3, 0.5], [0.0, 0.5]]
+unit = "ft"
+status = "verified"
+source = "shsm"
+at = "p. 10-10"
+note = "x along the lane from the tail, y to its left. Dimensioned: 9.5 ft overall, 5 ft head, 12 in shaft; head width and barb sweep scaled off the drawing"
+
+[figure.arrow.left_outline]
+# the shaft's two edges, the outer bend (centre, radius), the head, the inner bend - see lane_use_arrow_ft
+shaft_half_width = 0.49
+outer_bend = [2.55, 2.79, 3.281]
+inner_bend = [1.90, 2.79, 2.297]
+head = [[5.83, 3.36], [8.0, 2.74], [5.0, 5.59], [1.90, 3.07], [4.20, 3.30]]
+value = 8.0
+unit = "ft"
+status = "verified"
+source = "shsm"
+at = "p. 10-10"
+note = "the left turn arrow, its value its length; the right is its mirror. Dimensioned: 8 ft overall, point 5 ft up, 12 in shaft, bend radii 3'3.375\" and 2'3.563\"; every other vertex scaled off the drawing"
+
+[figure.arrow.clearance]
+value = 4.0
+unit = "ft"
+status = "local"
+at = "Danny, 2026-10-08"
+note = "a lane's marking nearest a junction - a turn arrow, a bike lane symbol - is held this far clear of a stop line, a crosswalk or another road's surface. MUTCD 3B.20(21) says only 'an appropriate distance'; states differ (AK 4 ft, AZ 20 ft, AL 30 ft - as cited from a search summary)"
+
+[figure.arrow.search_step]
+value = 0.1
+unit = "m"
+status = "numerical"
+note = "how finely an arrow's place is searched along its lane"
+
+# --- bike lane markings ------------------------------------------------------------------------
+
+[figure.bike_lane.symbol_length]
+value = 72.0
+unit = "in"
+status = "verified"
+source = "mutcd_2009"
+at = "Figure 9C-3"
+note = "the bicycle symbol, overall length along the lane"
+
+[figure.bike_lane.symbol_to_arrow]
+value = 72.0
+unit = "in"
+status = "verified"
+source = "mutcd_2009"
+at = "Figure 9C-3"
+note = "from the top of the bicycle symbol to the bottom of its arrow"
+
+[figure.bike_lane.arrow_length]
+value = 72.0
+unit = "in"
+status = "verified"
+source = "mutcd_2009"
+at = "Figure 9C-3"
+note = "drawn as arrow.through_outline scaled to this length"
+
+[figure.bike_lane.symbol_shape]
+# x along the lane (the symbol's top downstream), y across it, in symbol lengths: two wheels side by
+# side as rings (centre x, y, semi-axis along, across), the frame and rider as strokes, the head.
+wheels = [[0.17, -0.2, 0.17, 0.09], [0.17, 0.2, 0.17, 0.09]]
+strokes = [[[0.17, -0.2], [0.45, -0.05], [0.45, 0.12], [0.17, 0.2]], [[0.17, -0.2], [0.24, 0.0], [0.17, 0.2]],
+           [[0.45, -0.05], [0.78, 0.0], [0.55, 0.15]]]
+head = [0.9, 0.0, 0.07]
+value = 0.045
+unit = "1"
+status = "modelled"
+note = "a schematic bicycle and rider, its value the stroke width; Figure 9C-3 gives its length, not its outline"
+
+# --- symbols, posts -----------------------------------------------------------------------------
+
+[figure.symbol.length]
+value = 5.5
+unit = "ft"
+status = "modelled"
+note = "a turn box's bicycle symbol and arrow; MUTCD 9E.11(05) names the markings, not a size"
+
+[figure.symbol.width]
+value = 2.4
+unit = "ft"
+status = "modelled"
+
+[figure.symbol.bicycle_outline]
+value = [[1.0, 0.0], [0.0, 1.0], [0.0, 0.333], [-1.0, 0.333], [-1.0, -0.333], [0.0, -0.333], [0.0, -1.0]]
+unit = "1"
+status = "modelled"
+note = "a turn box's bicycle symbol, schematic: x in half symbol.length, y in half symbol.width"
+
+[figure.symbol.arrow_outline]
+value = [[1.0, 0.0], [0.1, 1.0], [0.1, 0.25], [-1.0, 0.25], [-1.0, -0.25], [0.1, -0.25], [0.1, -1.0]]
+unit = "1"
+status = "modelled"
+note = "a turn box's through arrow, schematic, as symbol.bicycle_outline"
+
+[figure.bollard.spacing]
+value = 8.0
+unit = "ft"
+status = "modelled"
+note = "flex posts down a buffer's centre, as the old design spaced them"
+
+# --- parking ------------------------------------------------------------------------------------
+
+[figure.stall.width]
+value = 9.0
+unit = "ft"
+status = "as_cited"
+source = "njac_5_21"
+note = "an angled stall, measured across it in its own frame"
+
+[figure.stall.length]
+value = 18.0
+unit = "ft"
+status = "as_cited"
+source = "njac_5_21"
+note = "an angled stall, measured along it in its own frame"
+
+[figure.stall.diagonal_angle]
+value = 60.0
+unit = "deg"
+status = "local"
+at = "Danny, 2026-09-10: observed on Grand Central Ave"
+note = "`parking:<side>:orientation=diagonal`, from the kerb; OSM has no key for the angle"
+
+[figure.stall.parallel_length]
+value = 22.0
+unit = "ft"
+status = "as_cited"
+source = "aashto"
+at = "Danny, 2026-10-08"
+note = "a parallel stall along the kerb: where a marked lane gives no `capacity`, and the shortest piece the proposal parks"
+
+[figure.parking.lane_depth]
+value = 8.0
+unit = "ft"
+status = "as_cited"
+source = "aashto"
+at = "Danny, 2026-10-08"
+note = "a parallel parking lane's depth: a `parking:<side>=lane` with no `parking:<side>:width`, and the proposal's lane where the spare allows"
+
+[figure.parking.min_stall]
+value = 7.0
+unit = "ft"
+status = "modelled"
+note = "the proposal: spare narrower than this is hatched, not parked"
+
+[figure.parking.driveway_clearance]
+value = 5.0
+unit = "ft"
+status = "verified"
+source = "municipal_driveway"
+note = "no stall this near a driveway's return; R.S. 39:4-138 names no distance, so the municipal codes' 5 ft"
+
+[figure.no_standing.from_crosswalk]
+value = 25.0
+unit = "ft"
+status = "as_cited"
+source = "rs_39_4_138"
+at = "(e)"
+note = "no standing within this of a crosswalk at an intersection, or of the intersection's kerb line"
+
+[figure.no_standing.with_extension]
+value = 10.0
+unit = "ft"
+status = "as_cited"
+source = "rs_39_4_138"
+at = "(e)"
+note = "...and within this where a curb extension is built (`crossing:kerb_extension`)"
+
+# --- speed and tapers ---------------------------------------------------------------------------
+
+[figure.speed.default]
+value = 25.0
+unit = "mph"
+status = "as_cited"
+source = "njsa_39_4_98"
+note = "a street with no `maxspeed`: the statutory limit in a residence or business district"
+
+[figure.taper.speed_break]
+value = 40.0
+unit = "mph"
+status = "as_cited"
+source = "mutcd_2009"
+at = "Table 6C-4, from memory"
+note = "L = W*S^2/taper.low_speed_divisor at or below this speed, L = W*S above"
+
+[figure.taper.low_speed_divisor]
+value = 60.0
+unit = "1"
+status = "as_cited"
+source = "mutcd_2009"
+at = "Table 6C-4, from memory"
+
+# --- a restriped street's section ------------------------------------------------------------
+
+[figure.track.width]
+value = 10.0
+unit = "ft"
+status = "modelled"
+note = "a two-way protected track"
+
+[figure.track.constrained_width]
+value = 8.0
+unit = "ft"
+status = "local"
+at = "Danny, 2026-10-07"
+note = "how far the track gives where the kerbs are close"
+
+[figure.track.buffer]
+value = 3.0
+unit = "ft"
+status = "modelled"
+
+[figure.track.min_buffer]
+value = 2.0
+unit = "ft"
+status = "local"
+at = "Danny, 2026-10-07"
+note = "how far the buffer gives"
+
+[figure.hatch.min_width]
+value = 0.5
+unit = "ft"
+status = "modelled"
+note = "the proposal: spare narrower than this is left unmarked"
+
+[figure.junction.unmarked_mouth]
+value = 11.0
+unit = "ft"
+status = "modelled"
+note = "how far out of a junction the centre line stops where no crosswalk, stop line or cross street's kerb is mapped"
+
+[figure.turn_box.bicycle_length]
+value = 6.0
+unit = "ft"
+status = "modelled"
+note = "a bicycle, for sizing a two-stage turn box's queue; MUTCD 9E.11(10) gives no box dimension"
+
+[figure.turn_box.queue]
+value = 2.0
+unit = "1"
+status = "modelled"
+note = "bicycles a turn box queues"
+
+# --- the 3D scene -------------------------------------------------------------------------------
+
+[figure.render.pavement_height]
+value = 0.05
+unit = "m"
+status = "modelled"
+note = "the road's top above the ground"
+
+[figure.render.existing_marking_height]
+value = 0.07
+unit = "m"
+status = "numerical"
+note = "the top of the layer crosswalks, centre lines and stop bars are built in; overlays stack above it"
+
+[figure.render.paint_height]
+value = 0.01
+unit = "m"
+status = "numerical"
+note = "a marking's thickness: only there so the depth buffer can order it"
+
+[figure.render.marking_clearance]
+value = 0.01
+unit = "m"
+status = "numerical"
+note = "the gap between stacked marking layers, against z-fighting"
+
+# --- steps and tolerances -----------------------------------------------------------------------
+
+[figure.numerical.station_step]
+value = 2.0
+unit = "m"
+status = "numerical"
+note = "the spacing of the cross-sections a road's edges are sampled at"
+
+[figure.numerical.chunk]
+value = 50.0
+unit = "m"
+status = "numerical"
+note = "a road is drawn in pieces this long, so a looped road encloses nothing"
+
+[figure.numerical.seam]
+value = 0.05
+unit = "m"
+status = "numerical"
+note = "closes the mm seams hatching laid way by way leaves where consecutive ways turn"
+
+[figure.numerical.tangent_probe]
+value = 0.5
+unit = "m"
+status = "numerical"
+note = "a line's direction at a point: from this far behind it to this far ahead"
+
+[figure.numerical.search_step]
+value = 0.05
+unit = "m"
+status = "numerical"
+note = "how finely a signal pole's place off the street is searched"
+
+[figure.numerical.overshoot]
+value = 0.5
+unit = "m"
+status = "numerical"
+note = "how far past a kerb a junction face's closing line is cast, so it meets the kerb"
+
+[figure.numerical.node_match]
+value = 0.001
+unit = "m"
+status = "numerical"
+note = "a cut this close to a node is at that node"
+
+[figure.numerical.across]
+value = 0.01
+unit = "m"
+status = "numerical"
+note = "a kerb hit this much nearer its street is still across from it"
+
+# --- the OSM keys the reader acts on --------------------------------------------------------------
+# convention = "wiki" (the key means what its wiki page says) or "project" (our own key, used
+# where OSM has none - each is a candidate for a proposal on the wiki, or for removal).
+
+[tag.width]
+wiki = "Key:width"
+convention = "wiki"
+means = "the carriageway kerb to kerb, parking and cycle lanes included"
+absent = "lanes and kerbside features summed, each at its own width figure"
+figures = ["lane.width", "default_width.service"]
+
+[tag."width:lanes"]
+wiki = "Key:width:lanes"
+convention = "wiki"
+means = "each lane's width, left to right"
+absent = "every lane shares the travel way equally; a two-way way's centre line is where its backward lanes meet its forward ones"
+
+[tag.lanes]
+wiki = "Key:lanes"
+convention = "wiki"
+means = "travel lanes, and with :forward / :backward which way they run"
+absent = "no lane lines; no centre line unless overtaking or lane_markings=yes says so"
+figures = ["line.width", "line.dash", "line.dash_cycle"]
+
+[tag."change:lanes"]
+wiki = "Key:change"
+convention = "wiki"
+means = "whether traffic may cross from each lane; the line between two lanes is solid where it may not"
+absent = "broken lane lines"
+
+[tag."turn:lanes"]
+wiki = "Key:turn"
+convention = "wiki"
+means = "each lane's turn indications, left to right, :backward lanes as their drivers see them"
+absent = "no arrows"
+figures = ["arrow.through_length", "arrow.turn_through_length",
+           "arrow.through_outline", "arrow.left_outline", "arrow.clearance", "arrow.search_step"]
+
+[tag.overtaking]
+wiki = "Key:overtaking"
+convention = "wiki"
+means = "with :forward / :backward: a double yellow where no, broken where yes"
+absent = "a single solid centre line, counted"
+figures = ["line.width", "line.double_offset", "line.dash", "line.dash_cycle"]
+
+[tag.lane_markings]
+wiki = "Key:lane_markings"
+convention = "wiki"
+means = "no: no lane or centre lines; yes: a centre line even with fewer than 2 lanes"
+
+[tag.placement]
+wiki = "Key:placement"
+convention = "wiki"
+means = "transition: the way's layout eases from the piece before to the piece after"
+absent = "the way runs down the middle of its carriageway"
+figures = ["speed.default", "taper.speed_break", "taper.low_speed_divisor"]
+
+[tag.maxspeed]
+wiki = "Key:maxspeed"
+convention = "wiki"
+means = "the posted speed: sizes a taper, and the hatch stroke width"
+absent = "speed.default"
+figures = ["speed.default", "hatch.wide_speed"]
+
+[tag."cycleway:<side>"]
+wiki = "Key:cycleway"
+convention = "wiki"
+means = "lane | track on that side, with :width, :buffer, :oneway, :surface:colour, :separation:*"
+absent = "no bike lane"
+figures = ["cycleway.width", "bollard.spacing", "bike_lane.symbol_length", "bike_lane.symbol_to_arrow",
+           "bike_lane.arrow_length", "bike_lane.symbol_shape", "arrow.through_outline", "arrow.clearance"]
+
+[tag."cycleway:<side>:crossing:markings"]
+wiki = "Key:crossing:markings"
+convention = "project"
+means = "dashes: the lane's green skipped and its edges dotted where traffic crosses it"
+figures = ["line.dot"]
+
+[tag."parking:<side>"]
+wiki = "Street parking"
+convention = "wiki"
+means = "lane | street_side | on_kerb | half_on_kerb, with :width, :orientation, :direction, :capacity, :markings"
+absent = "no parking drawn"
+figures = ["parking.lane_depth", "stall.width", "stall.length", "stall.diagonal_angle", "stall.parallel_length"]
+
+[tag."shoulder:<side>"]
+wiki = "Key:shoulder"
+convention = "wiki"
+means = "a shoulder at that edge, :width wide"
+figures = ["default_width.shoulder"]
+
+[tag."shoulder:<side>:markings"]
+convention = "project"
+means = "hatched: the shoulder hatched from its inner line out to its street's edge as built; OSM has no tag for hatching along a way"
+figures = ["hatch.angle", "hatch.spacing", "hatch.stroke_width", "hatch.stroke_width_wide"]
+
+[tag."area:highway"]
+wiki = "Key:area:highway"
+convention = "wiki"
+means = "the street's surface as built; prohibited: painted hatching, not a surface"
+absent = "half the way's width either side of it"
+
+[tag.road_marking]
+wiki = "Key:road_marking"
+convention = "wiki"
+means = "stop_line: a bar along the mapped way; restriction: a hatched area in its colour"
+figures = ["stop_line.width", "hatch.angle", "hatch.spacing", "hatch.stroke_width", "hatch.stroke_width_wide"]
+
+[tag.median]
+convention = "project"
+means = "stripes: the way carries a flush median, drawn by the restriction area on it (draft)"
+
+[tag."crossing:markings"]
+wiki = "Key:crossing:markings"
+convention = "wiki"
+means = "lines | dashes | dots: two edge lines; zebra: bars; ladder: both; any other value drawn as zebra and counted"
+absent = "zebra where crossing=marked|zebra|uncontrolled, counted; else nothing"
+figures = ["default_width.crossing", "crosswalk.line_width", "crosswalk.bar_width"]
+
+[tag."crossing:kerb_extension"]
+wiki = "Key:crossing:kerb_extension"
+convention = "wiki"
+means = "a curb extension on that kerb: the no-standing zone shortens"
+figures = ["no_standing.with_extension"]
+
+[tag.kerb]
+wiki = "Key:kerb"
+convention = "wiki"
+means = "the kerb's type; its height where kerb:height is absent"
+figures = ["kerb.raised", "kerb.rolled", "kerb.lowered", "kerb.ramp", "kerb.flush", "kerb.top_width"]
+
+[tag.tactile_paving]
+wiki = "Key:tactile_paving"
+convention = "wiki"
+means = "yes on a kerb: a detectable warning pad behind it"
+figures = ["tactile.depth", "tactile.width"]
+
+[tag.highway]
+wiki = "Key:highway"
+convention = "wiki"
+means = "traffic_signals: a signal pole at each end of its crossings; the road classes are carriageway"
+figures = ["signal.clearance"]
+
+[tag.barrier]
+wiki = "Key:barrier"
+convention = "wiki"
+means = "kerb: a kerb way; bollard: a post, and along a way a row of them"
+figures = ["bollard.spacing"]
+
+[tag.height]
+wiki = "Key:height"
+convention = "wiki"
+means = "a building's height"
+absent = "building:levels at building.level_height each, else building.default_height"
+figures = ["building.default_height", "building.level_height"]
+
+[tag.surface]
+wiki = "Key:surface"
+convention = "wiki"
+means = "the material a street, paved ground or path is drawn in: concrete, gravel, dirt, else asphalt"

@@ -5,7 +5,7 @@ Parametric pedestrian-safety visualization for real intersections — real-world
 **Where the answers live.** This README is the map: what exists, where it lives, how to run it, and the facts about *this* street that no module owns. The reasoning behind a module's design lives in that module's own docstring, because that is where someone editing the code will see it. Three files sit beside this one:
 
 - **[.claude/SKILLS.md](.claude/SKILLS.md)** — read before changing geometry. What people (and agents) actually get wrong here: the two datums 25 ft apart, the constants that already exist, and the rule that matters most — measure the DRAWN output, not the arithmetic that was supposed to produce it.
-- **[STANDARDS.md](STANDARDS.md)** — every published figure the geometry relies on (R.S. 39:4-138, MUTCD, AASHTO, NACTO, NJDOT), which constant encodes it, and which have been checked against their source rather than written from memory.
+- **[standards.toml](standards.toml)** — every figure the drawing uses (R.S. 39:4-138, MUTCD, AASHTO, NJDOT, and our own choices, labelled as such), its source and whether it has been checked, and every OSM key the reader acts on. Loaded and validated by `src/standards.py`.
 - **[docs/](docs/)** — `network-model.md` (replacing legs with a road network, with its checkpoints) and `network-renderer-plan.md` (the corridor/coverage work, with what each stream owes).
 
 ## Quick start

@@ -51,3 +51,23 @@ forbidden_modules =
     src.render
 # src/render/assets.py imports the Overpass user agent from src.sources, never the reverse: what
 # OSM says is read once, and every drawing is a reader of it.
+
+
+[importlinter:contract:standards-is-stdlib-only]
+name = src.standards imports only the standard library, so Blender can load it by path
+type = forbidden
+source_modules =
+    src.standards
+forbidden_modules =
+    src.osm_world
+    src.osm_osc
+    src.sources
+    src.geometry
+    src.render
+    requests
+    geopandas
+    shapely
+    numpy
+    pandas
+    pyproj
+    yaml

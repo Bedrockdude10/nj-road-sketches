@@ -50,6 +50,21 @@ from pathlib import Path
 import bpy
 import mathutils
 
+
+def _standards():
+    """src/standards.py, loaded by path: it imports nothing but the standard library (an import
+    contract keeps it so), so Blender's own Python runs it, and every figure here is standards.toml's."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "src" / "standards.py"
+    spec = importlib.util.spec_from_file_location("standards", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["standards"] = module          # dataclasses resolves its module through sys.modules
+    spec.loader.exec_module(module)
+    return module
+
+
+si = _standards().si
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # for the sibling blender_*.py imports below
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # scripts/blender/blender_scene.py -> repo root
 
@@ -66,19 +81,18 @@ from blender_props import (
 
 random.seed(7)  # stable building color assignment across existing/proposed renders
 
-PAVEMENT_HEIGHT_M = 0.05
-# A sidewalk is at kerb height: the road's top plus a raised kerb's 6 in reveal, src/osm_world.py
-# KERB_HEIGHT_M["raised"] (NJDOT, STANDARDS.md 6a; this script runs in Blender's Python and cannot
-# import it). The reader cuts the street and the tactile pads out of the sidewalks, so standing
+PAVEMENT_HEIGHT_M = si("render.pavement_height")
+# A sidewalk is at kerb height: the road's top plus a raised kerb's reveal (kerb.raised). The
+# reader cuts the street and the tactile pads out of the sidewalks, so standing
 # above them hides neither; across a driveway or apron the sidewalk is built on, over the paving.
-RAISED_KERB_M = 6 * 0.0254
+RAISED_KERB_M = si("kerb.raised")
 SIDEWALK_HEIGHT_M = PAVEMENT_HEIGHT_M + RAISED_KERB_M
 # crosswalks/centerlines/stop bars (add_crosswalk*/add_dashed_centerline/add_double_yellow_centerline/
 # add_stop_bar) sit at blender_crosswalks.py:EXISTING_MARKING_Z_BASE (0.06) with thickness
 # EXISTING_MARKING_THICKNESS_M (0.01) - this is their real top, i.e. EXISTING_MARKING_Z_BASE +
 # EXISTING_MARKING_THICKNESS_M. Kept as its own constant here (rather than importing the two above)
 # since this file only needs the single derived "top" value to stack the next layer above it.
-EXISTING_MARKING_HEIGHT_M = 0.07
+EXISTING_MARKING_HEIGHT_M = si("render.existing_marking_height")
 # The new paint-only overlay markings (lane narrowing, corner hatching, mountable apron) sit on top
 # of EXISTING_MARKING_HEIGHT_M + this gap, NOT exactly at either that or PAVEMENT_HEIGHT_M - two
 # surfaces at the exact same height are coincident/coplanar, which renders as flickering z-fighting
@@ -96,12 +110,12 @@ EXISTING_MARKING_HEIGHT_M = 0.07
 # produced a torn/tessellated look on thin, elongated shapes like a crosswalk line - confirmed by an
 # isolated test. Fixed by both lifting z_base to sit flush on the pavement's top (see
 # blender_crosswalks.py:EXISTING_MARKING_Z_BASE) and tightening the camera's clip range.
-MARKING_CLEARANCE_M = 0.01
+MARKING_CLEARANCE_M = si("render.marking_clearance")
 # How thick a painted marking is built. Was add_paint_line's own `height_m=0.01` default, which is
 # where every batched marking's thickness came from before the draw block stopped going through it -
 # named here so the value is stated rather than inherited from a keyword default two modules away.
 # Paint has no meaningful thickness; this exists only to give the depth buffer something to order.
-PAINT_HEIGHT_M = 0.01
+PAINT_HEIGHT_M = si("render.paint_height")
 
 BUILDING_PALETTE = [
     (0.62, 0.42, 0.35),  # brick red
@@ -217,18 +231,18 @@ LEG_REACH_TOLERANCE = 1.05
 
 # How wide a kerb is built. A real kerb's top face is about 6 in; this only has to read as an
 # edge at the camera distance, and the height is what carries the raised/lowered distinction.
-KERB_WIDTH_M = 0.15
+KERB_WIDTH_M = si("kerb.top_width")
 
 # One stripe of a centerline, matching add_double_yellow_centerline's own width_m - MUTCD's ~6 in.
 # The two lines of a double yellow arrive already offset from each other, so this is the width of
 # each, not of the pair.
-CENTERLINE_WIDTH_M = 0.15
+CENTERLINE_WIDTH_M = si("line.width")
 
 # A surveyed TRANSVERSE crossing's two lines. Named rather than left inline at the call below, so
 # test_blender_stroke_widths_match_the_channels can read it: an unnamed literal is a width nothing
 # on the src/ side can be held against, and the plan view drew these at a cosmetic 1.6 pt for as
 # long as it went unnamed. Mirrors markings.EDGE_LINE_WIDTH_M.
-SURVEYED_CROSSING_LINE_WIDTH_M = 0.25
+SURVEYED_CROSSING_LINE_WIDTH_M = si("crosswalk.line_width")
 
 # WHICH PAINT CHANNELS ARE SAMPLED POLYLINES, and which are honestly two-point segments. Declared
 # as data rather than left implicit in the loops below, because the distinction is load-bearing and a
@@ -240,17 +254,17 @@ SURVEYED_CROSSING_LINE_WIDTH_M = 0.25
 # and lifted it off the hatching it bounds. The value beside each is its stripe width in metres - a
 # drawn-scale choice, not a standard: a solid edge line reads at 0.25 m here, a taper at 0.15 m.
 SAMPLED_POLYLINE_CHANNELS = (
-    ("lane_narrowing_edge_lines", 0.25),
-    ("yellow_hatch_edge_lines", 0.25),
-    ("blue_hatch_edge_lines", 0.25),
-    ("lane_narrowing_taper_lines", 0.15),
-    ("parking_edge_lines", 0.25),
-    ("left_edge_lines", 0.25),
-    ("parking_buffer_edge_lines", 0.25),
-    ("parking_buffer_taper_lines", 0.15),
-    ("bike_lane_edge_lines", 0.25),
+    ("lane_narrowing_edge_lines", si("line.width")),
+    ("yellow_hatch_edge_lines", si("line.width")),
+    ("blue_hatch_edge_lines", si("line.width")),
+    ("lane_narrowing_taper_lines", si("line.width")),
+    ("parking_edge_lines", si("line.width")),
+    ("left_edge_lines", si("line.width")),
+    ("parking_buffer_edge_lines", si("line.width")),
+    ("parking_buffer_taper_lines", si("line.width")),
+    ("bike_lane_edge_lines", si("line.width")),
     # MUTCD 9E.11(07): a solid white line on all four sides of the two-stage turn box.
-    ("turn_box_edge_lines", 0.25),
+    ("turn_box_edge_lines", si("line.width")),
 )
 # Two-point strokes: a hatch stroke runs edge to edge of its zone and a stall tick lies across the
 # kerbside strip. Only their two ends exist, so the chord IS the line.
@@ -261,12 +275,12 @@ TWO_POINT_CHANNELS = (
     "parking_stall_divider_lines",
     "parking_buffer_hatch_lines", "bike_lane_hatch_lines",
 )
-TWO_POINT_WIDTH_M = 0.15
-# Diagonal crosshatch strokes at MUTCD's widths (as cited; STANDARDS.md 6b): 8 in below 45 mph,
+TWO_POINT_WIDTH_M = si("line.width")
+# Diagonal crosshatch strokes at MUTCD's widths (hatch.stroke_width*, as cited): 8 in below 45 mph,
 # 12 in at or above - src/osm_world.py sorts each street's strokes by its OSM `maxspeed`.
-TWO_POINT_WIDTHS_M = {"lane_narrowing_hatch_lines": 8 * 0.0254, "yellow_hatch_stroke_lines": 8 * 0.0254,
-                      "blue_hatch_stroke_lines": 8 * 0.0254,
-                      "lane_narrowing_hatch_wide_lines": 12 * 0.0254}
+TWO_POINT_WIDTHS_M = {**dict.fromkeys(("lane_narrowing_hatch_lines", "yellow_hatch_stroke_lines",
+                                        "blue_hatch_stroke_lines"), si("hatch.stroke_width")),
+                      "lane_narrowing_hatch_wide_lines": si("hatch.stroke_width_wide")}
 # THE CHANNELS DRAWN IN THE YELLOW MATERIAL. Every other paint channel is white, so this is the
 # whole of what makes a stripe yellow at this end - which is why a yellow marking gets its own
 # channel upstream rather than sharing an edge-line one (src/geometry/markings.py). Two entries,
@@ -762,6 +776,13 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
         sharrows.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z)
     sharrows.build()
 
+    # LANE-USE ARROWS (MUTCD 3B.20), from each lane's `turn:lanes` upstream: white (3B.20(03)), on
+    # the road's own asphalt, at the stripe layer like the sharrow. Placed and shaped upstream.
+    arrows = MeshBatch("lane_arrows", marking_mat)
+    for ring in data.get("lane_arrow_polygons", []):
+        arrows.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z)
+    arrows.build()
+
     # EVERY SURVEYED CROSSING IN THE PICTURE, drawn from its own traced way rather than rebuilt
     # from a leg. This is the network-renderer change (docs/network-renderer-plan.md): a crossing
     # used to reach the render only by matching one of the modelled junction's legs, so at Broad &
@@ -806,7 +827,7 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     crossing_green.build()
     crossing_white = MeshBatch("cycle_crossing_edges", marking_mat)
     for line in data.get("cycle_crossing_edge_lines", []):
-        for ring in polyline_rings(line, 0.25):
+        for ring in polyline_rings(line, si("line.width")):
             crossing_white.add_prism(ring, PAINT_HEIGHT_M, z_base=marking_z)
     crossing_white.build()
     crossing_yellow = MeshBatch("cycle_crossing_divider", centerline_mat)
