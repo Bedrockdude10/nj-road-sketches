@@ -836,8 +836,8 @@ class _Reader:
         shapely.prepare(road)
         # A flush median (`colour=yellow` restriction area) is outlined by its own yellow lines
         # (MUTCD 3B.24, as cited), which carry the centre line past it: no centre line across it.
-        if self.hatched_yellow:
-            median = unary_union(self.hatched_yellow)
+        if self.hatched_coloured.get("yellow"):
+            median = unary_union(self.hatched_coloured["yellow"])
             self.out["bike_lane_contraflow_lines"] = [
                 part for line in self.out["bike_lane_contraflow_lines"] if len(line) >= 2
                 for part in _lines(LineString(line).difference(median))]
