@@ -1494,6 +1494,36 @@ def _section_tags(osm: dict, row) -> dict:
     return tags
 
 
+def _left(line: LineString, s: float) -> np.ndarray:
+    """The unit vector square to `line` at station `s`, to its left."""
+    t = _tangent(line, s)
+    return np.array([-t[1], t[0]])
+
+
+def _junction_moves(network: _Network, blocks: list) -> dict[int, np.ndarray]:
+    """How far each junction moves when the blocks into it are re-centred (`blocks`: leg, line,
+    offset or None): on to every street through it at once - the move along each street's left
+    there is that street's own offset at the junction, the mean of its re-centred blocks', or 0
+    where none of its blocks moved, so a street left where OSM has it still runs through the node.
+    Least squares where three streets disagree; only junctions some street moved."""
+    at: dict[int, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    for leg, line, shift, _bumps in blocks:
+        for node, s in ((leg.junction, 0.0), (leg.end, line.length)):
+            if node in network.junctions:
+                at[node][leg.street].append((_left(line, s), shift))
+    moves = {}
+    for node, streets in at.items():
+        normals, shifts = [], []
+        for legs in streets.values():
+            normal = legs[0][0]
+            moved = [shift * float(left @ normal) for left, shift in legs if shift is not None]
+            normals.append(normal)
+            shifts.append(float(np.mean(moved)) if moved else 0.0)
+        if any(shifts):
+            moves[node] = np.linalg.lstsq(np.array(normals), np.array(shifts), rcond=None)[0]
+    return moves
+
+
 def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = False,
                narrowing: bool = True) -> OsmChange:
     """`base` with every street re-centred between its kerbs.
@@ -1509,8 +1539,10 @@ def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = 
       stretch's own midline - the median there - so the narrowed section is centred between the
       kerbs that pinch it, shifting in and out over the MUTCD taper for its speed (taper_rate),
       with a node added at each end of each taper and of the stretch.
-    Junction nodes stay: the cross street shares them. A block with no kerb pair mapped stays
-    where OSM has it. Without `narrowing` (existing.osc) only the blocks move: there is no section
+    A junction moves on to every re-centred street through it (_junction_moves) - pinning it where
+    OSM has it bent an off-centre street back to OSM's line at every cross street - and each block
+    tapers from there to its own offset. A block with no kerb pair mapped stays where OSM has it,
+    but for the taper off a junction that moved. Without `narrowing` (existing.osc) only the blocks move: there is no section
     to fit, so no stretch is narrow."""
     layers = apply_change(osm_layers(area), base)
     frame = LocalFrame(SNAPSHOT_AREAS[area])
@@ -1528,6 +1560,7 @@ def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = 
     added: dict[int, list[tuple[int, float, int]]] = defaultdict(list)   # way -> (after index, d, node)
     new_nodes: list[NewNode] = []
     done: set[frozenset] = set()
+    blocks: list[tuple[_Leg, LineString, float | None, list]] = []   # (leg, its line, offset, stretches)
     for junction in network.junctions:
         for leg in network.legs(junction):
             key = frozenset(leg.nodes)
@@ -1567,6 +1600,7 @@ def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = 
                     bumps.append((d_lo, d_hi, (ds, mids), rate))
             if not offsets:
                 report["blocks with no kerb pair mapped: not re-centred"] += 1
+                blocks.append((leg, line, None, []))
                 continue
             shift = float(np.median(offsets))
             report["blocks re-centred between their kerbs"] += 1
@@ -1577,53 +1611,69 @@ def _recentred(area: str, base: OsmChange, report: Counter[str], resign: bool = 
                       max(abs(mids[0] - shift), abs(mids[-1] - shift)) / rate)
                      for lo, hi, (ds, mids), rate in bumps]
             report["narrow stretches the street shifts on to the middle of"] += len(bumps)
-            # Off a pinned junction node and on to the block's offset over the same taper.
-            rate = taper_rate(network.streets[leg.steps[0][0]]["tags"])
-            lead = abs(shift) / rate
-            pinned_end = leg.end in network.junctions
+            blocks.append((leg, line, shift, bumps))
+    shared = _junction_moves(network, blocks)
+    for junction, move in shared.items():
+        moves[junction] = network.node_xy[junction] + move
+    report["junctions moved on to the streets re-centred through them"] = len(shared)
+    for leg, line, shift, bumps in blocks:
+        # From where its junction went, on to the block's offset over the taper for its speed: a
+        # junction no street through it moved stays, and a dead end is the block's own.
+        own = shift or 0.0
+        ends = [float(shared[node] @ _left(line, s)) if node in shared
+                else own if node not in network.junctions else 0.0
+                for node, s in ((leg.junction, 0.0), (leg.end, line.length))]
+        if shift is None and not any(ends):
+            continue
+        rate = taper_rate(network.streets[leg.steps[0][0]]["tags"])
+        leads = [abs(end - own) / rate for end in ends]
+        if sum(leads) > line.length:
+            report["tapers cut short by a junction"] += 1
+            leads = [lead * line.length / sum(leads) for lead in leads]
 
-            def offset(d: float, shift: float = shift, bumps: list = bumps, lead: float = lead,
-                       length: float = line.length, pinned_end: bool = pinned_end) -> float:
-                base = shift * min(ease(d / lead) if lead > 0 else 1.0,
-                                   ease((length - d) / lead) if pinned_end and lead > 0 else 1.0)
-                best = 0.0
-                for lo, hi, (ds, corrections), taper in bumps:
-                    if lo <= d <= hi:
-                        value = float(np.interp(d, ds, corrections))
-                    elif taper > 0 and lo - taper < d < lo:
-                        value = float(corrections[0]) * ease((d - (lo - taper)) / taper)
-                    elif taper > 0 and hi < d < hi + taper:
-                        value = float(corrections[-1]) * ease(((hi + taper) - d) / taper)
-                    else:
-                        continue
-                    if abs(value) > abs(best):
-                        best = value
-                return base + best
-
-            # Every ramp drawn as a curve: a node every STATION_STEP_M along it.
-            ramps = [(0.0, lead)] + ([(line.length - lead, line.length)] if pinned_end else [])
-            ramps += [span for lo, hi, _c, taper in bumps for span in ((lo - taper, lo), (lo, hi), (hi, hi + taper))]
-
-            for k, node in enumerate(leg.nodes):
-                if node in (leg.junction, leg.end) or node in network.junctions or node in moves:
+        def offset(d: float, own: float = own, ends: list = ends, leads: list = leads,
+                   bumps: list = bumps, length: float = line.length) -> float:
+            base = own + sum((end - own) * (1.0 - ease(x / lead)) for end, lead, x
+                             in zip(ends, leads, (d, length - d), strict=True) if lead > 0)
+            best = 0.0
+            for lo, hi, (ds, corrections), taper in bumps:
+                if lo <= d <= hi:
+                    value = float(np.interp(d, ds, corrections))
+                elif taper > 0 and lo - taper < d < lo:
+                    value = float(corrections[0]) * ease((d - (lo - taper)) / taper)
+                elif taper > 0 and hi < d < hi + taper:
+                    value = float(corrections[-1]) * ease(((hi + taper) - d) / taper)
+                else:
                     continue
-                moves[node] = _at(line, float(leg.d[k]), offset(float(leg.d[k])))
-            for start, stop in ramps:
-                if start < 0 or stop > line.length:
-                    report["tapers cut short by a junction"] += 1
-                steps = max(1, math.ceil((stop - start) / STATION_STEP_M))
-                for d in np.linspace(start, stop, steps + 1):
-                    if not 0 < d < line.length:
-                        continue
-                    k = int(np.searchsorted(leg.d, d, side="right")) - 1
-                    if not 0 <= k < len(leg.steps) - 1:
-                        continue
-                    (way_a, i_a), (way_b, i_b) = leg.steps[k], leg.steps[k + 1]
-                    if way_a != way_b or abs(i_a - i_b) != 1 or min(abs(d - leg.d[k]), abs(d - leg.d[k + 1])) < NODE_MATCH_M:
-                        continue
-                    node = next(ids)
-                    new_nodes.append(NewNode(node, *frame.wgs84(*_at(line, d, offset(d))), {}))
-                    added[way_a].append((min(i_a, i_b), d if i_b > i_a else -d, node))
+                if abs(value) > abs(best):
+                    best = value
+            return base + best
+
+        # Every ramp drawn as a curve: a node every STATION_STEP_M along it.
+        ramps = [span for span, lead in zip(((0.0, leads[0]), (line.length - leads[1], line.length)), leads,
+                                            strict=True) if lead > 0]
+        ramps += [span for lo, hi, _c, taper in bumps for span in ((lo - taper, lo), (lo, hi), (hi, hi + taper))]
+
+        for k, node in enumerate(leg.nodes):
+            if node in (leg.junction, leg.end) or node in network.junctions or node in moves:
+                continue
+            moves[node] = _at(line, float(leg.d[k]), offset(float(leg.d[k])))
+        for start, stop in ramps:
+            if start < 0 or stop > line.length:
+                report["tapers cut short by a junction"] += 1
+            steps = max(1, math.ceil((stop - start) / STATION_STEP_M))
+            for d in np.linspace(start, stop, steps + 1):
+                if not 0 < d < line.length:
+                    continue
+                k = int(np.searchsorted(leg.d, d, side="right")) - 1
+                if not 0 <= k < len(leg.steps) - 1:
+                    continue
+                (way_a, i_a), (way_b, i_b) = leg.steps[k], leg.steps[k + 1]
+                if way_a != way_b or abs(i_a - i_b) != 1 or min(abs(d - leg.d[k]), abs(d - leg.d[k + 1])) < NODE_MATCH_M:
+                    continue
+                node = next(ids)
+                new_nodes.append(NewNode(node, *frame.wgs84(*_at(line, d, offset(d))), {}))
+                added[way_a].append((min(i_a, i_b), d if i_b > i_a else -d, node))
     report["nodes moved to re-centre streets"] = len(moves)
     report["nodes added for the tapers on to narrow stretches"] = len(new_nodes)
     kept = [node for node in base.nodes if node.id not in moves]
