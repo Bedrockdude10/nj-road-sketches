@@ -462,27 +462,6 @@ class _Kerbs:
         return float(shapely.distance(points[within], centre).min())
 
 
-def kerb_centre_offsets(layers: dict, frame: LocalFrame,
-                        bbox: tuple[float, float, float, float]) -> dict[int, float]:
-    """How far each street's mapped kerbs put its middle from its ways, by way id: positive to the
-    left of each way. The drawn centreline is the middle of the kerbs, not where the way happens
-    to be digitised. ONE offset per street, so the pieces of a split street cannot step where
-    they meet: the median, over every cross-section of every one of its ways that meets its own
-    kerbs on both sides (_Kerbs.hits), of the kerbs' midline from that way. A street with no
-    such cross-section is absent - drawn where OSM has it."""
-    network = _Network(layers, frame)
-    kerbs = _Kerbs(layers, frame, network, bbox)
-    middles: dict[str, list[float]] = defaultdict(list)
-    for way_id, way in network.streets.items():
-        street = _street_key(way)
-        sampled = _samples(network.lines[way_id], kerbs, street)
-        left, right = kerbs.hits(street, sampled, 1), kerbs.hits(street, sampled, -1)
-        both = np.isfinite(left) & np.isfinite(right)
-        middles[street] += ((left[both] - right[both]) / 2).tolist()
-    return {way_id: float(np.median(middles[_street_key(way)]))
-            for way_id, way in network.streets.items() if middles[_street_key(way)]}
-
-
 # --- small helpers -----------------------------------------------------------------------------
 
 def _is_street(tags: dict) -> bool:
