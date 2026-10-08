@@ -234,6 +234,46 @@ def _strip(line: LineString, half_m: float) -> list[list[list[float]]]:
             + _strip(LineString(line.coords[middle:]), half_m))
 
 
+def street_ends(ways: list[dict]) -> dict[tuple[str | None, int], list[dict]]:
+    """Each carriageway way by its street and the node at each of its ends, and by (None, node)
+    at every node it has - what beyond() and _Reader.transition() walk."""
+    ends: dict[tuple[str | None, int], list[dict]] = defaultdict(list)
+    for way in ways:
+        ids, name = way.get("node_ids") or [], way["tags"].get("name")
+        if way["tags"].get("highway") not in CARRIAGEWAY or len(ids) < 2:
+            continue
+        for node in dict.fromkeys(ids):
+            ends[(None, node)].append(way)
+        if name:
+            ends[(name, ids[0])].append(way)
+            ends[(name, ids[-1])].append(way)
+    return ends
+
+
+def beyond(way: dict, ends: dict[tuple[str | None, int], list[dict]],
+           frame: LocalFrame) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
+    """At each end of `way`, the point half a metre into the way that carries on from it, else
+    None - what Stations spans the join with. That is the one other way of the same street ending
+    there (through a junction), else the one other carriageway at a node no third one touches -
+    a street that changes its name there, or two unnamed pieces of one."""
+    name, ids = way["tags"].get("name"), way.get("node_ids") or []
+    out = []
+    for node in (ids[0], ids[-1]) if len(ids) >= 2 else ():
+        others = [o for o in ends.get((name, node), []) if o["id"] != way["id"]] if name else []
+        if len(others) != 1:
+            others = [o for o in ends.get((None, node), []) if o["id"] != way["id"]]
+            if len(others) != 1 or node not in (others[0]["node_ids"][0], others[0]["node_ids"][-1]):
+                others = []
+        other = frame.line(others[0]["coords_wgs84"]) if others else None
+        if other is None:
+            out.append(None)
+            continue
+        at = min(0.5, other.length)
+        out.append(other.interpolate(at if others[0]["node_ids"][0] == node
+                                     else other.length - at).coords[0])
+    return (out[0], out[1]) if out else (None, None)
+
+
 class Stations:
     """Cross-sections along a centreline every STATION_STEP_M: each one's point and left normal.
     `before` / `after` are points on the way the line continues from / into, where there is one:
@@ -322,27 +362,10 @@ class _Reader:
 
     def index_ends(self, ways: list[dict]) -> None:
         """Each named way by the street and the node at each of its ends - transition() walks it."""
-        for way in ways:
-            ids, name = way.get("node_ids") or [], way["tags"].get("name")
-            if name and len(ids) >= 2:
-                self.ends[(name, ids[0])].append(way)
-                self.ends[(name, ids[-1])].append(way)
+        self.ends = street_ends(ways)
 
     def beyond(self, way: dict) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
-        """At each end, the point half a metre into the one way of the same street that carries
-        on from it, else None - what Stations spans the join with."""
-        name, ids = way["tags"].get("name"), way.get("node_ids") or []
-        out = []
-        for node in (ids[0], ids[-1]) if name and len(ids) >= 2 else ():
-            others = [o for o in self.ends[(name, node)] if o["id"] != way["id"]]
-            other = self.frame.line(others[0]["coords_wgs84"]) if len(others) == 1 else None
-            if other is None:
-                out.append(None)
-                continue
-            at = min(0.5, other.length)
-            out.append(other.interpolate(at if others[0]["node_ids"][0] == node
-                                         else other.length - at).coords[0])
-        return (out[0], out[1]) if out else (None, None)
+        return beyond(way, self.ends, self.frame)
 
     def transition(self, way: dict) -> tuple[dict, dict, float, float] | None:
         """For a `placement=transition` way (wiki Key:placement: the street's layout changes along
@@ -450,7 +473,9 @@ class _Reader:
         edge inward, and the centre line is the way. With every lane's width (wiki Key:width:lanes,
         left to right) the section is laid IN ORDER from the edge whose side carries a cycleway
         (else the left): its cycleway, buffer and parking, then the lanes, then the far side's
-        parking lane against the last lane; the far side's shoulder is laid from its own edge."""
+        parking lane against the last lane, and its shoulder from there out - so the shoulder's
+        hatching starts where the section ends wherever the widths are eased (a transition), never
+        over a stall. A far side with a cycleway of its own is laid from its own edge."""
         lanes = _int(tags.get("lanes")) or 0
         widths = [width_m(w) for w in (tags.get("width:lanes") or "").split("|")]
         backward = backward_lanes(tags, lanes)
@@ -477,17 +502,19 @@ class _Reader:
         far = "left" if anchor == "right" else "right"
         sign = 1 if anchor == "left" else -1
         inner = self.kerbside(tags, stations, anchor, edges[anchor])
-        self.kerbside(tags, stations, far, edges[far], parking=False)
+        lane_edge = inner - sum(widths)
+        outer = lane_edge
+        if (tags.get(f"parking:{far}") or tags.get("parking:both")) == "lane":
+            outer = lane_edge - self.eased(tags, f"parking:{far}:width", "parking", stations)
+            self.out["parking_edge_lines"].append(stations.line(sign * lane_edge))
+            self.stalls(tags, far, stations, sign * lane_edge, sign * outer)
+        self.kerbside(tags, stations, far, edges[far], parking=False,
+                      shoulder_from=None if _has_cycleway(tags, far) else -outer)
         near = widths[:backward] if anchor == "left" else widths[backward:]
         leftmost = sign * inner + (sum(widths) if anchor == "right" else 0)
         self.lane_lines(tags, stations, lanes, backward,
                         {j: leftmost - sum(widths[:j]) for j in range(1, lanes)
                          if tags.get("oneway") in ("yes", "-1") or j != backward})
-        if (tags.get(f"parking:{far}") or tags.get("parking:both")) == "lane":
-            lane_edge = inner - sum(widths)
-            self.out["parking_edge_lines"].append(stations.line(sign * lane_edge))
-            self.stalls(tags, far, stations, sign * lane_edge,
-                        sign * (lane_edge - self.eased(tags, f"parking:{far}:width", "parking", stations)))
         # Each side's lane edge, where nothing else marks it: a hatched shoulder's outline and a
         # parking lane's edge already do, and a track's buffer line does. That leaves a shoulder
         # whose hatching breaks where traffic crosses the kerb - the edge line is maintained across
@@ -503,16 +530,18 @@ class _Reader:
         return LineString(stations.line(sign * (inner - sum(near))))
 
     def kerbside(self, tags: dict, stations: Stations, side: str, edge: np.ndarray,
-                 parking: bool = True) -> np.ndarray:
+                 parking: bool = True, shoulder_from: np.ndarray | None = None) -> np.ndarray:
         """Draw one side's shoulder, cycleway, its buffer (with its posts) and, if `parking`, its
-        parking lane, edge inward, and return the travel way's edge on that side."""
+        parking lane, edge inward, and return the travel way's edge on that side. The shoulder's
+        inner line is `shoulder_from` where given (cross_section's far side), else its width in."""
         sign = 1 if side == "left" else -1
         edge = self.street_parking(tags, side, stations, edge)
         if (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes":
             # A shoulder at the edge (wiki Key:shoulder), `shoulder:<side>:width` wide; hatched
             # where `shoulder:<side>:markings=hatched` - a project convention, as OSM has no tag
             # for painted hatching along a way.
-            inner = edge - self.eased(tags, f"shoulder:{side}:width", "shoulder", stations)
+            inner = (shoulder_from if shoulder_from is not None
+                     else edge - self.eased(tags, f"shoulder:{side}:width", "shoulder", stations))
             if tags.get(f"shoulder:{side}:markings") == "hatched":
                 # A shoulder runs to the edge of the street as built: from its inner line out to
                 # wherever its own street's `area:highway` ends - the kerb - so whatever is left

@@ -1202,8 +1202,12 @@ not opened here.
 Where the kerbs stand closer than a block's section, the way is split and that piece narrowed;
 the street is re-centred on the stretch's midline over a taper, and a `placement=transition` piece
 leads into and out of it, along which the reader interpolates the layout (`src/osm_osc.py`:
-`_narrow`, `_narrowed`, `_recentred`, `_tag_pieces`; `src/osm_world.py`: `taper_rate`,
-`DEFAULT_MPH`, `_Reader.transition`). The kerbs are measured every 2 m and at every kerb vertex.
+`_blocks`, `_narrow`, `_narrowed`, `_recentred`, `_tag_pieces`; `src/osm_world.py`: `taper_rate`,
+`DEFAULT_MPH`, `_Reader.transition`). The section and its narrowing are the block's, not each
+way's: a corner's unparked piece is measured against the parked section it belongs to, and every
+narrowed piece of a block takes the one layout for the block's least kerb to kerb, so the track
+does not widen and narrow again across a way end. On a transition the far kerb's hatching starts
+where the section ends (`_Reader.cross_section`), never over a stall. The kerbs are measured every 2 m and at every kerb vertex.
 
 | figure | value | constant | source |
 |---|---|---|---|
