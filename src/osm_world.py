@@ -3,7 +3,9 @@ scripts/blender/blender_scene.py `--build` reads.
 
 Everything drawn is something OSM maps, placed where OSM puts it:
   carriageway   a street's `area:highway` polygons where it has them - the street as built -
-                else half each way's `width` either side of it. Every marking below is laid from
+                else half each way's `width` either side of its centreline: the middle of its
+                street's mapped kerbs where any are mapped across from each other
+                (src/osm_osc.py:kerb_centre_offsets), else the way. Every marking below is laid from
                 the way's `width` (the way runs down the middle of its carriageway), never from a
                 kerb, and then kept on that surface: paint stops at the kerb
   bike lanes    `cycleway[:<side>]=lane|track`, a band of `cycleway:<side>:width` inside that
@@ -274,8 +276,12 @@ class Stations:
 
 
 class _Reader:
-    def __init__(self, frame: LocalFrame, areas: dict[str | None, list[Polygon]]):
+    def __init__(self, frame: LocalFrame, areas: dict[str | None, list[Polygon]],
+                 centre_offsets: dict[int, float] | None = None):
         self.frame = frame
+        # Each way's drawn centreline off the way itself: the middle of its street's mapped kerbs
+        # (src/osm_osc.py:kerb_centre_offsets). A way absent here is drawn where OSM has it.
+        self.centre_offsets = centre_offsets or {}
         # Each street's `area:highway` polygons, by name: the street as built, where it is mapped.
         self.areas = areas
         self._own: dict[str, BaseGeometry] = {}
@@ -413,6 +419,14 @@ class _Reader:
         if tags.get("service") in ("driveway", "parking_aisle"):
             return  # paved_surfaces draws these
         stations = Stations(line, *self.beyond(way))
+        shift = self.centre_offsets.get(way["id"])
+        if shift is not None:
+            # Drawn down the middle of its kerbs: every cross-section, and the line itself.
+            stations.xy = stations.at(np.full(len(stations.s), shift))
+            line = LineString(stations.xy)
+            self.stats["ways centred between their street's kerbs"] += 1
+        else:
+            self.stats["ways drawn where OSM has them: no kerb pair mapped"] += 1
         self._way = way
         self._transition = self.transition(way)
         nodes = way.get("node_ids") or []
@@ -1474,7 +1488,10 @@ def read(area: str, change: OsmChange | None = None) -> tuple[dict, _Reader]:
             areas[way["tags"].get("name")].extend(polygons)
             pavement[_pavement_key(way["tags"])] += [
                 ring for p in polygons for ring in _rings(p)]
-    reader = _Reader(frame, dict(areas))
+    # The kerb measurement shares the proposal writer's kerb matching; imported here because
+    # src/osm_osc.py imports this module.
+    from src.osm_osc import kerb_centre_offsets
+    reader = _Reader(frame, dict(areas), kerb_centre_offsets(layers, frame, SNAPSHOT_AREAS[area]))
     reader.out["paved_surfaces"] += mouths
     for key, rings in pavement.items():
         reader.out[key] += rings
