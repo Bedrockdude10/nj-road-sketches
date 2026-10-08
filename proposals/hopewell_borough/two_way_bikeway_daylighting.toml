@@ -1,0 +1,12 @@
+# A proposal: the tags it puts on the ways it chooses. src/osm_osc.py:two_way_bikeway lays
+# `track.tags` on every street way whose OSM tags match `track.ways`, fits each to the kerbs it
+# finds there (the track's width and buffer, and where neither fits), and writes
+# two_way_bikeway_daylighting.osc beside this file. What the proposal does everywhere - the road diet, the
+# continental crosswalks - it does to every street, and this file does not name.
+note = "Proposal: Broad St two-way protected bikeway on the north kerb, with a painted curb extension at each parked corner (src/osm_osc.py:two_way_bikeway). Not a survey."
+kerb_extensions = true      # true: every corner a painted curb extension, edged in flexible posts
+
+[track]
+ways = { name = ["West Broad Street", "East Broad Street"] }   # every value a way's tag may have
+kerb = "north"              # by compass: `{side}` below is each way's own left or right
+tags = { "cycleway:{side}" = "track", "cycleway:{side}:oneway" = "no", "cycleway:{side}:surface:colour" = "green" }

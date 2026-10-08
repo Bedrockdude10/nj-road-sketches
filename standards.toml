@@ -424,10 +424,10 @@ source = "njac_5_21"
 note = "an angled stall, measured along it in its own frame"
 
 [figure.stall.diagonal_angle]
-value = 60.0
+value = 45.0
 unit = "deg"
 status = "local"
-at = "Danny, 2026-09-10: observed on Grand Central Ave"
+at = "Danny, 2026-10-08: the corner hatching mapped on Grand Central Ave, Lavallette - its slanted edges 44.2-45.4 deg to the street"
 note = "`parking:<side>:orientation=diagonal`, from the kerb; OSM has no key for the angle"
 
 [figure.stall.parallel_length]
@@ -606,7 +606,7 @@ note = "a line's direction at a point: from this far behind it to this far ahead
 value = 0.05
 unit = "m"
 status = "numerical"
-note = "how finely a signal pole's place off the street is searched"
+note = "how finely a search along a line steps: a signal pole's place off the street, where a stall clears painted hatching"
 
 [figure.numerical.overshoot]
 value = 0.5

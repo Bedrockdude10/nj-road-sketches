@@ -106,6 +106,12 @@ CARRIAGEWAY = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclass
                "residential", "living_street", "service", "motorway_link", "trunk_link",
                "primary_link", "secondary_link", "tertiary_link", "busway"}
 
+
+def is_street(tags: dict) -> bool:
+    """A carriageway that is a street - a junction is where two of them meet - and not a
+    `highway=service` way: a driveway, alley or parking aisle leaves a street, it does not cross it."""
+    return tags.get("highway") in CARRIAGEWAY and tags.get("highway") != "service"
+
 # Every figure below is declared in standards.toml, with its source and status; read in SI.
 # NOT OSM: what is drawn where a way carries no width tag. Counted every time it is used.
 DEFAULT_WIDTHS_M = {"lane": si("lane.width"), "service": si("default_width.service"),
@@ -133,6 +139,7 @@ ZEBRA_BAR_M = si("crosswalk.bar_width")
 HATCH_ANGLE_DEG, HATCH_SPACING_M = si("hatch.angle"), si("hatch.spacing")
 HATCH_WIDE_MPH = si("hatch.wide_speed")
 SEAM_M, TANGENT_M = si("numerical.seam"), si("numerical.tangent_probe")
+SEARCH_STEP_M = si("numerical.search_step")
 # The `colour`s a `road_marking=restriction` area is hatched in other than white, each in its own
 # channels (`<colour>_hatch_edge_lines`, `<colour>_hatch_stroke_lines`) - the channel is what
 # decides a stripe's colour in 3D (scripts/blender/blender_scene.py:PAINT_COLOUR_CHANNELS).
@@ -608,7 +615,8 @@ class _Reader:
 
     def parking_lane(self, tags: dict, side: str, stations: Stations, edge: np.ndarray) -> np.ndarray:
         """A parking lane from `edge` inward - as deep as parking_depth_m says - its inner edge
-        line and its stalls; return its inner edge."""
+        line and its stalls; return its inner edge. An angled stall's lines stop at its length
+        (stall_all), short of that edge, so the bay is open to the lane it is driven into from."""
         sign = 1 if side == "left" else -1
         depth = parking_depth_m(tags, side)
         width = (self.along(depth, lambda t: parking_depth_m(t, side), stations) if depth
@@ -737,8 +745,12 @@ class _Reader:
     def stall_all(self) -> None:
         """Every marked parking lane's stalls, run by run: its pieces - a way split for any other
         reason - joined end to end, and the run's capacity, summed (else as many standard stalls as
-        it holds, stall_pitch_m), laid in equal stalls along it, a divider across the lane at each
-        end of each."""
+        it holds, stall_pitch_m), laid in equal stalls along it, a stall line at each end of each. Stalls are laid only where no painted area is - a `road_marking=restriction`
+        of any colour, or a hatched shoulder - so the hatching's edge is where they start."""
+        painted = unary_union([part for part, _name in self.hatched]
+                              + [part for parts in self.hatched_coloured.values() for part in parts])
+        painted = painted.buffer(-SEARCH_STEP_M)     # a divider on its edge touches; it does not overlap
+        shapely.prepare(painted)
         after = {(p["street"], p["side"], p["first"]): p for p in self.parking}
         has_before = {(p["street"], p["side"], p["last"]) for p in self.parking}
         for start in self.parking:
@@ -751,18 +763,54 @@ class _Reader:
                 piece = after.get((piece["street"], piece["side"], piece["last"]))
             one = LineString([c for k, p in enumerate(run) for c in p["one"][(k > 0):]])
             other = LineString([c for k, p in enumerate(run) for c in p["other"][(k > 0):]])
-            capacity = sum(p["capacity"] or 0 for p in run)
-            if not capacity:
-                # Marked, with no `capacity`: as many standard stalls as the kerb holds.
-                capacity = int(one.length // stall_pitch_m(run[0]["orientation"]))
-                self.stats["marked parking with no capacity: standard stalls (runs)"] += 1
-            if not capacity:
+            # An angled divider leans with its stall: its kerb end lies along the street from its
+            # lane end by the lane's depth there / tan(angle) - with traffic for a head-in bay,
+            # against it for a back-in one - and the stalls fit between the run's ends.
+            angle = {"diagonal": DIAGONAL_DEG, "perpendicular": 90.0}.get(run[0]["orientation"])
+
+            def lean(s: float, run: list = run, angle: float | None = angle,
+                     one: LineString = one, other: LineString = other) -> float:
+                if angle is None:
+                    return 0.0
+                return run[0]["lean"] * other.distance(one.interpolate(s)) / math.tan(math.radians(angle))
+
+            def divider(s: float, one: LineString = one, other: LineString = other, lean=lean,
+                        angled: bool = angle is not None) -> LineString:
+                """The stall line at `s`: from the kerb toward the lane - an angled one the
+                stall's length along it (stall.length), the lane beyond open; a parallel one
+                across the lane."""
+                lane = np.asarray(one.interpolate(s).coords[0])
+                kerb = np.asarray(other.interpolate(other.project(Point(lane)) + lean(s)).coords[0])
+                reach = float(np.linalg.norm(lane - kerb))
+                if angled and reach > STALL_BODY_M:
+                    lane = kerb + (lane - kerb) * STALL_BODY_M / reach
+                return LineString([lane, kerb])
+
+            first, last = max(0.0, -lean(0.0)), one.length - max(0.0, lean(one.length))
+            if last <= first:
                 continue
-            for k in range(capacity + 1):
-                at = k / capacity
-                self.out["parking_stall_divider_lines"].append(
-                    [list(one.interpolate(at, normalized=True).coords[0]),
-                     list(other.interpolate(at, normalized=True).coords[0])])
+            # The stretches of the run whose dividers cross no painted area, searched along it.
+            free = [(first, last)]
+            lane_strip = Polygon([*one.coords, *other.coords[::-1]]).buffer(0)
+            if painted.intersects(lane_strip):
+                at = np.append(np.arange(first, last, SEARCH_STEP_M), last)
+                clear = np.array([not painted.intersects(divider(float(s))) for s in at])
+                edges = np.flatnonzero(np.diff(np.concatenate([[0], clear.astype(int), [0]])))
+                free = [(float(at[a]), float(at[b - 1])) for a, b in zip(edges[::2], edges[1::2], strict=True)
+                        if b - 1 > a]
+                self.stats["marked parking beside a painted area: stalls kept off it (runs)"] += 1
+            tagged = sum(p["capacity"] or 0 for p in run)
+            if not tagged:
+                self.stats["marked parking with no capacity: standard stalls (runs)"] += 1
+            total = sum(b - a for a, b in free)
+            for a, b in free:
+                # A tagged `capacity` shared over the free stretches by length; else as many
+                # standard stalls as each holds.
+                capacity = (round(tagged * (b - a) / total) if tagged and total > 0
+                            else int((b - a) // stall_pitch_m(run[0]["orientation"])))
+                for k in range(capacity + 1 if capacity else 0):
+                    line = divider(a + (b - a) * k / capacity)
+                    self.out["parking_stall_divider_lines"].append([list(c) for c in line.coords])
 
     def runs(self, pieces: list[dict]) -> list[list[dict]]:
         """`pieces` joined end to end into runs: the same street and `values`, past nodes that are
@@ -1043,11 +1091,12 @@ class _Reader:
     def off_other_streets(self) -> None:
         """Each way's own lines and green (STREET_PAINT) cut out of every other street's surface,
         so a street's markings stop where the street it meets begins - none across a junction or
-        a side street's mouth. Not a piece tagged as carried across the conflict
+        a side street's mouth (is_street: a driveway or alley mapped as `highway=service` cuts
+        nothing - the street's lines run on past it). Not a piece tagged as carried across the conflict
         (`cycleway:<side>:crossing:markings=dashes`), whose dotted lines are drawn there on purpose.
         Another way of the same street is not another street."""
         surfaces = [(way_id, polygon) for way_id, polygons in self.road_surfaces.items()
-                    for polygon in polygons]
+                    if is_street(self.road_ways[way_id][2]) for polygon in polygons]
         if not surfaces:
             return
         tree = STRtree([polygon for _way_id, polygon in surfaces])
@@ -1406,7 +1455,7 @@ class _Reader:
         """The first point from `at` along `outward` (a unit vector) standing SIGNAL_CLEARANCE_M from
         the drawn street - None if there is none before `limit`."""
         road = self.carriageway()
-        for d in np.arange(0.0, limit, si("numerical.search_step")):
+        for d in np.arange(0.0, limit, SEARCH_STEP_M):
             if not road.contains(point := Point(at + outward * d)) and road.distance(point) >= SIGNAL_CLEARANCE_M:
                 return at + outward * d
         return None
@@ -1527,6 +1576,18 @@ def carriageway_width_m(tags: dict) -> tuple[float, str]:
             depth = parking_depth_m(tags, side) or DEFAULT_WIDTHS_M["parking"]
             section += depth if position == "lane" else depth / 2
     return section, "DEFAULTED (its tagged section summed)"
+
+
+def has_lane_lines(tags: dict) -> bool:
+    """Whether a way's lane lines are painted (lane_lines): two or more of its `lanes` run the
+    same way - every lane of a oneway - unless `lane_markings=no`."""
+    if tags.get("lane_markings") == "no":
+        return False
+    lanes = _int(tags.get("lanes")) or 0
+    if tags.get("oneway") in ("yes", "-1"):
+        return lanes >= 2
+    backward = backward_lanes(tags, lanes)
+    return max(backward, lanes - backward) >= 2
 
 
 def backward_lanes(tags: dict, lanes: int) -> int:

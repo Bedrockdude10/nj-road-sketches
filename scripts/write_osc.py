@@ -2,17 +2,16 @@
 """Pull OSM fresh and write an area's osmChange files (src/osm_osc.py says what each holds):
 
     proposals/<area>/existing.osc          where OSM's tags do not yet say what is painted
-    proposals/<area>/two_way_bikeway.osc   existing.osc plus the Broad St two-way bikeway
-    proposals/<area>/two_way_bikeway_daylighting.osc
-                                           the same with a painted curb extension, edged in
-                                           flexible posts, at each parked corner - so the
-                                           statute's no-standing zone is 10 ft, not 25
+    proposals/<area>/<name>.osc            existing.osc plus what proposals/<area>/<name>.toml
+                                           puts on the ways it chooses (src/osm_osc.py:Proposal) -
+                                           with its `kerb_extensions`, a painted curb extension at
+                                           each parked corner, so the no-standing zone is 10 ft
 
     .venv/bin/python scripts/write_osc.py hopewell_borough            # re-pulls from Overpass
     .venv/bin/python scripts/write_osc.py hopewell_borough --cached   # the last pull
     .venv/bin/python scripts/write_osc.py hopewell_borough --existing-only   # existing.osc alone
 
-Every area gets an existing.osc; a proposal is rewritten only where the area already has its file.
+Every area gets an existing.osc, and a proposal .osc for each proposal .toml it has.
 render_osm.py writes them all from its own pull before it builds.
 
 Then render with `render_osm.py --cached`, so the render reads the same pull. Each is a real osmChange: open it in JOSM over the area to check it. render_osm.py renders one
