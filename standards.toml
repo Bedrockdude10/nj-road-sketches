@@ -54,8 +54,20 @@ title = "R.S. 39:4-138, as amended by P.L. 2009 c.257 - parking prohibited"
 [source.aashto]
 title = "AASHTO Guide for the Development of Bicycle Facilities / Green Book"
 
+[source.njdot_rdm_6]
+title = "NJDOT Design Manual - Roadway, Section 6 At Grade Intersections (BDC07MR-05), 6.4.2 Design Vehicles and 6.4.3 Turning Radii at Unchannelized Intersections"
+url = "https://www.nj.gov/transportation/eng/documents/BDC/pdf/DMR-Sec6-rev20090318.pdf"
+
 [source.municipal_driveway]
 title = "St. Louis City Code 17.24; Seattle Municipal Code - parking near a driveway return"
+
+[source.nacto_ubdg]
+title = "NACTO Urban Bikeway Design Guide, cycle tracks - parking-protected: a buffer between the bike lane and the parking lane"
+url = "https://nacto.org/publication/urban-bikeway-design-guide/"
+
+[source.nyc_sdm]
+title = "NYC DOT Street Design Manual, 2.2.2 Curb Extension"
+url = "https://www.nycstreetdesign.info/geometry/curb-extension"
 
 [source.osm_wiki]
 title = "OpenStreetMap wiki"
@@ -409,6 +421,14 @@ note = "flex posts down a buffer's centre, as the old design spaced them"
 
 # --- parking ------------------------------------------------------------------------------------
 
+[figure.turn.effective_radius]
+value = 30.0
+unit = "ft"
+status = "verified"
+source = "njdot_rdm_6"
+at = "Danny, 2026-10-09: no proposal leaves a corner a single-unit truck or bus cannot turn"
+note = "6.4.3: an effective radius of 30 ft lets an occasional truck or bus turn without much encroachment; the effective radius is measured from the edge of the travel lane where a parking lane, bike lane or shoulder lies outside it, and 6.4.3 warns that a kerb protruding into the turning path endangers pedestrians standing at it. A curb extension is built only where it leaves the corner at least this (src/turning.py)"
+
 [figure.stall.width]
 value = 9.0
 unit = "ft"
@@ -475,6 +495,13 @@ source = "rs_39_4_138"
 at = "(e)"
 note = "...and within this where a curb extension is built (`crossing:kerb_extension`)"
 
+[figure.curb_extension.inset]
+value = 2.0
+unit = "ft"
+status = "as_cited"
+source = "nyc_sdm"
+note = "a curb extension is typically this much narrower than the parking lane it is in, and at least as long as the crosswalk is wide"
+
 # --- speed and tapers ---------------------------------------------------------------------------
 
 [figure.speed.default]
@@ -519,6 +546,13 @@ value = 3.0
 unit = "ft"
 status = "modelled"
 
+[figure.parking_protected.buffer]
+value = 3.0
+unit = "ft"
+status = "as_cited"
+source = "nacto_ubdg"
+note = "a kerbside bike lane's buffer from the parked cars outside it: room to open a door and step out; not the two-way track's buffer"
+
 [figure.track.min_buffer]
 value = 2.0
 unit = "ft"
@@ -531,12 +565,6 @@ value = 0.5
 unit = "ft"
 status = "modelled"
 note = "the proposal: spare narrower than this is left unmarked"
-
-[figure.junction.unmarked_mouth]
-value = 11.0
-unit = "ft"
-status = "modelled"
-note = "how far out of a junction the centre line stops where no crosswalk, stop line or cross street's kerb is mapped"
 
 [figure.turn_box.bicycle_length]
 value = 6.0
@@ -608,6 +636,12 @@ unit = "m"
 status = "numerical"
 note = "how finely a search along a line steps: a signal pole's place off the street, where a stall clears painted hatching"
 
+[figure.numerical.turn_step]
+value = 0.5
+unit = "m"
+status = "numerical"
+note = "the spacing of the radii tried for a corner's effective radius, widest that clears kept, and of the points each arc is drawn with"
+
 [figure.numerical.overshoot]
 value = 0.5
 unit = "m"
@@ -668,7 +702,7 @@ figures = ["arrow.through_length", "arrow.turn_through_length",
 wiki = "Key:overtaking"
 convention = "wiki"
 means = "with :forward / :backward: a double yellow where no, broken where yes"
-absent = "a single solid centre line, counted"
+absent = "a broken centre line, counted; in one direction, that side of the pair broken"
 figures = ["line.width", "line.double_offset", "line.dash", "line.dash_cycle"]
 
 [tag.lane_markings]
@@ -693,7 +727,7 @@ figures = ["speed.default", "hatch.wide_speed"]
 [tag."cycleway:<side>"]
 wiki = "Key:cycleway"
 convention = "wiki"
-means = "lane | track on that side, with :width, :buffer, :oneway, :surface:colour, :separation:*"
+means = "lane | track on that side, with :width, :buffer, :oneway, :surface:colour, :separation:* (flex_post | bollard: posts down the buffer)"
 absent = "no bike lane"
 figures = ["cycleway.width", "bollard.spacing", "bike_lane.symbol_length", "bike_lane.symbol_to_arrow",
            "bike_lane.arrow_length", "bike_lane.symbol_shape", "arrow.through_outline", "arrow.clearance"]
@@ -748,8 +782,8 @@ figures = ["default_width.crossing", "crosswalk.line_width", "crosswalk.bar_widt
 [tag."crossing:kerb_extension"]
 wiki = "Key:crossing:kerb_extension"
 convention = "wiki"
-means = "a curb extension on that kerb: the no-standing zone shortens"
-figures = ["no_standing.with_extension"]
+means = "a curb extension on that kerb: the no-standing zone shortens; a proposal paints it and the crosswalk stops at it"
+figures = ["no_standing.with_extension", "curb_extension.inset"]
 
 [tag.kerb]
 wiki = "Key:kerb"

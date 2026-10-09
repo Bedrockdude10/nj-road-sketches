@@ -10,7 +10,7 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 edge - green where `cycleway:<side>:surface:colour=green`, in skip bars with
                 dotted edges where `cycleway:<side>:crossing:markings=dashes` - then
                 `cycleway:<side>:buffer`, with a bollard every BOLLARD_SPACING_M down its centre
-                where `cycleway:<side>:separation:*=flex_post`;
+                where `cycleway:<side>:separation:*=flex_post|bollard`;
                 `cycleway:<side>:oneway=no` adds the dashed yellow divider down its middle;
                 a `lane` (not a `track`) gets MUTCD's bicycle symbol and arrow at the start of
                 each block (_Reader.markings_all)
@@ -29,9 +29,9 @@ Everything drawn is something OSM maps, placed where OSM puts it:
   centre line   two-way ways with 2+ lanes, or with `overtaking*` or `lane_markings=yes` tagged
                 (has_centre_line), unless `lane_markings=no` - so where it stops is
                 where the way is split and tagged, never decided here. Double yellow where
-                `overtaking[:forward|:backward]=no`, dashed where `=yes`. Where the backward
-                lanes meet the forward ones - the lanes equal, or as `width:lanes` has them, so
-                off the way beside a turn lane - see _Reader.cross_section
+                `overtaking[:forward|:backward]=no`, dashed where `=yes` or untagged. Where the
+                backward lanes meet the forward ones - the lanes equal, or as `width:lanes` has
+                them, so off the way beside a turn lane - see _Reader.cross_section
   cycle crossings `highway=cycleway` + `cycleway=crossing` ways: a band of their `width`, green
                 where `surface:colour=green`; where `crossing:markings=dashes`, edged in
                 CROSSBIKE_DASH_M dots and the green in skip bars of the same pattern; a dashed
@@ -74,6 +74,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pyproj
@@ -321,6 +322,9 @@ class _Reader:
         # restriction areas hatched in a colour other than white, by HATCH_COLOURS colour
         self.hatched_coloured: dict[str, list[Polygon]] = defaultdict(list)
         self.parking: list[dict] = []        # marked parking lanes, piece by piece: stall_all draws them
+        self.parked: list[Polygon] = []      # every strip a car may stand in, marked or not
+        # each way's travel lanes' outer edges, signed offsets (left positive) at its Stations
+        self.lane_edges: dict[int, tuple[np.ndarray, np.ndarray]] = {}
         self._way: dict = {}                 # the way being drawn
         # Each named street's centrelines and widest carriageway: what its hatching is struck along.
         self.street_lines: dict[str, list[LineString]] = defaultdict(list)
@@ -490,6 +494,7 @@ class _Reader:
         backward = backward_lanes(tags, lanes)
         if len(widths) != lanes or None in widths:
             left, right = (self.kerbside(tags, stations, side, edges[side]) for side in ("left", "right"))
+            self.lane_edges[self._way["id"]] = (left, -right)
             if lanes < 1:
                 return line
             # Every lane shares the travel way equally - nothing says otherwise without
@@ -512,18 +517,19 @@ class _Reader:
                 return values[i] if len(values) == len(widths) and values[i] is not None else None
             return theirs
         widths = [self.along(w, lane(i), stations) for i, w in enumerate(widths)]
-        anchor = "right" if _has_cycleway(tags, "right") and not _has_cycleway(tags, "left") else "left"
+        anchor = "right" if has_cycleway(tags, "right") and not has_cycleway(tags, "left") else "left"
         far = "left" if anchor == "right" else "right"
         sign = 1 if anchor == "left" else -1
         inner = self.kerbside(tags, stations, anchor, edges[anchor])
         lane_edge = inner - sum(widths)
+        self.lane_edges[self._way["id"]] = (inner, lane_edge) if anchor == "left" else (-lane_edge, -inner)
         outer = lane_edge
         if (tags.get(f"parking:{far}") or tags.get("parking:both")) == "lane":
             outer = lane_edge - self.eased(tags, f"parking:{far}:width", "parking", stations)
             self.out["parking_edge_lines"].append(stations.line(sign * lane_edge))
             self.stalls(tags, far, stations, sign * lane_edge, sign * outer)
         self.kerbside(tags, stations, far, edges[far], parking=False,
-                      shoulder_from=None if _has_cycleway(tags, far) else -outer)
+                      shoulder_from=None if has_cycleway(tags, far) else -outer)
         near = widths[:backward] if anchor == "left" else widths[backward:]
         leftmost = sign * inner + (sum(widths) if anchor == "right" else 0)
         lefts = [leftmost - sum(widths[:j]) for j in range(lanes + 1)]   # each lane's left edge
@@ -537,7 +543,7 @@ class _Reader:
         # a driveway (MUTCD 3B.11(09)), dotted as through a conflict area (3B.11(10)), so a solid
         # line is never mistaken for a parking lane's or a hatched area's edge.
         for side, edge_at in ((anchor, inner), (far, inner - sum(widths))):
-            marked = (tags.get(f"shoulder:{side}:markings") == "hatched" or _has_cycleway(tags, side)
+            marked = (tags.get(f"shoulder:{side}:markings") == "hatched" or has_cycleway(tags, side)
                       or (tags.get(f"parking:{side}") or tags.get("parking:both")) == "lane")
             if not marked and (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes":
                 self.out["lane_narrowing_edge_lines"] += _dotted(LineString(stations.line(sign * edge_at)))
@@ -570,10 +576,11 @@ class _Reader:
                     for part in _polygons(band.intersection(own) if own is not None else band):
                         self.hatched.append((part, tags.get("name")))
             edge = inner
-        parked = parking and (tags.get(f"parking:{side}") or tags.get("parking:both")) == "lane"
-        if parked and _has_cycleway(tags, side) and parking_at_the_kerb(tags, side):
+        section = kerb_section(tags, side)
+        parked = parking and section.parking_m > 0
+        if parked and section.cycleway_m and not section.cycleway_at_kerb:
             edge, parked = self.parking_lane(tags, side, stations, edge), False
-        if _has_cycleway(tags, side):
+        if section.cycleway_m:
             inner = edge - self.eased(tags, f"cycleway:{side}:width", "cycleway", stations)
             green = tags.get(f"cycleway:{side}:surface:colour") == "green"
             crossed = tags.get(f"cycleway:{side}:crossing:markings") == "dashes"
@@ -599,7 +606,7 @@ class _Reader:
             buffer = width_m(tags.get(f"cycleway:{side}:buffer"))
             if buffer:
                 buffer = self.along(buffer, lambda t: width_m(t.get(f"cycleway:{side}:buffer")), stations)
-                if any(v == "flex_post" for k, v in tags.items()
+                if any(v in ("flex_post", "bollard") for k, v in tags.items()
                        if k.startswith(f"cycleway:{side}:separation")):
                     posts = LineString(stations.line(sign * (edge - buffer / 2)))
                     self.out["props"] += [
@@ -726,10 +733,12 @@ class _Reader:
     def stalls(self, tags: dict, side: str, stations: Stations, one: np.ndarray,
                other: np.ndarray) -> None:
         """A marked parking lane on this way's piece, kept for stall_all: its two edges and its
-        `parking:<side>:capacity`."""
+        `parking:<side>:capacity`. Any lane a car may stand in, marked or not, is kept in `parked`."""
         markings = tags.get(f"parking:{side}:markings") or tags.get("parking:both:markings")
         restriction = tags.get(f"parking:{side}:restriction") or tags.get("parking:both:restriction")
         nodes = self._way.get("node_ids") or []
+        if restriction not in PROHIBITIONS:
+            self.parked += [Polygon(ring) for ring in stations.strips(one, other)]
         if markings != "yes" or restriction in PROHIBITIONS or len(nodes) < 2:
             return
         # Which way traffic passes this kerb, along the way: a diagonal stall leans with it.
@@ -1161,19 +1170,16 @@ class _Reader:
         both = tags.get("overtaking")
         forward = tags.get("overtaking:forward", both)
         backward = tags.get("overtaking:backward", both)
-        if forward is None and backward is None:
-            self.stats["centre line: overtaking not tagged (pieces)"] += 1
-            self.out["bike_lane_contraflow_lines"] += _lines(line)
-            return
-        self.stats["centre line: overtaking from OSM (pieces)"] += 1
-        if forward == backward == "yes":
+        untagged = forward is None and backward is None
+        self.stats["centre line: overtaking " + ("not tagged" if untagged else "from OSM") + " (pieces)"] += 1
+        if "no" not in (forward, backward):
             self.out["bike_lane_contraflow_lines"] += _dashes(line)
             return
         # Forward traffic keeps right of the way, so its stripe is the one on the right.
         for allowed, offset in ((forward, -CENTRE_PAIR_OFFSET_M), (backward, CENTRE_PAIR_OFFSET_M)):
             stripe = line.offset_curve(offset)
-            self.out["bike_lane_contraflow_lines"] += (_dashes(stripe) if allowed == "yes"
-                                                      else _lines(stripe))
+            self.out["bike_lane_contraflow_lines"] += (_lines(stripe) if allowed == "no"
+                                                      else _dashes(stripe))
 
     def stop_line(self, way: dict) -> None:
         line = self.frame.line(way["coords_wgs84"])
@@ -1566,11 +1572,8 @@ def carriageway_width_m(tags: dict) -> tuple[float, str]:
     # `width` includes lane parking and never street-side parking (wiki Street_parking).
     section = lanes * DEFAULT_WIDTHS_M["lane"]
     for side in ("left", "right"):
-        if (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes":
-            section += width_m(tags.get(f"shoulder:{side}:width")) or DEFAULT_WIDTHS_M["shoulder"]
-        if _has_cycleway(tags, side):
-            section += (width_m(tags.get(f"cycleway:{side}:width")) or DEFAULT_WIDTHS_M["cycleway"]) \
-                + (width_m(tags.get(f"cycleway:{side}:buffer")) or 0.0)
+        kerb = kerb_section(tags, side)
+        section += kerb.shoulder_m + kerb.cycleway_m
         position = _parking(tags, side)
         if position in ("lane", "half_on_kerb"):
             depth = parking_depth_m(tags, side) or DEFAULT_WIDTHS_M["parking"]
@@ -1698,6 +1701,30 @@ def parking_at_the_kerb(tags: dict, side: str) -> bool:
     return (tags.get(f"cycleway:{side}") or tags.get("cycleway:both") or tags.get("cycleway")) == "lane"
 
 
+class KerbSection(NamedTuple):
+    """What a way's tags lay on one side, in metres: the cycle lane and its buffer, the parking
+    lane, the shoulder - each 0.0 where the side has none - and whether the cycle lane is the
+    one at the kerb, with the parking inside it."""
+    cycleway_m: float
+    parking_m: float
+    shoulder_m: float
+    cycleway_at_kerb: bool
+
+
+def kerb_section(tags: dict, side: str) -> KerbSection:
+    """`side`'s section as `_Reader.kerbside` lays it, from the same lookups and defaults:
+    DEFAULT_WIDTHS_M where a width is not tagged, parking_depth_m for the parking lane, and the
+    cycle lane at the kerb unless parking_at_the_kerb puts the parking there."""
+    cycle = has_cycleway(tags, side)
+    return KerbSection(
+        (width_m(tags.get(f"cycleway:{side}:width")) or DEFAULT_WIDTHS_M["cycleway"])
+        + (width_m(tags.get(f"cycleway:{side}:buffer")) or 0.0) if cycle else 0.0,
+        parking_depth_m(tags, side) or DEFAULT_WIDTHS_M["parking"] if _parking(tags, side) == "lane" else 0.0,
+        width_m(tags.get(f"shoulder:{side}:width")) or DEFAULT_WIDTHS_M["shoulder"]
+        if (tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) == "yes" else 0.0,
+        cycle and not parking_at_the_kerb(tags, side))
+
+
 def _footpath(tags: dict) -> bool:
     """A paved way on foot that is not a sidewalk or a crossing (those have their own layers):
     `highway=footway` / `pedestrian` unless its `surface` is unpaved, and `highway=path` - a
@@ -1726,7 +1753,8 @@ def _paving(ring: list, tags: dict) -> dict:
     return {"coords": ring} if material == "asphalt" else {"coords": ring, "surface": material}
 
 
-def _has_cycleway(tags: dict, side: str) -> bool:
+def has_cycleway(tags: dict, side: str) -> bool:
+    """Whether `side` has a cycle lane or track (`cycleway:<side>`, `:both` or the bare key)."""
     return (tags.get(f"cycleway:{side}") or tags.get("cycleway:both")
             or tags.get("cycleway")) in ("lane", "track")
 

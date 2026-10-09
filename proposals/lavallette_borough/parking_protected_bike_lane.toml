@@ -1,0 +1,22 @@
+# A proposal: the tags it puts on the ways it chooses. src/osm_osc.py:retagged lays each `[[retag]]`'s
+# tags on every street or crossing way whose tags match its `ways`, over existing conditions, and
+# changes nothing else; it writes parking_protected_bike_lane.osc beside this file.
+note = "Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey."
+kerb_extensions = true      # every corner a painted curb extension, edged in flexible posts, until it is built
+
+# The bike lane changes places with the parked cars: a `track` is laid at the kerb, with the parking
+# outside it (src/osm_world.py:parking_at_the_kerb). Its buffer, to the parked cars' side as the lane
+# is ridden, carries a post every bollard.spacing.
+[[retag]]
+ways = { name = ["Grand Central Avenue"], "cycleway:right" = ["lane"] }   # every value a way's tag may have
+
+[retag.tags]
+"cycleway:right" = "track"
+"cycleway:right:surface:colour" = "green"
+"cycleway:right:buffer" = "{parking_protected.buffer}"
+"cycleway:right:separation:left" = "bollard"
+
+# Every crosswalk marked in transverse lines, continental instead (wiki Key:crossing:markings).
+[[retag]]
+ways = { "crossing:markings" = ["lines"] }
+tags = { "crossing:markings" = "zebra" }

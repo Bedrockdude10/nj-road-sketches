@@ -421,6 +421,9 @@ OSM_LAYERS = ("buildings", "crossings", "sidewalks", "driveways", "parking_aisle
               "stop_lines", "road_markings", "road_areas", "highway_areas", "bollards",
               "municipalities")
 
+#: Layers that are paint on the carriageway, not something built.
+PAINT_LAYERS = ("stop_lines", "road_markings")
+
 _AREA_LAYERS_MEMO: dict[str, tuple] = {}
 
 
