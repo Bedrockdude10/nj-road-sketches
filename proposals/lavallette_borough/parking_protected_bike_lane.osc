@@ -114913,9 +114913,9 @@
       <nd ref="-43034" />
       <nd ref="-43035" />
       <nd ref="-43026" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43050">
@@ -114930,9 +114930,9 @@
       <nd ref="-43048" />
       <nd ref="-43049" />
       <nd ref="-43040" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43070">
@@ -114948,9 +114948,9 @@
       <nd ref="-43068" />
       <nd ref="-43069" />
       <nd ref="-43059" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43089">
@@ -114968,9 +114968,9 @@
       <nd ref="-43087" />
       <nd ref="-43088" />
       <nd ref="-43076" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43107">
@@ -114985,9 +114985,9 @@
       <nd ref="-43105" />
       <nd ref="-43106" />
       <nd ref="-43097" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43118">
@@ -115000,9 +115000,9 @@
       <nd ref="-43116" />
       <nd ref="-43117" />
       <nd ref="-43110" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43132">
@@ -115017,9 +115017,9 @@
       <nd ref="-43130" />
       <nd ref="-43131" />
       <nd ref="-43122" />
-      <tag k="colour" v="white" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="stripes" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
     <way id="-43140">
@@ -115029,21 +115029,21 @@
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43141">
       <nd ref="-43136" />
       <nd ref="-43137" />
       <tag k="footway" v="traffic_island" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43142">
       <nd ref="-43138" />
       <nd ref="-43139" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43143">
       <nd ref="-43139" />
@@ -115052,7 +115052,7 @@
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43148">
       <nd ref="9429162292" />
@@ -115061,21 +115061,21 @@
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43149">
       <nd ref="-43144" />
       <nd ref="-43145" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43150">
       <nd ref="-43146" />
       <nd ref="-43147" />
       <tag k="footway" v="traffic_island" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43151">
       <nd ref="-43147" />
@@ -115084,7 +115084,7 @@
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43156">
       <nd ref="14168509514" />
@@ -115092,7 +115092,7 @@
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43157">
       <nd ref="-43152" />
@@ -115100,14 +115100,14 @@
       <nd ref="-43153" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43158">
       <nd ref="-43154" />
       <nd ref="-43155" />
       <tag k="footway" v="traffic_island" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43159">
       <nd ref="-43155" />
@@ -115116,7 +115116,7 @@
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43162">
       <nd ref="-43160" />
@@ -115124,7 +115124,7 @@
       <nd ref="-43161" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="-43163">
       <nd ref="-43161" />
@@ -115132,7 +115132,7 @@
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
   </create>
   <modify>
@@ -116864,7 +116864,7 @@
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1022371579">
       <nd ref="-43145" />
@@ -116874,7 +116874,7 @@
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1098862406">
       <nd ref="105137639" />
@@ -116964,7 +116964,7 @@
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1557764182">
       <nd ref="14168509517" />
@@ -116974,7 +116974,7 @@
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, edged in flexible posts, so R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1557764183">
       <nd ref="14168509516" />

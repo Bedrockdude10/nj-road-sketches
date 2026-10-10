@@ -1224,7 +1224,13 @@ class _Reader:
         so a way split for any other reason does not split its hatching, and struck at 45 degrees
         to the street it is on: from points HATCH_SPACING_M * sqrt(2) apart along that street's
         centreline, its ways joined end to end, so the strokes run on unbroken across the splits
-        and turn with the street. A restriction area on no street takes its own long axis."""
+        and turn with the street. A restriction area on no street takes its own long axis. A
+        solid area (`pattern=solid`) is painted over the hatching it lies on, so none is struck
+        there - a curb extension laid across a hatched shoulder."""
+        solid = unary_union([part for parts in self.filled.values() for part in parts])
+        if not solid.is_empty:
+            self.hatched = [(piece, name) for part, name in self.hatched
+                            for piece in _polygons(part.difference(solid))]
         merged = _seamless([part for part, _name in self.hatched])
         for area in _polygons(merged):
             self.out["lane_narrowing_edge_lines"] += _lines(area.exterior)
