@@ -765,7 +765,7 @@ absent = "half the way's width either side of it"
 [tag.road_marking]
 wiki = "Key:road_marking"
 convention = "wiki"
-means = "stop_line: a bar along the mapped way; restriction: a hatched area in its colour"
+means = "stop_line: a bar along the mapped way; restriction: a hatched area in its colour, or with pattern=solid filled in its colour (tan: a painted curb extension) and edged white"
 figures = ["stop_line.width", "hatch.angle", "hatch.spacing", "hatch.stroke_width", "hatch.stroke_width_wide"]
 
 [tag.median]

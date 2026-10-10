@@ -483,6 +483,9 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     bike_surface_mat = make_material("BikeLaneSurface", (0.13, 0.45, 0.28), roughness=0.85)
     centerline_mat = make_material("Centerline", (0.85, 0.7, 0.15), roughness=0.4)
     blue_paint_mat = make_material("BluePaint", (0.1, 0.25, 0.7), roughness=0.4)
+    # A painted curb extension's fill (`colour=tan`): the beige NYC DOT paints them, rough like the
+    # asphalt it is on.
+    tan_paint_mat = make_material("TanPaint", (0.72, 0.6, 0.42), roughness=0.85)
     building_mats = [make_material(f"Building{i}", c, roughness=0.75) for i, c in enumerate(BUILDING_PALETTE)]
     pole_mat = make_material("Pole", SIGN_POST_GRAY, roughness=0.5)
     trunk_mat = make_material("TreeTrunk", (0.32, 0.22, 0.15), roughness=0.9)
@@ -766,6 +769,13 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     for ring in data.get("turn_box_surface_polygons", []):
         box.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z - MARKING_CLEARANCE_M)
     box.build()
+
+    # A PAINTED CURB EXTENSION's tan fill (src/osm_world.py:FILL_COLOURS), under its white outline
+    # and posts at the same layer as the green surfaces.
+    tan = MeshBatch("tan_fill", tan_paint_mat)
+    for ring in data.get("tan_fill_polygons", []):
+        tan.add_prism(ring, MARKING_CLEARANCE_M / 2, z_base=marking_z - MARKING_CLEARANCE_M)
+    tan.build()
 
     # THE SHARROW (MUTCD 9E.09), downstream of where the facility ends. White paint on the road's
     # own asphalt, at the stripe layer - and note what is NOT here: 9E.09(05) forbids green

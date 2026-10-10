@@ -72,7 +72,7 @@ over every street way in the world, every rule a vector operation over all of th
     its approach lane only, from the new centre line to that lane's edge.
   - with `kerb_extensions` (the daylighting proposal), on a base whose crosswalks carry
     `crossing:kerb_extension=both`: each extension a `road_marking=restriction` +
-    `pattern=stripes` area across the parking lane less EXTENSION_INSET_FT, from the crosswalk's
+    `pattern=solid` + `colour=tan` area (NYC's painted curb extension) across the parking lane less EXTENSION_INSET_FT, from the crosswalk's
     near side out its NO_STANDING_WITH_EXTENSION_FT zone, with `barrier=bollard` +
     `bollard=flexible` nodes down its middle, and the crosswalk split at its edges, the piece over
     it a footway (_extensions), so the crosswalk crosses only the street between. The kerbs are re-signed: a
@@ -142,7 +142,8 @@ TURN_BOX_NOTE = ("Proposal: a two-stage turn box where the two-way track ends (M
                  "rider can cross to or from the far side of the street (src/osm_osc.py). "
                  "`cycleway=two_stage_box` is a value from the 2020 draft Proposal:Two-stage bicycle "
                  "turn, not an approved tag.")
-EXTENSION_NOTE = ("Proposal: a painted curb extension at the corner, edged in flexible posts, so "
+EXTENSION_NOTE = ("Proposal: a painted curb extension at the corner, tan as NYC paints them and edged "
+                  "in flexible posts, so the crosswalk is shorter and "
                   f"R.S. 39:4-138(e) sets the no-standing zone at {NO_STANDING_WITH_EXTENSION_FT:g} ft, "
                   f"not {NO_STANDING_FT:g} (src/osm_osc.py). Whether paint and posts count as a curb "
                   "extension 'constructed' is for the Borough to confirm.")
@@ -1993,9 +1994,9 @@ def _extensions(layers: dict, network: _Network, kerbs: _Kerbs, applied: pd.Data
                 crossings: dict[int, dict], frame: LocalFrame, ids: Iterator[int], nodes: list[NewNode],
                 created: list[WayChange], report: Counter[str]) -> None:
     """Each painted curb extension, as OSM maps one. On each kerb a leg's crosswalk node gives an
-    extension (`crossing:kerb_extension`, _extension_sides): a hatched area, a closed way
-    `road_marking=restriction` + `pattern=stripes` + `colour=white` (wiki Key:road_marking, its
-    no-parking marking), from the kerb - the mapped one where there is one (_Kerbs.hits), less
+    extension (`crossing:kerb_extension`, _extension_sides): a painted area, a closed way
+    `road_marking=restriction` + `pattern=solid` + `colour=tan` (wiki Key:road_marking, its
+    no-parking marking, filled in the tan NYC paints a curb extension), from the kerb - the mapped one where there is one (_Kerbs.hits), less
     any cycle lane at it - in to the spare less EXTENSION_INSET_FT from the section's travel
     lane, and along it from the crosswalk's near side (_band_span) - as long as the
     crosswalk is wide - to the statute's NO_STANDING_WITH_EXTENSION_FT past where the crosswalk
@@ -2044,8 +2045,8 @@ def _extensions(layers: dict, network: _Network, kerbs: _Kerbs, applied: pd.Data
             for piece in shapely.get_parts(rest):
                 if isinstance(piece, Polygon) and not piece.buffer(-MIN_HATCH_FT * FT_TO_M / 2).is_empty:
                     created.append(_closed_way(list(piece.exterior.coords),
-                                               {"road_marking": "restriction", "pattern": "stripes",
-                                                "colour": "white", "note": EXTENSION_NOTE}, ids, frame, nodes))
+                                               {"road_marking": "restriction", "pattern": "solid",
+                                                "colour": "tan", "note": EXTENSION_NOTE}, ids, frame, nodes))
                     _posts(line, piece, frame, ids, nodes)
             report["curb extensions on a mapped hatched area, painted where it is not (kerbs)" if on
                    else "curb extensions painted, with flexible posts (kerbs)"] += 1

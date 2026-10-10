@@ -42,7 +42,8 @@ Everything drawn is something OSM maps, placed where OSM puts it:
                 carriageway only: two edge lines for `lines`/`dashes`/`dots`, bars for `zebra`,
                 both for `ladder`; any other kind - `yes` among them - drawn as zebra and counted
   markings      `road_marking=stop_line` bars (STOP_BAR_M wide), `road_marking=restriction`
-                hatched areas
+                hatched areas - filled solid in their `colour`, edged white, where
+                `pattern=solid` (a painted curb extension)
   lane arrows   `turn:lanes[:forward|:backward]`: in each lane, MUTCD's arrow for its `left`,
                 `through` and `right` - two to a run of ways with the same indications up to a
                 junction, one at each end, held clear of what crosses the lane (_Reader.markings_all)
@@ -145,6 +146,9 @@ SEARCH_STEP_M = si("numerical.search_step")
 # channels (`<colour>_hatch_edge_lines`, `<colour>_hatch_stroke_lines`) - the channel is what
 # decides a stripe's colour in 3D (scripts/blender/blender_scene.py:PAINT_COLOUR_CHANNELS).
 HATCH_COLOURS = ("yellow", "blue")
+# The `colour`s a `road_marking=restriction` + `pattern=solid` area is filled in, each its own
+# `<colour>_fill_polygons` channel: tan is NYC's painted curb extension (`colour=tan`).
+FILL_COLOURS = ("tan",)
 # The line channels that are paint, kept on the street surface (_Reader.on_carriageway).
 PAINT_LINES = ("bike_lane_edge_lines", "parking_edge_lines", "bike_lane_contraflow_lines",
                "lane_narrowing_edge_lines", "lane_narrowing_hatch_lines", "lane_narrowing_hatch_wide_lines",
@@ -321,6 +325,8 @@ class _Reader:
         self.hatched: list[tuple[Polygon, str | None]] = []   # (area, street): hatch_all draws them
         # restriction areas hatched in a colour other than white, by HATCH_COLOURS colour
         self.hatched_coloured: dict[str, list[Polygon]] = defaultdict(list)
+        # restriction areas filled solid (`pattern=solid`), by FILL_COLOURS colour
+        self.filled: dict[str, list[Polygon]] = defaultdict(list)
         self.parking: list[dict] = []        # marked parking lanes, piece by piece: stall_all draws them
         self.parked: list[Polygon] = []      # every strip a car may stand in, marked or not
         # each way's travel lanes' outer edges, signed offsets (left positive) at its Stations
@@ -354,6 +360,7 @@ class _Reader:
             "parking_edge_lines": [], "lane_lines": [], "bike_lane_contraflow_lines": [], "lane_narrowing_edge_lines": [],
             "lane_narrowing_hatch_lines": [], "lane_narrowing_hatch_wide_lines": [],
             **{f"{c}_hatch_{k}_lines": [] for c in HATCH_COLOURS for k in ("edge", "stroke")},
+            **{f"{c}_fill_polygons": [] for c in FILL_COLOURS},
             "tree_points": [], "props": [],
             "cycle_crossing_surface_polygons": [], "cycle_crossing_edge_lines": [],
             "cycle_crossing_divider_lines": [], "parking_stall_divider_lines": [],
@@ -757,7 +764,8 @@ class _Reader:
         it holds, stall_pitch_m), laid in equal stalls along it, a stall line at each end of each. Stalls are laid only where no painted area is - a `road_marking=restriction`
         of any colour, or a hatched shoulder - so the hatching's edge is where they start."""
         painted = unary_union([part for part, _name in self.hatched]
-                              + [part for parts in self.hatched_coloured.values() for part in parts])
+                              + [part for parts in self.hatched_coloured.values() for part in parts]
+                              + [part for parts in self.filled.values() for part in parts])
         painted = painted.buffer(-SEARCH_STEP_M)     # a divider on its edge touches; it does not overlap
         shapely.prepare(painted)
         after = {(p["street"], p["side"], p["first"]): p for p in self.parking}
@@ -1158,7 +1166,8 @@ class _Reader:
                                         "parking_stall_divider_lines")
                              else clipped)
         for key in ("bike_lane_surface_polygons", "cycle_crossing_surface_polygons",
-                    "turn_box_surface_polygons", "bike_lane_symbol_polygons", "lane_arrow_polygons"):
+                    "turn_box_surface_polygons", "bike_lane_symbol_polygons", "lane_arrow_polygons",
+                    *(f"{c}_fill_polygons" for c in FILL_COLOURS)):
             self.out[key] = [ring for poly in self.out[key] if len(poly) >= 4
                              for ring in _rings(Polygon(poly).buffer(0).intersection(road))]
         self.out["turn_box_edge_lines"] = [part for line in self.out["turn_box_edge_lines"]
@@ -1190,7 +1199,8 @@ class _Reader:
 
     def restriction(self, way: dict) -> None:
         """A `road_marking=restriction` area, hatched in its `colour` - one of HATCH_COLOURS, else
-        white, the colour of a marking with none tagged."""
+        white, the colour of a marking with none tagged - or with `pattern=solid`, filled in it,
+        one of FILL_COLOURS."""
         line = self.frame.line(way["coords_wgs84"])
         if line is not None and len(line.coords) >= 4:
             # On a street - its centre inside that street's own surface - it is struck along that
@@ -1200,7 +1210,9 @@ class _Reader:
                          and any(a.contains(polygons[0].representative_point()) for a in own)), None)
             parts = [(part, name) for part in polygons]
             colour = way["tags"].get("colour")
-            if colour in HATCH_COLOURS:
+            if way["tags"].get("pattern") == "solid" and colour in FILL_COLOURS:
+                self.filled[colour] += [part for part, _name in parts]
+            elif colour in HATCH_COLOURS:
                 self.hatched_coloured[colour] += [part for part, _name in parts]
             else:
                 if colour not in (None, "white"):
@@ -1234,6 +1246,11 @@ class _Reader:
             for line in getattr(linemerge(self.street_lines[name]), "geoms", None) or [
                     linemerge(self.street_lines[name])]:
                 self.strokes(line, area, self.street_width[name], wide=self.street_mph[name] >= HATCH_WIDE_MPH)
+        # Solid restriction areas: filled in their colour's channel, outlined in white.
+        for colour, parts in self.filled.items():
+            for piece in _polygons(_seamless(parts)):
+                self.out[f"{colour}_fill_polygons"] += _rings(piece)
+                self.out["lane_narrowing_edge_lines"] += _lines(piece.exterior)
         # Coloured restriction areas: their own outline and strokes, in their colour's channels.
         for colour, parts in self.hatched_coloured.items():
             for piece in _polygons(_seamless(parts)):
