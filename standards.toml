@@ -65,10 +65,6 @@ title = "St. Louis City Code 17.24; Seattle Municipal Code - parking near a driv
 title = "NACTO Urban Bikeway Design Guide, cycle tracks - parking-protected: a buffer between the bike lane and the parking lane"
 url = "https://nacto.org/publication/urban-bikeway-design-guide/"
 
-[source.nyc_sdm]
-title = "NYC DOT Street Design Manual, 2.2.2 Curb Extension"
-url = "https://www.nycstreetdesign.info/geometry/curb-extension"
-
 [source.osm_wiki]
 title = "OpenStreetMap wiki"
 url = "https://wiki.openstreetmap.org/"
@@ -427,7 +423,7 @@ unit = "ft"
 status = "verified"
 source = "njdot_rdm_6"
 at = "Danny, 2026-10-09: no proposal leaves a corner a single-unit truck or bus cannot turn"
-note = "6.4.3: an effective radius of 30 ft lets an occasional truck or bus turn without much encroachment; the effective radius is measured from the edge of the travel lane where a parking lane, bike lane or shoulder lies outside it, and 6.4.3 warns that a kerb protruding into the turning path endangers pedestrians standing at it. A curb extension is built only where it leaves the corner at least this (src/turning.py)"
+note = "6.4.3: an effective radius of 30 ft lets an occasional truck or bus turn without much encroachment; the effective radius is measured from the edge of the travel lane where a parking lane, bike lane or shoulder lies outside it, and 6.4.3 warns that a kerb protruding into the turning path endangers pedestrians standing at it. A curb extension's shorter no-standing zone is kept only where it leaves the corner at least this (src/turning.py)"
 
 [figure.stall.width]
 value = 9.0
@@ -494,13 +490,6 @@ status = "as_cited"
 source = "rs_39_4_138"
 at = "(e)"
 note = "...and within this where a curb extension is built (`crossing:kerb_extension`)"
-
-[figure.curb_extension.inset]
-value = 2.0
-unit = "ft"
-status = "as_cited"
-source = "nyc_sdm"
-note = "a curb extension is typically this much narrower than the parking lane it is in, and at least as long as the crosswalk is wide"
 
 # --- speed and tapers ---------------------------------------------------------------------------
 
@@ -782,8 +771,8 @@ figures = ["default_width.crossing", "crosswalk.line_width", "crosswalk.bar_widt
 [tag."crossing:kerb_extension"]
 wiki = "Key:crossing:kerb_extension"
 convention = "wiki"
-means = "a curb extension on that kerb: the no-standing zone shortens; a proposal paints it and the crosswalk stops at it"
-figures = ["no_standing.with_extension", "curb_extension.inset"]
+means = "a curb extension on that kerb: the no-standing zone shortens, unless cars standing that close would narrow a corner's turn; a proposal paints it across the kerb's spare to the travel lane, as long as the crosswalk is wide, and the crosswalk stops at it"
+figures = ["no_standing.with_extension"]
 
 [tag.kerb]
 wiki = "Key:kerb"

@@ -40369,8 +40369,8 @@
     <node id="-41482" lat="39.9733666" lon="-74.0686286" />
     <node id="-41483" lat="39.9733324" lon="-74.0682853" />
     <node id="-41484" lat="39.9733304" lon="-74.0682646" />
-    <node id="-41485" lat="39.9733293" lon="-74.0682525" />
-    <node id="-41486" lat="39.9733241" lon="-74.0681967" />
+    <node id="-41485" lat="39.9733293" lon="-74.0682526" />
+    <node id="-41486" lat="39.9733291" lon="-74.0682500" />
     <node id="-41506" lat="39.9752038" lon="-74.0713442" />
     <node id="-41507" lat="39.9751882" lon="-74.0712028" />
     <node id="-41508" lat="39.9751842" lon="-74.0711633" />
@@ -40917,12 +40917,12 @@
     <node id="-42640" lat="39.9732308" lon="-74.0684802" />
     <node id="-42641" lat="39.9732576" lon="-74.0684760" />
     <node id="-42642" lat="39.9734414" lon="-74.0684418" />
-    <node id="-42643" lat="39.9734686" lon="-74.0684375" />
-    <node id="-42644" lat="39.9735056" lon="-74.0684317" />
+    <node id="-42643" lat="39.9734648" lon="-74.0684381" />
+    <node id="-42644" lat="39.9734686" lon="-74.0684375" />
     <node id="-42645" lat="39.9740247" lon="-74.0683503" />
     <node id="-42646" lat="39.9740928" lon="-74.0683396" />
     <node id="-42647" lat="39.9741529" lon="-74.0683295" />
-    <node id="-42648" lat="39.9742205" lon="-74.0683137" />
+    <node id="-42648" lat="39.9742205" lon="-74.0683136" />
     <node id="-42649" lat="39.9747986" lon="-74.0682108" />
     <node id="-42650" lat="39.9748667" lon="-74.0681998" />
     <node id="-42651" lat="39.9749266" lon="-74.0681895" />
@@ -41055,39 +41055,39 @@
     <node id="-42982" lat="39.9735203" lon="-74.0700814" />
     <node id="-42983" lat="39.9735288" lon="-74.0700801" />
     <node id="-42984" lat="39.9735119" lon="-74.0700826" />
-    <node id="-42985" lat="39.9733535" lon="-74.0684975" />
-    <node id="-42986" lat="39.9733520" lon="-74.0684831" />
+    <node id="-42985" lat="39.9733535" lon="-74.0684974" />
+    <node id="-42986" lat="39.9733520" lon="-74.0684830" />
     <node id="-42987" lat="39.9733507" lon="-74.0684732" />
-    <node id="-42988" lat="39.9741263" lon="-74.0683679" />
-    <node id="-42989" lat="39.9741250" lon="-74.0683556" />
-    <node id="-42990" lat="39.9741242" lon="-74.0683472" />
-    <node id="-42991" lat="39.9743635" lon="-74.0682806" />
-    <node id="-42992" lat="39.9743462" lon="-74.0682836" />
-    <node id="-42993" lat="39.9743290" lon="-74.0682869" />
-    <node id="-42994" lat="39.9743118" lon="-74.0682906" />
-    <node id="-42995" lat="39.9742946" lon="-74.0682946" />
-    <node id="-42996" lat="39.9742775" lon="-74.0682988" />
-    <node id="-42997" lat="39.9742603" lon="-74.0683032" />
-    <node id="-42998" lat="39.9742432" lon="-74.0683077" />
-    <node id="-42999" lat="39.9742261" lon="-74.0683122" />
-    <node id="-43000" lat="39.9742090" lon="-74.0683166" />
-    <node id="-43001" lat="39.9741918" lon="-74.0683209" />
-    <node id="-43002" lat="39.9741747" lon="-74.0683249" />
-    <node id="-43003" lat="39.9741575" lon="-74.0683286" />
+    <node id="-42988" lat="39.9741262" lon="-74.0683677" />
+    <node id="-42989" lat="39.9741250" lon="-74.0683555" />
+    <node id="-42990" lat="39.9741242" lon="-74.0683471" />
+    <node id="-42991" lat="39.9743626" lon="-74.0682807" />
+    <node id="-42992" lat="39.9743454" lon="-74.0682837" />
+    <node id="-42993" lat="39.9743283" lon="-74.0682870" />
+    <node id="-42994" lat="39.9743111" lon="-74.0682907" />
+    <node id="-42995" lat="39.9742940" lon="-74.0682947" />
+    <node id="-42996" lat="39.9742769" lon="-74.0682989" />
+    <node id="-42997" lat="39.9742598" lon="-74.0683033" />
+    <node id="-42998" lat="39.9742428" lon="-74.0683078" />
+    <node id="-42999" lat="39.9742257" lon="-74.0683122" />
+    <node id="-43000" lat="39.9742087" lon="-74.0683166" />
+    <node id="-43001" lat="39.9741916" lon="-74.0683209" />
+    <node id="-43002" lat="39.9741745" lon="-74.0683249" />
+    <node id="-43003" lat="39.9741573" lon="-74.0683286" />
     <node id="-43004" lat="39.9741402" lon="-74.0683319" />
     <node id="-43005" lat="39.9741210" lon="-74.0683149" />
-    <node id="-43006" lat="39.9741186" lon="-74.0682911" />
-    <node id="-43007" lat="39.9741166" lon="-74.0682711" />
-    <node id="-43008" lat="39.9741225" lon="-74.0683350" />
-    <node id="-43009" lat="39.9733821" lon="-74.0684511" />
-    <node id="-43010" lat="39.9733705" lon="-74.0684535" />
-    <node id="-43011" lat="39.9733608" lon="-74.0684564" />
+    <node id="-43006" lat="39.9741186" lon="-74.0682912" />
+    <node id="-43007" lat="39.9741166" lon="-74.0682713" />
+    <node id="-43008" lat="39.9741225" lon="-74.0683349" />
+    <node id="-43009" lat="39.9733825" lon="-74.0684509" />
+    <node id="-43010" lat="39.9733708" lon="-74.0684534" />
+    <node id="-43011" lat="39.9733609" lon="-74.0684563" />
     <node id="-43012" lat="39.9733468" lon="-74.0684355" />
     <node id="-43013" lat="39.9733439" lon="-74.0684077" />
-    <node id="-43014" lat="39.9733416" lon="-74.0683843" />
-    <node id="-43015" lat="39.9733339" lon="-74.0684619" />
-    <node id="-43016" lat="39.9733168" lon="-74.0684659" />
-    <node id="-43017" lat="39.9733015" lon="-74.0684690" />
+    <node id="-43014" lat="39.9733416" lon="-74.0683844" />
+    <node id="-43015" lat="39.9733337" lon="-74.0684619" />
+    <node id="-43016" lat="39.9733165" lon="-74.0684660" />
+    <node id="-43017" lat="39.9733011" lon="-74.0684691" />
     <node id="-43018" lat="39.9726041" lon="-74.0685796" />
     <node id="-43019" lat="39.9726014" lon="-74.0685529" />
     <node id="-43020" lat="39.9725984" lon="-74.0685210" />
@@ -41097,215 +41097,352 @@
     <node id="-43024" lat="39.9734239" lon="-74.0683495" />
     <node id="-43025" lat="39.9735299" lon="-74.0683319" />
     <node id="-43026" lat="39.9755671" lon="-74.0679789" />
-    <node id="-43027" lat="39.9755531" lon="-74.0679813" />
-    <node id="-43028" lat="39.9755391" lon="-74.0679838" />
-    <node id="-43029" lat="39.9755254" lon="-74.0679863" />
-    <node id="-43030" lat="39.9755119" lon="-74.0679888" />
-    <node id="-43031" lat="39.9755184" lon="-74.0680492" />
-    <node id="-43032" lat="39.9755320" lon="-74.0680467" />
-    <node id="-43033" lat="39.9755456" lon="-74.0680442" />
-    <node id="-43034" lat="39.9755593" lon="-74.0680417" />
-    <node id="-43035" lat="39.9755731" lon="-74.0680394" />
-    <node id="-43037" lat="39.9755609" lon="-74.0680108">
+    <node id="-43027" lat="39.9755533" lon="-74.0679812" />
+    <node id="-43028" lat="39.9755394" lon="-74.0679838" />
+    <node id="-43029" lat="39.9755467" lon="-74.0680512" />
+    <node id="-43030" lat="39.9755602" lon="-74.0680488" />
+    <node id="-43031" lat="39.9755738" lon="-74.0680465" />
+    <node id="-43033" lat="39.9755636" lon="-74.0680139">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43038" lat="39.9755426" lon="-74.0680140">
+    <node id="-43034" lat="39.9755499" lon="-74.0680163">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43039" lat="39.9755243" lon="-74.0680173">
+    <node id="-43035" lat="39.9755875" lon="-74.0681921" />
+    <node id="-43036" lat="39.9755808" lon="-74.0681245" />
+    <node id="-43037" lat="39.9755670" lon="-74.0681268" />
+    <node id="-43038" lat="39.9755531" lon="-74.0681293" />
+    <node id="-43039" lat="39.9755603" lon="-74.0681968" />
+    <node id="-43040" lat="39.9755740" lon="-74.0681943" />
+    <node id="-43042" lat="39.9755773" lon="-74.0681594">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43040" lat="39.9755875" lon="-74.0681921" />
-    <node id="-43041" lat="39.9755815" lon="-74.0681316" />
-    <node id="-43042" lat="39.9755683" lon="-74.0681338" />
-    <node id="-43043" lat="39.9755551" lon="-74.0681362" />
-    <node id="-43044" lat="39.9755418" lon="-74.0681386" />
-    <node id="-43045" lat="39.9755283" lon="-74.0681411" />
-    <node id="-43046" lat="39.9755349" lon="-74.0682015" />
-    <node id="-43047" lat="39.9755483" lon="-74.0681990" />
-    <node id="-43048" lat="39.9755616" lon="-74.0681966" />
-    <node id="-43049" lat="39.9755746" lon="-74.0681942" />
-    <node id="-43051" lat="39.9755757" lon="-74.0681633">
+    <node id="-43043" lat="39.9755636" lon="-74.0681618">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43052" lat="39.9755580" lon="-74.0681664">
+    <node id="-43044" lat="39.9733069" lon="-74.0686019" />
+    <node id="-43045" lat="39.9733092" lon="-74.0686192" />
+    <node id="-43046" lat="39.9733108" lon="-74.0686367" />
+    <node id="-43047" lat="39.9733365" lon="-74.0686325" />
+    <node id="-43048" lat="39.9733348" lon="-74.0686150" />
+    <node id="-43049" lat="39.9733330" lon="-74.0685975" />
+    <node id="-43051" lat="39.9733209" lon="-74.0686084">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43053" lat="39.9755404" lon="-74.0681697">
+    <node id="-43052" lat="39.9733226" lon="-74.0686259">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43054" lat="39.9732442" lon="-74.0684027">
+    <node id="-43053" lat="39.9734192" lon="-74.0685838" />
+    <node id="-43054" lat="39.9733931" lon="-74.0685882" />
+    <node id="-43055" lat="39.9733949" lon="-74.0686061" />
+    <node id="-43056" lat="39.9733966" lon="-74.0686239" />
+    <node id="-43057" lat="39.9734223" lon="-74.0686197" />
+    <node id="-43058" lat="39.9734207" lon="-74.0686018" />
+    <node id="-43060" lat="39.9734070" lon="-74.0685949">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43055" lat="39.9732242" lon="-74.0684059">
+    <node id="-43061" lat="39.9734088" lon="-74.0686128">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43056" lat="39.9732042" lon="-74.0684091">
+    <node id="-43062" lat="39.9733911" lon="-74.0683121" />
+    <node id="-43063" lat="39.9733892" lon="-74.0682945" />
+    <node id="-43064" lat="39.9733875" lon="-74.0682769" />
+    <node id="-43065" lat="39.9733624" lon="-74.0682807" />
+    <node id="-43066" lat="39.9733640" lon="-74.0682984" />
+    <node id="-43067" lat="39.9733657" lon="-74.0683161" />
+    <node id="-43069" lat="39.9733776" lon="-74.0683053">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43057" lat="39.9731843" lon="-74.0684122">
+    <node id="-43070" lat="39.9733760" lon="-74.0682876">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43058" lat="39.9731643" lon="-74.0684154">
+    <node id="-43071" lat="39.9732807" lon="-74.0683315" />
+    <node id="-43072" lat="39.9733058" lon="-74.0683275" />
+    <node id="-43073" lat="39.9733042" lon="-74.0683098" />
+    <node id="-43074" lat="39.9733026" lon="-74.0682921" />
+    <node id="-43075" lat="39.9732781" lon="-74.0682958" />
+    <node id="-43076" lat="39.9732794" lon="-74.0683137" />
+    <node id="-43078" lat="39.9732925" lon="-74.0683207">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43059" lat="39.9732621" lon="-74.0683773" />
-    <node id="-43060" lat="39.9732519" lon="-74.0683779" />
-    <node id="-43061" lat="39.9732563" lon="-74.0684240" />
-    <node id="-43062" lat="39.9732280" lon="-74.0684291" />
-    <node id="-43063" lat="39.9732256" lon="-74.0684295" />
-    <node id="-43064" lat="39.9732270" lon="-74.0684442" />
-    <node id="-43065" lat="39.9732407" lon="-74.0684421" />
-    <node id="-43066" lat="39.9732542" lon="-74.0684400" />
-    <node id="-43067" lat="39.9732678" lon="-74.0684378" />
-    <node id="-43068" lat="39.9732813" lon="-74.0684356" />
-    <node id="-43069" lat="39.9732756" lon="-74.0683751" />
-    <node id="-43071" lat="39.9732725" lon="-74.0684059">
+    <node id="-43079" lat="39.9732908" lon="-74.0683030">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43072" lat="39.9732607" lon="-74.0684077">
+    <node id="-43080" lat="39.9732442" lon="-74.0684027">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43073" lat="39.9732619" lon="-74.0685759">
+    <node id="-43081" lat="39.9732242" lon="-74.0684059">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43074" lat="39.9732423" lon="-74.0685790">
+    <node id="-43082" lat="39.9732042" lon="-74.0684091">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43075" lat="39.9732227" lon="-74.0685821">
+    <node id="-43083" lat="39.9731843" lon="-74.0684122">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43076" lat="39.9732917" lon="-74.0685359" />
-    <node id="-43077" lat="39.9732781" lon="-74.0685381" />
-    <node id="-43078" lat="39.9732646" lon="-74.0685402" />
-    <node id="-43079" lat="39.9732510" lon="-74.0685424" />
-    <node id="-43080" lat="39.9732374" lon="-74.0685445" />
-    <node id="-43081" lat="39.9732385" lon="-74.0685560" />
-    <node id="-43082" lat="39.9732691" lon="-74.0685513" />
-    <node id="-43083" lat="39.9732718" lon="-74.0685756" />
-    <node id="-43084" lat="39.9732742" lon="-74.0685975" />
-    <node id="-43085" lat="39.9732632" lon="-74.0685993" />
-    <node id="-43086" lat="39.9732700" lon="-74.0685982" />
-    <node id="-43087" lat="39.9732838" lon="-74.0685986" />
-    <node id="-43088" lat="39.9732974" lon="-74.0685965" />
-    <node id="-43090" lat="39.9732887" lon="-74.0685671">
+    <node id="-43084" lat="39.9731643" lon="-74.0684154">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43091" lat="39.9732770" lon="-74.0685690">
+    <node id="-43085" lat="39.9732622" lon="-74.0683772" />
+    <node id="-43086" lat="39.9732519" lon="-74.0683779" />
+    <node id="-43087" lat="39.9732563" lon="-74.0684240" />
+    <node id="-43088" lat="39.9732529" lon="-74.0684246" />
+    <node id="-43089" lat="39.9732554" lon="-74.0684511" />
+    <node id="-43090" lat="39.9732689" lon="-74.0684490" />
+    <node id="-43091" lat="39.9732824" lon="-74.0684469" />
+    <node id="-43092" lat="39.9732757" lon="-74.0683751" />
+    <node id="-43094" lat="39.9732731" lon="-74.0684115">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43092" lat="39.9734536" lon="-74.0685433">
+    <node id="-43095" lat="39.9732613" lon="-74.0684133">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43093" lat="39.9734711" lon="-74.0685405">
+    <node id="-43096" lat="39.9732619" lon="-74.0685759">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43094" lat="39.9734886" lon="-74.0685378">
+    <node id="-43097" lat="39.9732423" lon="-74.0685790">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43095" lat="39.9735061" lon="-74.0685350">
+    <node id="-43098" lat="39.9732227" lon="-74.0685821">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43096" lat="39.9735236" lon="-74.0685323">
+    <node id="-43099" lat="39.9732906" lon="-74.0685247" />
+    <node id="-43100" lat="39.9732770" lon="-74.0685269" />
+    <node id="-43101" lat="39.9732633" lon="-74.0685290" />
+    <node id="-43102" lat="39.9732655" lon="-74.0685519" />
+    <node id="-43103" lat="39.9732691" lon="-74.0685513" />
+    <node id="-43104" lat="39.9732718" lon="-74.0685756" />
+    <node id="-43105" lat="39.9732742" lon="-74.0685975" />
+    <node id="-43106" lat="39.9732699" lon="-74.0685982" />
+    <node id="-43107" lat="39.9732837" lon="-74.0685986" />
+    <node id="-43108" lat="39.9732974" lon="-74.0685965" />
+    <node id="-43110" lat="39.9732881" lon="-74.0685615">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43097" lat="39.9734385" lon="-74.0685684" />
-    <node id="-43098" lat="39.9734474" lon="-74.0685676" />
-    <node id="-43099" lat="39.9734423" lon="-74.0685214" />
-    <node id="-43100" lat="39.9734760" lon="-74.0685162" />
-    <node id="-43101" lat="39.9734746" lon="-74.0685013" />
-    <node id="-43102" lat="39.9734608" lon="-74.0685035" />
-    <node id="-43103" lat="39.9734468" lon="-74.0685057" />
-    <node id="-43104" lat="39.9734329" lon="-74.0685078" />
-    <node id="-43105" lat="39.9734191" lon="-74.0685100" />
-    <node id="-43106" lat="39.9734248" lon="-74.0685705" />
-    <node id="-43108" lat="39.9734275" lon="-74.0685397">
+    <node id="-43111" lat="39.9732764" lon="-74.0685634">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43109" lat="39.9734385" lon="-74.0685380">
+    <node id="-43112" lat="39.9734536" lon="-74.0685433">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43110" lat="39.9673168" lon="-74.0693380" />
-    <node id="-43111" lat="39.9672963" lon="-74.0693407" />
-    <node id="-43112" lat="39.9672787" lon="-74.0693436" />
-    <node id="-43113" lat="39.9672611" lon="-74.0693466" />
-    <node id="-43114" lat="39.9672671" lon="-74.0694071" />
-    <node id="-43115" lat="39.9672847" lon="-74.0694041" />
-    <node id="-43116" lat="39.9673023" lon="-74.0694012" />
-    <node id="-43117" lat="39.9673210" lon="-74.0693987" />
-    <node id="-43119" lat="39.9673097" lon="-74.0693695">
+    <node id="-43113" lat="39.9734711" lon="-74.0685405">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43120" lat="39.9672915" lon="-74.0693722">
+    <node id="-43114" lat="39.9734886" lon="-74.0685378">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43121" lat="39.9672732" lon="-74.0693753">
+    <node id="-43115" lat="39.9735061" lon="-74.0685350">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43122" lat="39.9673372" lon="-74.0695512" />
-    <node id="-43123" lat="39.9673331" lon="-74.0694904" />
-    <node id="-43124" lat="39.9673186" lon="-74.0694921" />
-    <node id="-43125" lat="39.9673056" lon="-74.0694942" />
-    <node id="-43126" lat="39.9672909" lon="-74.0694966" />
-    <node id="-43127" lat="39.9672762" lon="-74.0694991" />
-    <node id="-43128" lat="39.9672822" lon="-74.0695595" />
-    <node id="-43129" lat="39.9672969" lon="-74.0695571" />
-    <node id="-43130" lat="39.9673116" lon="-74.0695546" />
-    <node id="-43131" lat="39.9673230" lon="-74.0695528" />
-    <node id="-43133" lat="39.9673258" lon="-74.0695219">
+    <node id="-43116" lat="39.9735236" lon="-74.0685323">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43134" lat="39.9673072" lon="-74.0695246">
+    <node id="-43117" lat="39.9734386" lon="-74.0685684" />
+    <node id="-43118" lat="39.9734474" lon="-74.0685675" />
+    <node id="-43119" lat="39.9734423" lon="-74.0685214" />
+    <node id="-43120" lat="39.9734486" lon="-74.0685204" />
+    <node id="-43121" lat="39.9734463" lon="-74.0684950" />
+    <node id="-43122" lat="39.9734321" lon="-74.0684972" />
+    <node id="-43123" lat="39.9734179" lon="-74.0684994" />
+    <node id="-43124" lat="39.9734244" lon="-74.0685706" />
+    <node id="-43126" lat="39.9734267" lon="-74.0685344">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43135" lat="39.9672885" lon="-74.0695277">
+    <node id="-43127" lat="39.9734379" lon="-74.0685326">
       <tag k="barrier" v="bollard" />
       <tag k="bollard" v="flexible" />
     </node>
-    <node id="-43136" lat="39.9755537" lon="-74.0679811" />
-    <node id="-43137" lat="39.9755594" lon="-74.0680420" />
-    <node id="-43138" lat="39.9755681" lon="-74.0681337" />
-    <node id="-43139" lat="39.9755738" lon="-74.0681946" />
-    <node id="-43144" lat="39.9673239" lon="-74.0695536" />
-    <node id="-43145" lat="39.9673173" lon="-74.0694920" />
-    <node id="-43146" lat="39.9673076" lon="-74.0694011" />
-    <node id="-43147" lat="39.9673010" lon="-74.0693397" />
-    <node id="-43152" lat="39.9732840" lon="-74.0685987" />
-    <node id="-43153" lat="39.9732779" lon="-74.0685380" />
-    <node id="-43154" lat="39.9732679" lon="-74.0684378" />
-    <node id="-43155" lat="39.9732620" lon="-74.0683760" />
-    <node id="-43160" lat="39.9734325" lon="-74.0685074" />
-    <node id="-43161" lat="39.9734397" lon="-74.0685695" />
+    <node id="-43128" lat="39.9734348" lon="-74.0683706">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43129" lat="39.9734523" lon="-74.0683678">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43130" lat="39.9734698" lon="-74.0683651">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43131" lat="39.9734873" lon="-74.0683623">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43132" lat="39.9735048" lon="-74.0683596">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43133" lat="39.9734085" lon="-74.0684217" />
+    <node id="-43134" lat="39.9734223" lon="-74.0684195" />
+    <node id="-43135" lat="39.9734361" lon="-74.0684174" />
+    <node id="-43136" lat="39.9734340" lon="-74.0683943" />
+    <node id="-43137" lat="39.9734283" lon="-74.0683953" />
+    <node id="-43138" lat="39.9734239" lon="-74.0683495" />
+    <node id="-43139" lat="39.9734297" lon="-74.0683485" />
+    <node id="-43140" lat="39.9734158" lon="-74.0683484" />
+    <node id="-43141" lat="39.9734020" lon="-74.0683505" />
+    <node id="-43143" lat="39.9734107" lon="-74.0683852">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43144" lat="39.9734216" lon="-74.0683836">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43145" lat="39.9673171" lon="-74.0693379" />
+    <node id="-43146" lat="39.9673021" lon="-74.0693397" />
+    <node id="-43147" lat="39.9672876" lon="-74.0693421" />
+    <node id="-43148" lat="39.9672943" lon="-74.0694097" />
+    <node id="-43149" lat="39.9673079" lon="-74.0694074" />
+    <node id="-43150" lat="39.9673217" lon="-74.0694058" />
+    <node id="-43152" lat="39.9673123" lon="-74.0693728">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43153" lat="39.9672981" lon="-74.0693747">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43154" lat="39.9673372" lon="-74.0695512" />
+    <node id="-43155" lat="39.9673326" lon="-74.0694833" />
+    <node id="-43156" lat="39.9673174" lon="-74.0694851" />
+    <node id="-43157" lat="39.9673032" lon="-74.0694874" />
+    <node id="-43158" lat="39.9673099" lon="-74.0695549" />
+    <node id="-43159" lat="39.9673225" lon="-74.0695529" />
+    <node id="-43161" lat="39.9673278" lon="-74.0695181">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43162" lat="39.9673136" lon="-74.0695199">
+      <tag k="barrier" v="bollard" />
+      <tag k="bollard" v="flexible" />
+    </node>
+    <node id="-43163" lat="39.9755537" lon="-74.0679811" />
+    <node id="-43164" lat="39.9755601" lon="-74.0680491" />
+    <node id="-43165" lat="39.9755674" lon="-74.0681266" />
+    <node id="-43166" lat="39.9755738" lon="-74.0681946" />
+    <node id="-43171" lat="39.9673239" lon="-74.0695536" />
+    <node id="-43172" lat="39.9673165" lon="-74.0694850" />
+    <node id="-43173" lat="39.9673083" lon="-74.0694082" />
+    <node id="-43174" lat="39.9673010" lon="-74.0693397" />
+    <node id="-43179" lat="39.9734208" lon="-74.0686017" />
+    <node id="-43180" lat="39.9733946" lon="-74.0686057" />
+    <node id="-43181" lat="39.9733348" lon="-74.0686150" />
+    <node id="-43182" lat="39.9733086" lon="-74.0686193" />
+    <node id="-43187" lat="39.9732840" lon="-74.0685987" />
+    <node id="-43188" lat="39.9732767" lon="-74.0685268" />
+    <node id="-43189" lat="39.9732690" lon="-74.0684490" />
+    <node id="-43190" lat="39.9732620" lon="-74.0683760" />
+    <node id="-43195" lat="39.9734154" lon="-74.0683482" />
+    <node id="-43196" lat="39.9734227" lon="-74.0684197" />
+    <node id="-43197" lat="39.9734313" lon="-74.0684968" />
+    <node id="-43198" lat="39.9734397" lon="-74.0685695" />
+    <node id="-43203" lat="39.9732789" lon="-74.0683141" />
+    <node id="-43204" lat="39.9733044" lon="-74.0683095" />
+    <node id="-43205" lat="39.9733638" lon="-74.0682987" />
+    <node id="-43206" lat="39.9733893" lon="-74.0682941" />
+    <node id="-43211" lat="39.9718198" lon="-74.0685647" />
+    <node id="-43212" lat="39.9718799" lon="-74.0685554" />
+    <node id="-43214" lat="39.9834202" lon="-74.0660560" />
+    <node id="-43215" lat="39.9834785" lon="-74.0660410" />
+    <node id="-43217" lat="39.9829261" lon="-74.0661800" />
+    <node id="-43218" lat="39.9829861" lon="-74.0661648" />
+    <node id="-43220" lat="39.9827177" lon="-74.0662352" />
+    <node id="-43221" lat="39.9827788" lon="-74.0662183" />
+    <node id="-43223" lat="39.9824999" lon="-74.0662988" />
+    <node id="-43224" lat="39.9825595" lon="-74.0662812" />
+    <node id="-43226" lat="39.9821724" lon="-74.0663972" />
+    <node id="-43227" lat="39.9822169" lon="-74.0663838" />
+    <node id="-43229" lat="39.9818740" lon="-74.0664881" />
+    <node id="-43230" lat="39.9819338" lon="-74.0664695" />
+    <node id="-43232" lat="39.9816366" lon="-74.0665626" />
+    <node id="-43233" lat="39.9816789" lon="-74.0665497" />
+    <node id="-43235" lat="39.9814367" lon="-74.0666194" />
+    <node id="-43236" lat="39.9814820" lon="-74.0666063" />
+    <node id="-43238" lat="39.9812262" lon="-74.0666823" />
+    <node id="-43239" lat="39.9812854" lon="-74.0666647" />
+    <node id="-43241" lat="39.9810395" lon="-74.0667382" />
+    <node id="-43242" lat="39.9810988" lon="-74.0667204" />
+    <node id="-43244" lat="39.9808740" lon="-74.0667875" />
+    <node id="-43245" lat="39.9809332" lon="-74.0667699" />
+    <node id="-43247" lat="39.9806604" lon="-74.0668514" />
+    <node id="-43248" lat="39.9807195" lon="-74.0668338" />
+    <node id="-43250" lat="39.9804897" lon="-74.0669024" />
+    <node id="-43251" lat="39.9805490" lon="-74.0668847" />
+    <node id="-43253" lat="39.9800183" lon="-74.0670432" />
+    <node id="-43254" lat="39.9800775" lon="-74.0670256" />
+    <node id="-43256" lat="39.9792865" lon="-74.0672613" />
+    <node id="-43257" lat="39.9793445" lon="-74.0672447" />
+    <node id="-43259" lat="39.9785358" lon="-74.0674682" />
+    <node id="-43260" lat="39.9785912" lon="-74.0674545" />
+    <node id="-43262" lat="39.9777874" lon="-74.0675999" />
+    <node id="-43263" lat="39.9778494" lon="-74.0675909" />
+    <node id="-43265" lat="39.9770704" lon="-74.0677149" />
+    <node id="-43266" lat="39.9771304" lon="-74.0677053" />
+    <node id="-43268" lat="39.9763202" lon="-74.0678360" />
+    <node id="-43269" lat="39.9763803" lon="-74.0678263" />
+    <node id="-43271" lat="39.9755365" lon="-74.0679645" />
+    <node id="-43272" lat="39.9756572" lon="-74.0679443" />
+    <node id="-43274" lat="39.9748561" lon="-74.0680879" />
+    <node id="-43275" lat="39.9749145" lon="-74.0680779" />
+    <node id="-43277" lat="39.9741102" lon="-74.0682232" />
+    <node id="-43278" lat="39.9741399" lon="-74.0682181" />
+    <node id="-43280" lat="39.9732472" lon="-74.0683640" />
+    <node id="-43281" lat="39.9734310" lon="-74.0683298" />
+    <node id="-43283" lat="39.9725663" lon="-74.0684715" />
+    <node id="-43284" lat="39.9726234" lon="-74.0684629" />
+    <node id="-43286" lat="39.9710833" lon="-74.0686786" />
+    <node id="-43287" lat="39.9711448" lon="-74.0686685" />
+    <node id="-43289" lat="39.9703598" lon="-74.0688062" />
+    <node id="-43290" lat="39.9704181" lon="-74.0687966" />
+    <node id="-43292" lat="39.9695655" lon="-74.0689285" />
+    <node id="-43293" lat="39.9696269" lon="-74.0689185" />
+    <node id="-43295" lat="39.9688060" lon="-74.0690608" />
+    <node id="-43296" lat="39.9688650" lon="-74.0690510" />
+    <node id="-43298" lat="39.9680747" lon="-74.0691795" />
+    <node id="-43299" lat="39.9681363" lon="-74.0691688" />
+    <node id="-43301" lat="39.9672861" lon="-74.0693226" />
+    <node id="-43302" lat="39.9673991" lon="-74.0693068" />
+    <node id="-43304" lat="39.9666077" lon="-74.0694360" />
+    <node id="-43305" lat="39.9666674" lon="-74.0694261" />
+    <node id="-43307" lat="39.9658720" lon="-74.0695561" />
+    <node id="-43308" lat="39.9659318" lon="-74.0695465" />
+    <node id="-43310" lat="39.9650728" lon="-74.0696853" />
+    <node id="-43311" lat="39.9651333" lon="-74.0696753" />
+    <node id="-43313" lat="39.9643209" lon="-74.0698128" />
+    <node id="-43314" lat="39.9643808" lon="-74.0698026" />
+    <node id="-43316" lat="39.9635792" lon="-74.0699384" />
+    <node id="-43317" lat="39.9636391" lon="-74.0699282" />
     <way id="-49">
       <nd ref="-1" />
       <nd ref="-2" />
@@ -94042,12 +94179,16 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'4&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'4&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94063,8 +94204,12 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'4&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'4&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94080,10 +94225,14 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'4&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'4&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94099,12 +94248,16 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'4&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'4&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94121,12 +94274,16 @@
       <tag k="lane_markings" v="no" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'4&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'4&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94203,12 +94360,16 @@
       <tag k="lane_markings" v="no" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'2&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94224,12 +94385,16 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'2&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94245,10 +94410,14 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
       <tag k="parking:left:restriction" v="no_standing" />
       <tag k="parking:left:restriction:reason" v="junction" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'2&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -94264,8 +94433,12 @@
       <tag k="highway" v="residential" />
       <tag k="lit" v="yes" />
       <tag k="name" v="Reese Avenue" />
-      <tag k="note" v="Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload." />
+      <tag k="note" v="Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="overtaking" v="no" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="9'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="9'2&quot;" />
       <tag k="sidewalk" v="both" />
       <tag k="surface" v="asphalt" />
       <tag k="tiger:cfcc" v="A41" />
@@ -109805,6 +109978,10 @@
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'2&quot;" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -109843,6 +110020,10 @@
       <tag k="parking:both:markings" v="yes" />
       <tag k="parking:both:orientation" v="diagonal" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'2&quot;" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -109886,6 +110067,10 @@
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'2&quot;" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -109932,6 +110117,10 @@
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'2&quot;" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'2&quot;" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -110063,6 +110252,10 @@
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -110095,17 +110288,21 @@
       <tag k="lit" v="yes" />
       <tag k="maxspeed" v="35 mph" />
       <tag k="name" v="Grand Central Avenue" />
-      <tag k="note" v="No standing within 25 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="note" v="No standing within 10 ft of the nearest crosswalk or the intersecting street's side line, R.S. 39:4-138(e) where a curb extension is built - the law, not a sign.; Existing conditions: `width` measured between the mapped kerbs, and where the centre line is not painted, from the mapped crossings, stop lines and kerbs at each junction, by src/osm_osc.py. Check on the ground or imagery before upload.; Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
       <tag k="oneway" v="yes" />
       <tag k="parking:left" v="lane" />
       <tag k="parking:left:markings" v="yes" />
       <tag k="parking:left:orientation" v="diagonal" />
+      <tag k="parking:left:restriction" v="no_standing" />
+      <tag k="parking:left:restriction:reason" v="junction" />
       <tag k="parking:right" v="lane" />
       <tag k="parking:right:markings" v="yes" />
       <tag k="parking:right:orientation" v="diagonal" />
-      <tag k="parking:right:restriction" v="no_standing" />
-      <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -110144,6 +110341,10 @@
       <tag k="parking:both:markings" v="yes" />
       <tag k="parking:both:orientation" v="diagonal" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -110189,6 +110390,10 @@
       <tag k="parking:right:restriction" v="no_standing" />
       <tag k="parking:right:restriction:reason" v="junction" />
       <tag k="ref" v="NJ 35" />
+      <tag k="shoulder:left" v="yes" />
+      <tag k="shoulder:left:width" v="1'" />
+      <tag k="shoulder:right" v="yes" />
+      <tag k="shoulder:right:width" v="1'" />
       <tag k="source:hgv:state_network" v="NJDOT http://www.state.nj.us/transportation/about/rules/pdf/chapter32truckaccess.pdf" />
       <tag k="surface" v="asphalt" />
       <tag k="survey:date" v="2018-09-24" />
@@ -114901,81 +115106,100 @@
       <tag k="tiger:zip_left" v="08735" />
       <tag k="tiger:zip_right" v="08735" />
     </way>
-    <way id="-43036">
+    <way id="-43032">
       <nd ref="-43026" />
       <nd ref="-43027" />
       <nd ref="-43028" />
       <nd ref="-43029" />
       <nd ref="-43030" />
       <nd ref="-43031" />
-      <nd ref="-43032" />
-      <nd ref="-43033" />
-      <nd ref="-43034" />
-      <nd ref="-43035" />
       <nd ref="-43026" />
       <tag k="colour" v="tan" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
       <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
-    <way id="-43050">
+    <way id="-43041">
+      <nd ref="-43035" />
+      <nd ref="-43036" />
+      <nd ref="-43037" />
+      <nd ref="-43038" />
+      <nd ref="-43039" />
       <nd ref="-43040" />
-      <nd ref="-43041" />
-      <nd ref="-43042" />
-      <nd ref="-43043" />
+      <nd ref="-43035" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
+      <tag k="road_marking" v="restriction" />
+    </way>
+    <way id="-43050">
       <nd ref="-43044" />
       <nd ref="-43045" />
       <nd ref="-43046" />
       <nd ref="-43047" />
       <nd ref="-43048" />
       <nd ref="-43049" />
-      <nd ref="-43040" />
+      <nd ref="-43044" />
       <tag k="colour" v="tan" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
       <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
-    <way id="-43070">
-      <nd ref="-43059" />
-      <nd ref="-43060" />
-      <nd ref="-43061" />
+    <way id="-43059">
+      <nd ref="-43053" />
+      <nd ref="-43054" />
+      <nd ref="-43055" />
+      <nd ref="-43056" />
+      <nd ref="-43057" />
+      <nd ref="-43058" />
+      <nd ref="-43053" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
+      <tag k="road_marking" v="restriction" />
+    </way>
+    <way id="-43068">
       <nd ref="-43062" />
       <nd ref="-43063" />
       <nd ref="-43064" />
       <nd ref="-43065" />
       <nd ref="-43066" />
       <nd ref="-43067" />
-      <nd ref="-43068" />
-      <nd ref="-43069" />
-      <nd ref="-43059" />
+      <nd ref="-43062" />
       <tag k="colour" v="tan" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
       <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
-    <way id="-43089">
+    <way id="-43077">
+      <nd ref="-43071" />
+      <nd ref="-43072" />
+      <nd ref="-43073" />
+      <nd ref="-43074" />
+      <nd ref="-43075" />
       <nd ref="-43076" />
-      <nd ref="-43077" />
-      <nd ref="-43078" />
-      <nd ref="-43079" />
-      <nd ref="-43080" />
-      <nd ref="-43081" />
-      <nd ref="-43082" />
-      <nd ref="-43083" />
-      <nd ref="-43084" />
+      <nd ref="-43071" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
+      <tag k="road_marking" v="restriction" />
+    </way>
+    <way id="-43093">
       <nd ref="-43085" />
       <nd ref="-43086" />
       <nd ref="-43087" />
       <nd ref="-43088" />
-      <nd ref="-43076" />
+      <nd ref="-43089" />
+      <nd ref="-43090" />
+      <nd ref="-43091" />
+      <nd ref="-43092" />
+      <nd ref="-43085" />
       <tag k="colour" v="tan" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
       <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
-    <way id="-43107">
-      <nd ref="-43097" />
-      <nd ref="-43098" />
+    <way id="-43109">
       <nd ref="-43099" />
       <nd ref="-43100" />
       <nd ref="-43101" />
@@ -114984,69 +115208,96 @@
       <nd ref="-43104" />
       <nd ref="-43105" />
       <nd ref="-43106" />
-      <nd ref="-43097" />
+      <nd ref="-43107" />
+      <nd ref="-43108" />
+      <nd ref="-43099" />
       <tag k="colour" v="tan" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
       <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
-    <way id="-43118">
-      <nd ref="-43110" />
-      <nd ref="-43111" />
-      <nd ref="-43112" />
-      <nd ref="-43113" />
-      <nd ref="-43114" />
-      <nd ref="-43115" />
-      <nd ref="-43116" />
+    <way id="-43125">
       <nd ref="-43117" />
-      <nd ref="-43110" />
-      <tag k="colour" v="tan" />
-      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
-      <tag k="pattern" v="solid" />
-      <tag k="road_marking" v="restriction" />
-    </way>
-    <way id="-43132">
+      <nd ref="-43118" />
+      <nd ref="-43119" />
+      <nd ref="-43120" />
+      <nd ref="-43121" />
       <nd ref="-43122" />
       <nd ref="-43123" />
       <nd ref="-43124" />
-      <nd ref="-43125" />
-      <nd ref="-43126" />
-      <nd ref="-43127" />
-      <nd ref="-43128" />
-      <nd ref="-43129" />
-      <nd ref="-43130" />
-      <nd ref="-43131" />
-      <nd ref="-43122" />
+      <nd ref="-43117" />
       <tag k="colour" v="tan" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
       <tag k="pattern" v="solid" />
       <tag k="road_marking" v="restriction" />
     </way>
-    <way id="-43140">
-      <nd ref="9377084626" />
+    <way id="-43142">
+      <nd ref="-43133" />
+      <nd ref="-43134" />
+      <nd ref="-43135" />
       <nd ref="-43136" />
+      <nd ref="-43137" />
+      <nd ref="-43138" />
+      <nd ref="-43139" />
+      <nd ref="-43140" />
+      <nd ref="-43141" />
+      <nd ref="-43133" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
+      <tag k="road_marking" v="restriction" />
+    </way>
+    <way id="-43151">
+      <nd ref="-43145" />
+      <nd ref="-43146" />
+      <nd ref="-43147" />
+      <nd ref="-43148" />
+      <nd ref="-43149" />
+      <nd ref="-43150" />
+      <nd ref="-43145" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
+      <tag k="road_marking" v="restriction" />
+    </way>
+    <way id="-43160">
+      <nd ref="-43154" />
+      <nd ref="-43155" />
+      <nd ref="-43156" />
+      <nd ref="-43157" />
+      <nd ref="-43158" />
+      <nd ref="-43159" />
+      <nd ref="-43154" />
+      <tag k="colour" v="tan" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+      <tag k="pattern" v="solid" />
+      <tag k="road_marking" v="restriction" />
+    </way>
+    <way id="-43167">
+      <nd ref="9377084626" />
+      <nd ref="-43163" />
       <tag k="crossing" v="marked" />
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43141">
-      <nd ref="-43136" />
-      <nd ref="-43137" />
+    <way id="-43168">
+      <nd ref="-43163" />
+      <nd ref="-43164" />
       <tag k="footway" v="traffic_island" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43142">
-      <nd ref="-43138" />
-      <nd ref="-43139" />
+    <way id="-43169">
+      <nd ref="-43165" />
+      <nd ref="-43166" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43143">
-      <nd ref="-43139" />
+    <way id="-43170">
+      <nd ref="-43166" />
       <nd ref="9377084627" />
       <tag k="crossing" v="marked" />
       <tag k="crossing:markings" v="yes" />
@@ -115054,31 +115305,31 @@
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43148">
+    <way id="-43175">
       <nd ref="9429162292" />
-      <nd ref="-43144" />
+      <nd ref="-43171" />
       <tag k="crossing" v="marked" />
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43149">
-      <nd ref="-43144" />
-      <nd ref="-43145" />
+    <way id="-43176">
+      <nd ref="-43171" />
+      <nd ref="-43172" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43150">
-      <nd ref="-43146" />
-      <nd ref="-43147" />
+    <way id="-43177">
+      <nd ref="-43173" />
+      <nd ref="-43174" />
       <tag k="footway" v="traffic_island" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43151">
-      <nd ref="-43147" />
+    <way id="-43178">
+      <nd ref="-43174" />
       <nd ref="9429162293" />
       <tag k="crossing" v="marked" />
       <tag k="crossing:markings" v="yes" />
@@ -115086,31 +115337,63 @@
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43156">
-      <nd ref="14168509514" />
-      <nd ref="-43152" />
+    <way id="-43183">
+      <nd ref="14168509512" />
+      <nd ref="-43179" />
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43157">
-      <nd ref="-43152" />
-      <nd ref="14168509520" />
-      <nd ref="-43153" />
+    <way id="-43184">
+      <nd ref="-43179" />
+      <nd ref="14168509547" />
+      <nd ref="-43180" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43158">
-      <nd ref="-43154" />
-      <nd ref="-43155" />
+    <way id="-43185">
+      <nd ref="-43181" />
+      <nd ref="14168509523" />
+      <nd ref="-43182" />
+      <tag k="footway" v="sidewalk" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43186">
+      <nd ref="-43182" />
+      <nd ref="14168509514" />
+      <tag k="crossing:markings" v="zebra" />
+      <tag k="footway" v="crossing" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43191">
+      <nd ref="14168509514" />
+      <nd ref="-43187" />
+      <tag k="crossing:markings" v="zebra" />
+      <tag k="footway" v="crossing" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43192">
+      <nd ref="-43187" />
+      <nd ref="14168509520" />
+      <nd ref="-43188" />
+      <tag k="footway" v="sidewalk" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43193">
+      <nd ref="-43189" />
+      <nd ref="-43190" />
       <tag k="footway" v="traffic_island" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43159">
-      <nd ref="-43155" />
+    <way id="-43194">
+      <nd ref="-43190" />
       <nd ref="14168509529" />
       <nd ref="14168509516" />
       <tag k="crossing:markings" v="zebra" />
@@ -115118,21 +115401,465 @@
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43162">
-      <nd ref="-43160" />
+    <way id="-43199">
+      <nd ref="14168509517" />
+      <nd ref="14168509536" />
+      <nd ref="-43195" />
+      <tag k="crossing:markings" v="zebra" />
+      <tag k="footway" v="crossing" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43200">
+      <nd ref="-43195" />
+      <nd ref="-43196" />
+      <tag k="footway" v="traffic_island" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43201">
+      <nd ref="-43197" />
       <nd ref="14168509544" />
-      <nd ref="-43161" />
+      <nd ref="-43198" />
       <tag k="footway" v="sidewalk" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
-    <way id="-43163">
-      <nd ref="-43161" />
+    <way id="-43202">
+      <nd ref="-43198" />
       <nd ref="14168509512" />
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43207">
+      <nd ref="14168509516" />
+      <nd ref="-43203" />
+      <tag k="crossing:markings" v="zebra" />
+      <tag k="footway" v="crossing" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43208">
+      <nd ref="-43203" />
+      <nd ref="14168509531" />
+      <nd ref="-43204" />
+      <tag k="footway" v="sidewalk" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43209">
+      <nd ref="-43205" />
+      <nd ref="14168509534" />
+      <nd ref="-43206" />
+      <tag k="footway" v="sidewalk" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43210">
+      <nd ref="-43206" />
+      <nd ref="14168509517" />
+      <tag k="crossing:markings" v="zebra" />
+      <tag k="footway" v="crossing" />
+      <tag k="highway" v="footway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
+    </way>
+    <way id="-43213">
+      <nd ref="-43211" />
+      <nd ref="-43212" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43216">
+      <nd ref="-43214" />
+      <nd ref="-43215" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43219">
+      <nd ref="-43217" />
+      <nd ref="-43218" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43222">
+      <nd ref="-43220" />
+      <nd ref="-43221" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43225">
+      <nd ref="-43223" />
+      <nd ref="-43224" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43228">
+      <nd ref="-43226" />
+      <nd ref="-43227" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43231">
+      <nd ref="-43229" />
+      <nd ref="-43230" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43234">
+      <nd ref="-43232" />
+      <nd ref="-43233" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43237">
+      <nd ref="-43235" />
+      <nd ref="-43236" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43240">
+      <nd ref="-43238" />
+      <nd ref="-43239" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43243">
+      <nd ref="-43241" />
+      <nd ref="-43242" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43246">
+      <nd ref="-43244" />
+      <nd ref="-43245" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43249">
+      <nd ref="-43247" />
+      <nd ref="-43248" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43252">
+      <nd ref="-43250" />
+      <nd ref="-43251" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43255">
+      <nd ref="-43253" />
+      <nd ref="-43254" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43258">
+      <nd ref="-43256" />
+      <nd ref="-43257" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43261">
+      <nd ref="-43259" />
+      <nd ref="-43260" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43264">
+      <nd ref="-43262" />
+      <nd ref="-43263" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43267">
+      <nd ref="-43265" />
+      <nd ref="-43266" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43270">
+      <nd ref="-43268" />
+      <nd ref="-43269" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43273">
+      <nd ref="-43271" />
+      <nd ref="-43272" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43276">
+      <nd ref="-43274" />
+      <nd ref="-43275" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43279">
+      <nd ref="-43277" />
+      <nd ref="-43278" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43282">
+      <nd ref="-43280" />
+      <nd ref="-43281" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43285">
+      <nd ref="-43283" />
+      <nd ref="-43284" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43288">
+      <nd ref="-43286" />
+      <nd ref="-43287" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43291">
+      <nd ref="-43289" />
+      <nd ref="-43290" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43294">
+      <nd ref="-43292" />
+      <nd ref="-43293" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43297">
+      <nd ref="-43295" />
+      <nd ref="-43296" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43300">
+      <nd ref="-43298" />
+      <nd ref="-43299" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43303">
+      <nd ref="-43301" />
+      <nd ref="-43302" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43306">
+      <nd ref="-43304" />
+      <nd ref="-43305" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43309">
+      <nd ref="-43307" />
+      <nd ref="-43308" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43312">
+      <nd ref="-43310" />
+      <nd ref="-43311" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43315">
+      <nd ref="-43313" />
+      <nd ref="-43314" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
+    </way>
+    <way id="-43318">
+      <nd ref="-43316" />
+      <nd ref="-43317" />
+      <tag k="crossing:markings" v="dashes" />
+      <tag k="cycleway" v="crossing" />
+      <tag k="highway" v="cycleway" />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="oneway" v="yes" />
+      <tag k="surface:colour" v="green" />
+      <tag k="width" v="5'" />
     </way>
   </create>
   <modify>
@@ -115141,8 +115868,8 @@
       <tag k="crossing:kerb_extension" v="both" />
       <tag k="highway" v="crossing" />
     </node>
-    <node id="104958451" lat="39.9741229" lon="-74.0683349" />
-    <node id="104958453" lat="39.9733491" lon="-74.0684588">
+    <node id="104958451" lat="39.9741229" lon="-74.0683348" />
+    <node id="104958453" lat="39.9733492" lon="-74.0684588">
       <tag k="highway" v="traffic_signals" />
     </node>
     <node id="104958455" lat="39.9726040" lon="-74.0685796" />
@@ -115215,11 +115942,11 @@
       <tag k="highway" v="crossing" />
     </node>
     <node id="14168509518" lat="39.9734252" lon="-74.0684443">
-      <tag k="crossing:kerb_extension" v="left" />
+      <tag k="crossing:kerb_extension" v="both" />
       <tag k="highway" v="crossing" />
     </node>
     <node id="14168509519" lat="39.9733341" lon="-74.0683041">
-      <tag k="crossing:kerb_extension" v="right" />
+      <tag k="crossing:kerb_extension" v="both" />
       <tag k="highway" v="crossing" />
     </node>
     <node id="14170733284" lat="39.9732334" lon="-74.0684798" />
@@ -116857,9 +117584,9 @@
       <tag k="wikimedia_commons" v="File:2018-09-24 09 10 06 View north along New Jersey State Route 35 (Grand Central Avenue) just north of Philadelphia Avenue in Lavallette, Ocean County, New Jersey.jpg" />
     </way>
     <way id="1016646297">
-      <nd ref="-43137" />
+      <nd ref="-43164" />
       <nd ref="9377084628" />
-      <nd ref="-43138" />
+      <nd ref="-43165" />
       <tag k="crossing" v="marked" />
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
@@ -116867,9 +117594,9 @@
       <tag k="note" v="Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1022371579">
-      <nd ref="-43145" />
+      <nd ref="-43172" />
       <nd ref="9429162294" />
-      <nd ref="-43146" />
+      <nd ref="-43173" />
       <tag k="crossing" v="marked" />
       <tag k="crossing:markings" v="yes" />
       <tag k="footway" v="crossing" />
@@ -116947,45 +117674,40 @@
       <tag k="tiger:zip_right" v="08735" />
     </way>
     <way id="1557764180">
-      <nd ref="14168509512" />
-      <nd ref="14168509547" />
+      <nd ref="-43180" />
       <nd ref="14168509513" />
-      <nd ref="14168509523" />
-      <nd ref="14168509514" />
+      <nd ref="-43181" />
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1557764181">
-      <nd ref="-43153" />
+      <nd ref="-43188" />
       <nd ref="14168509515" />
-      <nd ref="-43154" />
+      <nd ref="-43189" />
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1557764182">
-      <nd ref="14168509517" />
-      <nd ref="14168509536" />
+      <nd ref="-43196" />
       <nd ref="14168509518" />
-      <nd ref="-43160" />
+      <nd ref="-43197" />
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
       <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1557764183">
-      <nd ref="14168509516" />
-      <nd ref="14168509531" />
+      <nd ref="-43204" />
       <nd ref="14168509519" />
-      <nd ref="14168509534" />
-      <nd ref="14168509517" />
+      <nd ref="-43205" />
       <tag k="crossing:markings" v="zebra" />
       <tag k="footway" v="crossing" />
       <tag k="highway" v="footway" />
-      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey." />
+      <tag k="note" v="Proposal: NJ 35 northbound bike lane, green, moved to the kerb, behind the parked cars, with a bollard-protected buffer; continental crosswalks; a painted curb extension at each parked corner (src/osm_osc.py:retagged). Not a survey.; Proposal: a painted curb extension at the corner, tan as NYC paints them and edged in flexible posts, so the crosswalk is shorter and R.S. 39:4-138(e) sets the no-standing zone at 10 ft, not 25 (src/osm_osc.py). Whether paint and posts count as a curb extension 'constructed' is for the Borough to confirm." />
     </way>
     <way id="1566318226">
       <nd ref="14262205502" />

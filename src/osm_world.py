@@ -695,9 +695,8 @@ class _Reader:
         nodes = self._way.get("node_ids") or []
         if len(nodes) < 2:
             return
-        oneway, own = tags.get("oneway"), tags.get(f"cycleway:{side}:oneway")
-        along = oneway == "yes" or (oneway != "-1" and side == "right")
-        along = not along if own == "-1" else along
+        own = tags.get(f"cycleway:{side}:oneway")
+        along = rides_along(tags, side)
         line = stations.line(centre)
         self.bike_lanes.append({
             "street": tags.get("name"), "id": self._way["id"], "values": ("bike lane", own == "no"),
@@ -1583,6 +1582,11 @@ def has_centre_line(tags: dict) -> bool:
             or any(key == "overtaking" or key.startswith("overtaking:") for key in tags))
 
 
+def lane_count(tags: dict) -> int:
+    """A way's travel lanes: its `lanes`, else one on a oneway and two on a two-way way."""
+    return _int(tags.get("lanes")) or (1 if tags.get("oneway") == "yes" else 2)
+
+
 def carriageway_width_m(tags: dict) -> tuple[float, str]:
     """A way's kerb-to-kerb width: `width` / `width:carriageway`, else a counted fallback."""
     found = width_m(tags.get("width")) or width_m(tags.get("width:carriageway"))
@@ -1590,7 +1594,7 @@ def carriageway_width_m(tags: dict) -> tuple[float, str]:
         return found, "from OSM"
     if tags.get("highway") == "service":
         return DEFAULT_WIDTHS_M["service"], "DEFAULTED (service)"
-    lanes = _int(tags.get("lanes")) or (1 if tags.get("oneway") == "yes" else 2)
+    lanes = lane_count(tags)
     # Everything the way's tags put on its carriageway, each as wide as _Reader.kerbside lays it:
     # `width` includes lane parking and never street-side parking (wiki Street_parking).
     section = lanes * DEFAULT_WIDTHS_M["lane"]
@@ -1774,6 +1778,14 @@ def _paving(ring: list, tags: dict) -> dict:
     """A paved-ground ring, and its material where that is not asphalt."""
     material = SURFACE_MATERIAL.get(tags.get("surface"), "asphalt")
     return {"coords": ring} if material == "asphalt" else {"coords": ring, "surface": material}
+
+
+def rides_along(tags: dict, side: str) -> bool:
+    """Whether a `cycleway:<side>` lane's riders travel in the way's direction: the traffic's on
+    that side of the way, unless `cycleway:<side>:oneway=-1` says otherwise."""
+    oneway = tags.get("oneway")
+    along = oneway == "yes" or (oneway != "-1" and side == "right")
+    return not along if tags.get(f"cycleway:{side}:oneway") == "-1" else along
 
 
 def has_cycleway(tags: dict, side: str) -> bool:
