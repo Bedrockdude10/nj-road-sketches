@@ -483,8 +483,9 @@ def build_scene(data: dict, world: bool = False, texture_res: str = DEFAULT_TEXT
     bike_surface_mat = make_material("BikeLaneSurface", (0.13, 0.45, 0.28), roughness=0.85)
     centerline_mat = make_material("Centerline", (0.85, 0.7, 0.15), roughness=0.4)
     blue_paint_mat = make_material("BluePaint", (0.1, 0.25, 0.7), roughness=0.4)
-    # A painted curb extension's fill (`colour=tan`): the beige NYC DOT paints them, rough like the
-    # asphalt it is on.
+    # A painted curb extension's fill (`colour=tan`), rough like the asphalt it is on. NYC DOT lays
+    # pedestrian space in epoxy gravel (Standard Specifications 6.44 CST) and names its colours
+    # without publishing a measured value, so this RGB is matched by eye - not a standard.
     tan_paint_mat = make_material("TanPaint", (0.72, 0.6, 0.42), roughness=0.85)
     building_mats = [make_material(f"Building{i}", c, roughness=0.75) for i, c in enumerate(BUILDING_PALETTE)]
     pole_mat = make_material("Pole", SIGN_POST_GRAY, roughness=0.5)
