@@ -1,0 +1,19 @@
+# Every area: its OSM download and its render cameras (src/sources/osm_context.py reads it).
+#
+# `bbox` is west, south, east, north in WGS84 degrees; each area is pulled from the OSM API once
+# and cached under a hash of that exact tuple, so never edit one - add another area. Under the
+# API's 0.25 sq deg limit for one /map call, which loading checks.
+#
+# `cameras` are what scripts/render_osm.py renders: each a junction, by its OSM node, framed
+# standards.toml's `render.camera_radius` about it.
+
+hopewell_borough:
+  bbox: [-74.7760, 40.3830, -74.7500, 40.3970]
+  cameras: {broad_greenwood: 104048876, broad_princeton: 104041625, broad_louellen: 104043149,
+            broad_elm: 104079674, broad_lanning: 103981610, princeton_prospect: 104024684}
+pennington_borough:
+  bbox: [-74.8120, 40.3180, -74.7830, 40.3420]
+  cameras: {rt31_wdelaware: 104089792}
+lavallette_borough:
+  bbox: [-74.0780, 39.9640, -74.0640, 39.9840]
+  cameras: {reese: 104958453}

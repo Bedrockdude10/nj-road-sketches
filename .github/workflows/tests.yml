@@ -1,16 +1,4 @@
-# Runs the guards that were previously only run when someone remembered to type the command.
-#
-# WHAT THIS CAN AND CANNOT SEE. data/ is a 391 MB licensed download (NJDOT road network, Mercer
-# County parcels) kept out of git, so it is absent here and 236 of the 527 tests skip - every
-# test that builds a real junction, including the golden geometry comparison. What DOES run is
-# everything that needs no source data: the lint and import contracts, the config schema, the
-# frame property tests, the scene invariants, metrics, treatments and the leg frame. 291 tests,
-# about two seconds.
-#
-# That is worth being explicit about rather than reading a green tick as "the renders are fine".
-# The geometry goldens are still a local-only guard; this catches the class of break that does
-# not need a junction to demonstrate - which, judging by what this repo has actually shipped, is
-# most of them.
+# The guards, on every push: lint, import contracts, and the tests, none of which needs OSM.
 
 name: tests
 
@@ -47,7 +35,7 @@ jobs:
       # but a dedicated failed step names the problem on the summary page instead of burying it
       # in a test report, and both finish in under a second.
       - name: Lint
-        run: ruff check src scripts tests conftest.py
+        run: ruff check src scripts tests
 
       - name: Import contracts
         run: lint-imports

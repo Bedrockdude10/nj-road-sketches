@@ -36,10 +36,10 @@ dead end. Two relationships OSM does not record are read off its geometry, each 
     side line (its kerb line as above, else half its `width`). The way is split there and tagged
     `parking:<side>=no` + `parking:<side>:restriction=no_standing` +
     `parking:<side>:restriction:reason=junction` (wiki Street parking), which the proposal reads
-    like any other restriction. On a kerb whose crosswalk node carries `crossing:kerb_extension`
-    (wiki), the statute's NO_STANDING_WITH_EXTENSION_FT instead. With `kerb_extensions` - the
-    daylighting proposal's base - every crosswalk a junction claims is given
-    `crossing:kerb_extension=both` first.
+    like any other restriction - NO_STANDING_FT on every kerb, a curb extension or not: the
+    statute's shorter zone beside one is not taken, so no car stands near the corner. With
+    `kerb_extensions` - the daylighting proposal's base - every crosswalk a junction claims is
+    given `crossing:kerb_extension=both` first.
 
 `two_way_bikeway(area, base)` - `base` plus the proposal, applied universally: one design table
 over every street way in the world, every rule a vector operation over all of them (_design).
@@ -72,10 +72,13 @@ over every street way in the world, every rule a vector operation over all of th
     its approach lane only, from the new centre line to that lane's edge.
   - with `kerb_extensions` (the daylighting proposal), on a base whose crosswalks carry
     `crossing:kerb_extension=both`: each extension a `road_marking=restriction` +
-    `pattern=solid` + `colour=tan` area (NYC's painted curb extension) across the parking lane to the travel lane's edge, as long
-    as the crosswalk is wide - its near side to its far one - with `barrier=bollard` +
-    `bollard=flexible` nodes down its middle, and the crosswalk split at its edges, the piece over
-    it a footway (_extensions), so the crosswalk crosses only the street between. The kerbs are re-signed: a
+    `pattern=solid` + `colour=tan` area (NYC's painted curb extension), one per corner: the drawn
+    street outside the drawn travel lanes, its corner rounded to the EFFECTIVE_RADIUS_M arc on their
+    edges (NJDOT 6.4.3), and off every bikeway and its buffer, out along each leg to
+    its no-standing zone's end - the zone's hatching, painted as the extension, so the zone's
+    shoulder is unmarked, `shoulder:<side>:markings=no` (_section_tags) - with
+    `barrier=bollard` + `bollard=flexible` nodes down its middle (_extensions); the crosswalk is
+    left as mapped, and the reader paints the extension over it. The kerbs are re-signed: a
     restriction OSM records with no `:restriction:reason` - the blanket corner sign the extension
     replaces - is lifted (_may_park), so the statute's zone is the limit.
   - where the track stops - a junction where no other leg of the route carries it - a two-stage
@@ -88,6 +91,7 @@ from __future__ import annotations
 
 import bisect
 import dataclasses
+import functools
 import itertools
 import math
 import tomllib
@@ -101,19 +105,22 @@ import shapely
 import shapely.ops
 from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry.base import BaseGeometry
 
-from src.osm_world import (BOLLARD_SPACING_M, PROHIBITIONS, DEFAULT_WIDTHS_M, FT_TO_M, LocalFrame,
-                           SEAM_M, STATION_STEP_M, TANGENT_M, Stations, beyond, carriageway_width_m, ease,
-                           has_centre_line, has_lane_lines, is_street, kerb_section, lane_count, read,
-                           rides_along, street_ends, taper_rate, width_m)
-from src.sources.osm_change import NewNode, OsmChange, WayChange, apply_change
+from src.osm_world import (BOLLARD_SPACING_M, PROHIBITIONS, FT_TO_M, Leg, LocalFrame,
+                           SEAM_M, STATION_STEP_M, TANGENT_M, Stations, StreetGraph, carriageway_width_m,
+                           crossing_markings, ease, has_centre_line, has_lane_lines, heading, is_corner, is_street,
+                           kerb_section, lane_count, lane_widths, line_parts, meets, read, rides_along, sided, street_key,
+                           tagged_width, tangent, taper_rate, vertex_stations, width_m, width_or_default)
+from src.sources.osm_change import PROPOSALS_DIR, NewNode, OsmChange, WayChange, write_change
 from src.sources.osm_context import PAINT_LAYERS, SNAPSHOT_AREAS, fetch_borough_osm, osm_layers
 from src.standards import in_unit, si
-from src.turning import EFFECTIVE_RADIUS_M, Edge, effective_radius
+from src.turning import EFFECTIVE_RADIUS_M, Edge, arc, centre, effective_radius
 
 # Every figure is declared in standards.toml; these are in feet, the unit the section is designed in.
 NODE_MATCH_M, ACROSS_M = si("numerical.node_match"), si("numerical.across")
 OVERSHOOT_M = si("numerical.overshoot")
+OSM_GRID_M = si("numerical.osm_grid")
 
 TRACK_FT, CONSTRAINED_TRACK_FT = in_unit("track.width", "ft"), in_unit("track.constrained_width", "ft")
 BUFFER_FT, LANE_FT = in_unit("track.buffer", "ft"), in_unit("lane.width", "ft")
@@ -123,7 +130,6 @@ MIN_HATCH_FT = in_unit("hatch.min_width", "ft")            # spare narrower than
 STALL_LENGTH_M = si("stall.parallel_length")             # a piece shorter than one stall is not parked
 DRIVEWAY_CLEARANCE_FT = in_unit("parking.driveway_clearance", "ft")
 NO_STANDING_FT = in_unit("no_standing.from_crosswalk", "ft")
-NO_STANDING_WITH_EXTENSION_FT = in_unit("no_standing.with_extension", "ft")
 
 AREA_NOTE = ("Existing conditions: the street's surface out to its mapped kerbs (each kerb the edge "
              "of the street nearest it), and half its block's width where a side has none, by "
@@ -133,8 +139,7 @@ EXISTING_NOTE = ("Existing conditions: `width` measured between the mapped kerbs
                  "junction, by src/osm_osc.py. Check on the ground or imagery before upload.")
 def no_standing_note(feet: float) -> str:
     return (f"No standing within {feet:g} ft of the nearest crosswalk or the intersecting street's "
-            "side line, R.S. 39:4-138(e)" + (" where a curb extension is built" if feet < NO_STANDING_FT
-                                             else "") + " - the law, not a sign.")
+            "side line, R.S. 39:4-138(e) - the law, not a sign.")
 
 
 TURN_BOX_NOTE = ("Proposal: a two-stage turn box where the two-way track ends (MUTCD 9E.11), so a "
@@ -142,10 +147,8 @@ TURN_BOX_NOTE = ("Proposal: a two-stage turn box where the two-way track ends (M
                  "`cycleway=two_stage_box` is a value from the 2020 draft Proposal:Two-stage bicycle "
                  "turn, not an approved tag.")
 EXTENSION_NOTE = ("Proposal: a painted curb extension at the corner, tan as NYC paints them and edged "
-                  "in flexible posts, so the crosswalk is shorter and "
-                  f"R.S. 39:4-138(e) sets the no-standing zone at {NO_STANDING_WITH_EXTENSION_FT:g} ft, "
-                  f"not {NO_STANDING_FT:g} (src/osm_osc.py). Whether paint and posts count as a curb "
-                  "extension 'constructed' is for the Borough to confirm.")
+                  "in flexible posts, so the crosswalk is shorter, over the corner's "
+                  f"{NO_STANDING_FT:g} ft no-standing zone, R.S. 39:4-138(e) (src/osm_osc.py).")
 RECENTRED_NOTE = ("Existing conditions: the way moved to the middle of its mapped kerbs (wiki "
                   "Key:placement), by src/osm_osc.py. Check before upload.")
 COMPASS = {"north": (0.0, 1.0), "south": (0.0, -1.0), "east": (1.0, 0.0), "west": (-1.0, 0.0)}
@@ -201,251 +204,125 @@ class Proposal:
         return {key.format(side=side): value for key, value in self.tags.items()}
 
 
-# --- the street network ------------------------------------------------------------------------
+# --- where a junction ends, along each of its legs (the graph is src/osm_world.py:StreetGraph) ---
 
-def _street_key(way: dict) -> str:
-    """Which street a way is part of: its name, else the way itself."""
-    return way["tags"].get("name") or f"way {way['id']}"
+def _claimed(leg: Leg, crossing_nodes, stops: _Stops) -> int | None:
+    """The crossing node whose crosswalk ends this leg's centre line at its junction: the
+    first out along the leg - unless it is the only one on a leg between two junctions and
+    nearer the other, whose crosswalk it then is. Never one beyond the stop line serving the
+    approach: a stop line is placed in advance of its junction's crosswalk (MUTCD 3B.16, as
+    cited), so a crossing past it is mid-block, dark only across its own band."""
+    stop_at = _stop_line(leg, stops)
+    on_leg = list(dict.fromkeys(
+        n for k, n in enumerate(leg.nodes) if k > 0 and n in crossing_nodes and n != leg.end
+        and (stop_at is None or float(leg.d[k]) < stop_at)))
+    if not on_leg:
+        return None
+    if leg.end is not None and len(on_leg) == 1:
+        out = float(leg.d[leg.nodes.index(on_leg[0])])
+        return on_leg[0] if out < leg.length - out else None
+    return on_leg[0]
 
 
-def _vertex_stations(line: LineString) -> np.ndarray:
-    """Each vertex's distance along `line` - a node's station on its way."""
-    xy = np.asarray(line.coords)
-    return np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))])
-
-
-@dataclasses.dataclass(eq=False)
-class _Leg:
-    """The run of street ways out of a junction, node by node, to the next junction or a dead end."""
-    junction: int
-    street: str
-    steps: list[tuple[int, int]]      # (way id, node index), from the junction out
-    nodes: list[int]
-    xy: np.ndarray
-    d: np.ndarray                     # each step's distance out from the junction along the leg
-    end: int | None                   # the junction it reaches; None at a dead end
-    outbound: bool = False            # a oneway's traffic only leaves the junction along it
-    inbound: bool = False             # a oneway's traffic only comes into the junction along it
-
-    @property
-    def length(self) -> float:
-        return float(self.d[-1])
-
-    def direction(self) -> np.ndarray | None:
-        """The leg's first segment out of the junction, as a unit vector."""
-        ahead = np.flatnonzero(self.d > 0)
-        if not len(ahead):
-            return None
-        out = self.xy[ahead[0]] - self.xy[0]
-        return out / np.linalg.norm(out)
-
-    def line(self) -> LineString:
-        keep = np.concatenate([[True], np.diff(self.d) > 0])
-        return LineString(self.xy[keep])
-
-    def dark(self, reach: float, stations: dict[int, np.ndarray]) -> list[tuple[int, float, float]]:
-        """(way, from, to) stations of each way the leg covers from the junction out to `reach`."""
-        out = []
-        for k in range(len(self.steps) - 1):
-            (way, i), (other, j) = self.steps[k], self.steps[k + 1]
-            if way != other or self.d[k + 1] == self.d[k]:
-                continue
-            if self.d[k] >= reach:
+def _stop_line(leg: Leg, stops: _Stops) -> float | None:
+    """How far out along `leg` its junction's stop line is: the first that lies across the lane
+    approaching the junction - right of that traffic, which keeps right. A stop line joined to
+    the leg at a node stands at that node; one joined to no street (wiki Key:road_marking
+    allows a separate way) stands where it lies along the leg of its nearest street. A oneway
+    leg whose traffic only leaves the junction has none: nothing approaches it there."""
+    if leg.outbound:
+        return None
+    found = []
+    for k in range(1, len(leg.steps)):
+        if leg.nodes[k] == leg.end:
+            break
+        back = np.flatnonzero(leg.d[:k] < leg.d[k])
+        if not len(back):
+            continue
+        toward = leg.xy[back[-1]] - leg.xy[k]
+        right = np.array([toward[1], -toward[0]])
+        for stop in stops.get(leg.nodes[k], []):
+            far = max(stop.coords, key=lambda c: float(np.linalg.norm(np.asarray(c) - leg.xy[k])))
+            if float(np.dot(np.asarray(far) - leg.xy[k], right)) > 0:
+                found.append(float(leg.d[k]))
                 break
-            a, b = stations[way][i], stations[way][j]
-            t = min(1.0, (reach - self.d[k]) / (self.d[k + 1] - self.d[k]))
-            end = a + (b - a) * t
-            out.append((way, min(a, end), max(a, end)))
-        return out
+        if found:
+            break
+    ways = {way_id for way_id, _i in leg.steps}
+    line = leg.line()
+    for stop, way_id in getattr(stops, "floating", []):
+        if way_id not in ways or line.length == 0:
+            continue
+        middle = stop.interpolate(0.5, normalized=True)
+        d = line.project(middle)
+        if not 0 < d < line.length:
+            continue
+        here = np.asarray(line.interpolate(d).coords[0])
+        toward = np.asarray(line.interpolate(max(d - TANGENT_M, 0.0)).coords[0]) - here
+        if float(np.dot(np.asarray(middle.coords[0]) - here, [toward[1], -toward[0]])) > 0:
+            found.append(float(d))
+    return min(found, default=None)
 
 
-class _Network:
-    """The streets as a graph of junctions and the legs between them."""
+def _kerb_line(network: StreetGraph, leg: Leg, kerbs: _Kerbs) -> float | None:
+    """How far out along `leg` the cross street's kerb line, carried straight across the
+    mouth, crosses it. On each side of the leg the next leg round the junction, where it is
+    another street's; that street's kerb in the corner between the two, at its least distance
+    from that street's centreline (carried back across the junction along its first segment);
+    and where the leg leaves that distance - where the corner has none of its kerb mapped, half
+    its width, which is where its edge is drawn. The further side; None where neither side of
+    the leg is another street's."""
+    ordered = network.around(leg.junction)
+    if leg not in ordered:
+        return None
+    here = leg.xy[0]
+    i = ordered.index(leg)
+    own = heading(leg.direction())
+    line = leg.line()
+    found = []
+    for neighbour, ccw in ((ordered[(i + 1) % len(ordered)], True), (ordered[i - 1], False)):
+        if neighbour is leg or neighbour.street == leg.street:
+            continue
+        theirs = heading(neighbour.direction())
+        start, span = (own, (theirs - own) % (2 * math.pi)) if ccw else (
+            theirs, (own - theirs) % (2 * math.pi))
+        cross = LineString([here - neighbour.direction() * leg.length,
+                            *neighbour.line().coords])
+        half = kerbs.least_offset(neighbour.street, cross, leg.length + neighbour.length,
+                                  here, start, span, line)
+        if half is None:
+            # No kerb of it mapped in the corner: its own surface as drawn, half its width
+            # either side of it - not carried across the junction, which on a street meeting
+            # this one at a shallow angle would reach far down this one.
+            half = _half_width(network, neighbour)
+            edge = neighbour.line().buffer(half, cap_style="flat")
+        else:
+            edge = cross.buffer(half)
+        inside = [LineString(p) for p in line_parts(line.intersection(edge))]
+        for piece in inside:
+            at = sorted((line.project(Point(piece.coords[0])), line.project(Point(piece.coords[-1]))))
+            # Where the kerb line crosses the leg: one that covers the whole leg crosses nothing.
+            if at[0] <= NODE_MATCH_M and at[1] < line.length - NODE_MATCH_M:
+                found.append(at[1])
+    return max(found) if found else None
 
-    def __init__(self, layers: dict, frame: LocalFrame):
-        self.streets: dict[int, dict] = {}
-        self.lines: dict[int, LineString] = {}
-        self.stations: dict[int, np.ndarray] = {}
-        self.on_node: dict[int, list[tuple[int, int]]] = defaultdict(list)
-        self.node_xy: dict[int, np.ndarray] = {}
-        for way in layers["roads"]:
-            line = frame.line(way.get("coords_wgs84") or [])
-            node_ids = way.get("node_ids") or []
-            if not is_street(way["tags"]) or line is None or len(node_ids) != len(line.coords):
-                continue
-            self.streets[way["id"]], self.lines[way["id"]] = way, line
-            self.stations[way["id"]] = _vertex_stations(line)
-            for i, (node, xy) in enumerate(zip(node_ids, line.coords, strict=True)):
-                self.on_node[node].append((way["id"], i))
-                self.node_xy[node] = np.asarray(xy)
-        self.junctions = {node for node, at in self.on_node.items()
-                          if len(self._starts(node)) >= 3
-                          and len({_street_key(self.streets[w]) for w, _ in at}) >= 2}
-        self._legs: dict[int, list[_Leg]] = {}
 
-    def _starts(self, node: int) -> list[tuple[int, int, int]]:
-        return [(way, i, step) for way, i in self.on_node[node] for step in (-1, 1)
-                if 0 <= i + step < len(self.streets[way]["node_ids"])]
+def _side_line(network: StreetGraph, leg: Leg) -> float:
+    """Where the cross street's side line is by its tags, where no kerb of it is mapped: half
+    the widest carriageway among the junction's other streets' first ways."""
+    return max((_half_width(network, other) for other in network.legs(leg.junction)
+                if other.street != leg.street), default=0.0)
 
-    def legs(self, junction: int) -> list[_Leg]:
-        if junction not in self._legs:
-            self._legs[junction] = [self._walk(junction, *start) for start in self._starts(junction)]
-        return self._legs[junction]
 
-    def _walk(self, junction: int, way: int, i: int, step: int) -> _Leg:
-        steps, seen, end = [(way, i)], {(way, i)}, None
-        while True:
-            ids = self.streets[way]["node_ids"]
-            if 0 <= i + step < len(ids):
-                i += step
-                if (way, i) in seen:
-                    break
-                steps.append((way, i))
-                seen.add((way, i))
-                if ids[i] in self.junctions:
-                    end = ids[i]
-                    break
-                continue
-            # Off the end of this way, at a node that is no junction: on along the way ending there.
-            on = [(w, k) for w, k in self.on_node[ids[i]] if (w, k) not in seen
-                  and k in (0, len(self.streets[w]["node_ids"]) - 1)]
-            if not on:
-                break
-            way, i = on[0]
-            step = 1 if i == 0 else -1
-            steps.append((way, i))
-            seen.add((way, i))
-        nodes = [self.streets[w]["node_ids"][k] for w, k in steps]
-        xy = np.array([self.node_xy[n] for n in nodes])
-        d = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))])
-        (way_a, i_a), (way_b, i_b) = steps[0], steps[min(1, len(steps) - 1)]
-        oneway = self.streets[way_a]["tags"].get("oneway")
-        with_way = way_a == way_b and i_b > i_a
-        outbound = way_a == way_b and i_a != i_b and ((oneway == "yes" and with_way) or (oneway == "-1" and not with_way))
-        inbound = way_a == way_b and i_a != i_b and oneway in ("yes", "-1") and not outbound
-        return _Leg(junction, _street_key(self.streets[way_a]), steps, nodes, xy, d, end, outbound, inbound)
-
-    @staticmethod
-    def claimed(leg: _Leg, crossing_nodes, stops: _Stops) -> int | None:
-        """The crossing node whose crosswalk ends this leg's centre line at its junction: the
-        first out along the leg - unless it is the only one on a leg between two junctions and
-        nearer the other, whose crosswalk it then is. Never one beyond the stop line serving the
-        approach: a stop line is placed in advance of its junction's crosswalk (MUTCD 3B.16, as
-        cited), so a crossing past it is mid-block, dark only across its own band."""
-        stop_at = _Network.stop_line(leg, stops)
-        on_leg = list(dict.fromkeys(
-            n for k, n in enumerate(leg.nodes) if k > 0 and n in crossing_nodes and n != leg.end
-            and (stop_at is None or float(leg.d[k]) < stop_at)))
-        if not on_leg:
-            return None
-        if leg.end is not None and len(on_leg) == 1:
-            out = float(leg.d[leg.nodes.index(on_leg[0])])
-            return on_leg[0] if out < leg.length - out else None
-        return on_leg[0]
-
-    @staticmethod
-    def stop_line(leg: _Leg, stops: _Stops) -> float | None:
-        """How far out along `leg` its junction's stop line is: the first that lies across the lane
-        approaching the junction - right of that traffic, which keeps right. A stop line joined to
-        the leg at a node stands at that node; one joined to no street (wiki Key:road_marking
-        allows a separate way) stands where it lies along the leg of its nearest street. A oneway
-        leg whose traffic only leaves the junction has none: nothing approaches it there."""
-        if leg.outbound:
-            return None
-        found = []
-        for k in range(1, len(leg.steps)):
-            if leg.nodes[k] == leg.end:
-                break
-            back = np.flatnonzero(leg.d[:k] < leg.d[k])
-            if not len(back):
-                continue
-            toward = leg.xy[back[-1]] - leg.xy[k]
-            right = np.array([toward[1], -toward[0]])
-            for stop in stops.get(leg.nodes[k], []):
-                far = max(stop.coords, key=lambda c: float(np.linalg.norm(np.asarray(c) - leg.xy[k])))
-                if float(np.dot(np.asarray(far) - leg.xy[k], right)) > 0:
-                    found.append(float(leg.d[k]))
-                    break
-            if found:
-                break
-        ways = {way_id for way_id, _i in leg.steps}
-        line = leg.line()
-        for stop, way_id in getattr(stops, "floating", []):
-            if way_id not in ways or line.length == 0:
-                continue
-            middle = stop.interpolate(0.5, normalized=True)
-            d = line.project(middle)
-            if not 0 < d < line.length:
-                continue
-            here = np.asarray(line.interpolate(d).coords[0])
-            toward = np.asarray(line.interpolate(max(d - TANGENT_M, 0.0)).coords[0]) - here
-            if float(np.dot(np.asarray(middle.coords[0]) - here, [toward[1], -toward[0]])) > 0:
-                found.append(float(d))
-        return min(found, default=None)
-
-    def kerb_line(self, leg: _Leg, kerbs: _Kerbs) -> float | None:
-        """How far out along `leg` the cross street's kerb line, carried straight across the
-        mouth, crosses it. On each side of the leg the next leg round the junction, where it is
-        another street's; that street's kerb in the corner between the two, at its least distance
-        from that street's centreline (carried back across the junction along its first segment);
-        and where the leg leaves that distance - where the corner has none of its kerb mapped, half
-        its width, which is where its edge is drawn. The further side; None where neither side of
-        the leg is another street's."""
-        legs = [other for other in self.legs(leg.junction) if other.direction() is not None]
-        if leg not in legs:
-            return None
-        here = leg.xy[0]
-
-        def angle(v: np.ndarray) -> float:
-            return math.atan2(v[1], v[0]) % (2 * math.pi)
-
-        ordered = sorted(legs, key=lambda other: angle(other.direction()))
-        i = ordered.index(leg)
-        own = angle(leg.direction())
-        line = leg.line()
-        found = []
-        for neighbour, ccw in ((ordered[(i + 1) % len(ordered)], True), (ordered[i - 1], False)):
-            if neighbour is leg or neighbour.street == leg.street:
-                continue
-            theirs = angle(neighbour.direction())
-            start, span = (own, (theirs - own) % (2 * math.pi)) if ccw else (
-                theirs, (own - theirs) % (2 * math.pi))
-            cross = LineString([here - neighbour.direction() * leg.length,
-                                *neighbour.line().coords])
-            half = kerbs.least_offset(neighbour.street, cross, leg.length + neighbour.length,
-                                      here, start, span, line)
-            if half is None:
-                # No kerb of it mapped in the corner: its own surface as drawn, half its width
-                # either side of it - not carried across the junction, which on a street meeting
-                # this one at a shallow angle would reach far down this one.
-                half = carriageway_width_m(self.streets[neighbour.steps[0][0]]["tags"])[0] / 2
-                edge = neighbour.line().buffer(half, cap_style="flat")
-            else:
-                edge = cross.buffer(half)
-            inside = [LineString(p) for p in _lines(line.intersection(edge))]
-            for piece in inside:
-                at = sorted((line.project(Point(piece.coords[0])), line.project(Point(piece.coords[-1]))))
-                # Where the kerb line crosses the leg: one that covers the whole leg crosses nothing.
-                if at[0] <= NODE_MATCH_M and at[1] < line.length - NODE_MATCH_M:
-                    found.append(at[1])
-        return max(found) if found else None
-
-    def side_line(self, leg: _Leg) -> float:
-        """Where the cross street's side line is by its tags, where no kerb of it is mapped: half
-        the widest carriageway among the junction's other streets' first ways."""
-        return max((carriageway_width_m(self.streets[other.steps[0][0]]["tags"])[0] / 2
-                    for other in self.legs(leg.junction) if other.street != leg.street), default=0.0)
+def _half_width(network: StreetGraph, leg: Leg) -> float:
+    """Half a leg's carriageway, by its first way's tags: where its edge is drawn."""
+    return carriageway_width_m(network.streets[leg.steps[0][0]]["tags"])[0] / 2
 
 
 def _lines_xy(geometry) -> list[tuple[float, float]]:
     """Every vertex of a (multi)line, or of nothing."""
     return [xy for part in getattr(geometry, "geoms", [geometry]) if not part.is_empty
             for xy in part.coords]
-
-
-def _lines(geometry) -> list[list]:
-    return [list(part.coords) for part in getattr(geometry, "geoms", [geometry])
-            if isinstance(part, LineString) and len(part.coords) >= 2]
 
 
 # --- the street's kerbs ------------------------------------------------------------------------
@@ -455,7 +332,7 @@ class _Kerbs:
     nearest it (OSM does not say which street a kerb bounds), and which are `kerb=lowered` or
     `flush` and no crossing's ramp - a dropped kerb, where traffic may cross it."""
 
-    def __init__(self, layers: dict, frame: LocalFrame, network: _Network,
+    def __init__(self, layers: dict, frame: LocalFrame, network: StreetGraph,
                  bbox: tuple[float, float, float, float]):
         segments, lowered = [], []
         for way in layers["kerbs"]:
@@ -465,7 +342,7 @@ class _Kerbs:
             # A dropped kerb traffic crosses - not a crossing's ramp: one a footway crossing meets
             # carries pedestrians, and its crosswalk's band already cuts the paint there.
             low = (way["tags"].get("kerb") in ("lowered", "flush")
-                   and not _meets(way, line, layers["crossings"], frame))
+                   and not meets(way, line, layers["crossings"], frame))
             for a, b in itertools.pairwise(line.coords):
                 if a != b:
                     segments.append(LineString([a, b]))
@@ -478,10 +355,10 @@ class _Kerbs:
         middles = shapely.line_interpolate_point(self.segments, 0.5, normalized=True)
         nearest = streets.query_nearest(middles, all_matches=False)
         self.owner = np.empty(len(segments), dtype=object)
-        self.owner[nearest[0]] = [_street_key(network.streets[ways[k]]) for k in nearest[1]]
+        self.owner[nearest[0]] = [street_key(network.streets[ways[k]]) for k in nearest[1]]
         by_street: dict[str, list[LineString]] = defaultdict(list)
         for w in ways:
-            by_street[_street_key(network.streets[w])].append(network.lines[w])
+            by_street[street_key(network.streets[w])].append(network.lines[w])
         self.street_lines = {key: shapely.union_all(lines) for key, lines in by_street.items()}
         for geometry in self.street_lines.values():
             shapely.prepare(geometry)
@@ -513,7 +390,7 @@ class _Kerbs:
                 offsets[i] = float(far.min())
         return offsets
 
-    def band_reach(self, leg: _Leg, band, sign: int) -> float | None:
+    def band_reach(self, leg: Leg, band, sign: int) -> float | None:
         """How far out along `leg` a crosswalk's `band` reaches where it meets the leg's street's
         own kerb on one side (`sign` +1 is left, looking out from the junction): the furthest
         point of their meeting. None where that kerb is not mapped through the band."""
@@ -574,9 +451,12 @@ def _has_lane_markings(tags: dict) -> bool:
 
 
 def _marked(tags: dict) -> bool:
-    markings = tags.get("crossing:markings")
-    return (markings not in (None, "no")
-            or (markings is None and tags.get("crossing") in ("marked", "zebra", "uncontrolled")))
+    return crossing_markings(tags) not in (None, "no")
+
+
+def _half(crossing: dict) -> float:
+    """Half a crossing's `width`, else of the default the reader draws it at."""
+    return width_or_default(crossing["tags"], "width", "crossing")[0] / 2
 
 
 def _with_note(tags: dict, note: str) -> dict:
@@ -637,7 +517,7 @@ _RANK = ("motorway", "trunk", "primary", "secondary", "tertiary", "unclassified"
          "living_street")
 
 
-def _junction_face(network: _Network, kerbs: _Kerbs, junction: int) -> Polygon | None:
+def _junction_face(network: StreetGraph, kerbs: _Kerbs, junction: int) -> Polygon | None:
     """The face around `junction` enclosed by the mapped kerbs and, across each leg, its first
     cross-section that meets its own kerb on both sides - None where that face is not closed."""
     closing = []
@@ -668,20 +548,13 @@ def _junction_face(network: _Network, kerbs: _Kerbs, junction: int) -> Polygon |
     return None
 
 
-def _meets(kerb: dict, line: LineString, ways: list[dict], frame: LocalFrame) -> list[LineString]:
-    """The `ways` that meet a kerb way - at a node they share, or across it."""
-    nodes = set(kerb.get("node_ids") or [])
-    return [path for way in ways if (path := frame.line(way.get("coords_wgs84") or [])) is not None
-            and (nodes & set(way["node_ids"]) or path.intersects(line))]
-
-
 def _ramp_gaps(layers: dict, frame: LocalFrame, report: Counter[str]) -> None:
     """Report each lowered kerb a footway crossing meets that has no `wheelchair` tag: the reader
     draws a curb ramp flush only where OSM says `wheelchair=yes`, so these are mapping gaps."""
     for kerb in layers["kerbs"]:
         line = frame.line(kerb.get("coords_wgs84") or [])
         if (line is not None and kerb["tags"].get("kerb") == "lowered" and kerb["tags"].get("wheelchair") is None
-                and _meets(kerb, line, layers["crossings"], frame)):
+                and meets(kerb, line, layers["crossings"], frame)):
             report["lowered kerbs at a crossing with no wheelchair tag: not drawn as ramps"] += 1
 
 
@@ -698,31 +571,25 @@ def _pieces(count: int, at: list[int]) -> list[tuple[int, int]]:
     return [(a, b) for a, b in itertools.pairwise(bounds) if b > a]
 
 
-def _tangent(line: LineString, s: float) -> np.ndarray:
-    a = np.asarray(line.interpolate(max(s - TANGENT_M, 0.0)).coords[0])
-    b = np.asarray(line.interpolate(min(s + TANGENT_M, line.length)).coords[0])
-    return (b - a) / np.linalg.norm(b - a)
-
-
 def _at_beyond(line: LineString, s: float, offset: float) -> np.ndarray:
     """`_at`, carried straight on past either end of `line` along its end segment."""
     if 0.0 <= s <= line.length:
         return _at(line, s, offset)
     end = 0.0 if s < 0 else line.length
-    t = _tangent(line, end)
+    t = tangent(line, end)
     return _at(line, end, offset) + t * (s - end)
 
 
 def _station(line: LineString, point) -> tuple[float, float]:
     """`point`'s station along `line`, and its offset from it (left positive)."""
     s = line.project(Point(point))
-    t, v = _tangent(line, s), np.asarray(point) - np.asarray(line.interpolate(s).coords[0])
+    t, v = tangent(line, s), np.asarray(point) - np.asarray(line.interpolate(s).coords[0])
     return s, float(t[0] * v[1] - t[1] * v[0])
 
 
 def _at(line: LineString, s: float, offset: float) -> np.ndarray:
     """The point `offset` to the left of `line` at station `s`."""
-    t = _tangent(line, s)
+    t = tangent(line, s)
     return np.asarray(line.interpolate(s).coords[0]) + offset * np.array([-t[1], t[0]])
 
 
@@ -737,17 +604,17 @@ class _Stops(defaultdict):
         self.floating: list[tuple[LineString, int]] = []
 
 
-def _stops(layers: dict, frame: LocalFrame, network: _Network, report: Counter[str]) -> _Stops:
+def _stops(layers: dict, frame: LocalFrame, network: StreetGraph, report: Counter[str]) -> _Stops:
     """Every stop line: by each street node it is joined to, else with its nearest street - the
     street it belongs to as every kerb does (_Kerbs)."""
     stops = _Stops()
-    ways = list(network.lines)
+    ways = list(network.streets)
     tree = STRtree([network.lines[w] for w in ways])
     for stop_way in layers["stop_lines"]:
         stop = frame.line(stop_way["coords_wgs84"])
         if stop is None:
             continue
-        joined = [n for n in stop_way["node_ids"] if n in network.on_node]
+        joined = [n for n in stop_way["node_ids"] if network.on_street(n)]
         for n in joined:
             stops[n].append(stop)
         if not joined and ways:
@@ -757,7 +624,7 @@ def _stops(layers: dict, frame: LocalFrame, network: _Network, report: Counter[s
     return stops
 
 
-def _bands(layers: dict, network: _Network, frame: LocalFrame) -> dict[int, tuple[float, Polygon]]:
+def _bands(layers: dict, network: StreetGraph, frame: LocalFrame) -> dict[int, tuple[float, Polygon]]:
     """Each crossing node on a street: half its crossing's `width`, and its band - the crossing
     way that wide, square-ended - the crosswalk as built. A crossing split where it passes over an
     island or a curb extension is still one crosswalk (wiki Tag:footway=traffic_island): its band
@@ -771,12 +638,12 @@ def _bands(layers: dict, network: _Network, frame: LocalFrame) -> dict[int, tupl
     out = {}
     for crossing in layers["crossings"]:
         line = frame.line(crossing["coords_wgs84"])
-        if line is None or not set(crossing["node_ids"]) & network.on_node.keys():
+        if line is None or not any(network.on_street(n) for n in crossing["node_ids"]):
             continue
-        half = (width_m(crossing["tags"].get("width")) or DEFAULT_WIDTHS_M["crossing"]) / 2
+        half = _half(crossing)
         band = _crosswalk(crossing, half, ends, crossings, frame).buffer(half, cap_style="flat")
         for node in crossing["node_ids"]:
-            if node in network.on_node:
+            if network.on_street(node):
                 out[node] = (half, band)
     return out
 
@@ -825,8 +692,8 @@ def _band_span(line: LineString, band: Polygon, lo: float, hi: float) -> tuple[f
     return None if part.is_empty else (start + float(part.bounds[0]), start + float(part.bounds[2]))
 
 
-def _datums(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops, frame: LocalFrame,
-            report: Counter[str]) -> list[tuple[_Leg, dict[str, float], int | None]]:
+def _datums(network: StreetGraph, kerbs: _Kerbs, stops: _Stops, bands: dict[int, tuple[float, Polygon]],
+            report: Counter[str]) -> list[tuple[Leg, dict[str, float], int | None]]:
     """Each junction leg, how far out along it R.S. 39:4-138(e)'s setback is measured from on
     each kerb (left and right looking out from the junction), and the node of the crosswalk it
     claims (None where it has none). On each kerb, the further of the statute's two arms: the
@@ -834,16 +701,15 @@ def _datums(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops, frame
     or not - where its band (the crossing way, its `width` wide) meets that kerb's mapped
     `barrier=kerb` (_Kerbs.band_reach), so a skewed crosswalk is measured where it is; and the
     cross street's side line (its kerb line, else half its width)."""
-    bands = _bands(layers, network, frame)
     half = {n: h for n, (h, _band) in bands.items()}
     out = []
     for junction in sorted(network.junctions):
         for leg in network.legs(junction):
-            if (kerb_at := network.kerb_line(leg, kerbs)) is not None:
+            if (kerb_at := _kerb_line(network, leg, kerbs)) is not None:
                 side_line = (kerb_at, "the cross street's kerb line")
             else:
-                side_line = (network.side_line(leg), "half the cross street's width")
-            claimed = network.claimed(leg, half, stops)
+                side_line = (_side_line(network, leg), "half the cross street's width")
+            claimed = _claimed(leg, half, stops)
             if claimed is None:
                 report["no-standing legs with no crossing mapped: the crosswalk arm not applied"] += 1
             datum = {}
@@ -860,8 +726,8 @@ def _datums(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops, frame
     return out
 
 
-def _junction_interiors(mouths: list[tuple[_Leg, float]],
-                        network: _Network) -> dict[int, list[tuple[float, float]]]:
+def _junction_interiors(mouths: list[tuple[Leg, float]],
+                        network: StreetGraph) -> dict[int, list[tuple[float, float]]]:
     """Each way's stretches inside a junction - from its node out to each leg's mouth (_mouths)."""
     inside: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for leg, mouth in mouths:
@@ -883,8 +749,8 @@ def _inside_junction(tags: dict) -> dict:
     return out | INSIDE_JUNCTION
 
 
-def _mouths(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops,
-            frame: LocalFrame) -> list[tuple[_Leg, float]]:
+def _mouths(network: StreetGraph, kerbs: _Kerbs, stops: _Stops,
+            bands: dict[int, tuple[float, Polygon]]) -> list[tuple[Leg, float]]:
     """Each junction leg, and how far out along it the junction ends: at the outer edge of the
     crosswalk it claims, the furthest the crosswalk reaches across the street, so none of the
     street's own paint is on the junction side of it however skewed it is. The band is straight,
@@ -895,18 +761,17 @@ def _mouths(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops,
     With no crosswalk, at the cross street's kerb line, else at half the cross street's width.
     Inside it a street carries no kerbside markings; the reader cuts the band out of whatever
     reaches it (src/osm_world.py:_Reader.on_carriageway)."""
-    bands = _bands(layers, network, frame)
     half = {n: h for n, (h, _band) in bands.items()}
     out = []
     for junction in sorted(network.junctions):
         for leg in network.legs(junction):
-            claimed = network.claimed(leg, half, stops)
+            claimed = _claimed(leg, half, stops)
             if claimed is None:
-                mouth = network.kerb_line(leg, kerbs)
-                out.append((leg, network.side_line(leg) if mouth is None else mouth))
+                mouth = _kerb_line(network, leg, kerbs)
+                out.append((leg, _side_line(network, leg) if mouth is None else mouth))
                 continue
             line, band = leg.line(), bands[claimed][1]
-            edge = carriageway_width_m(network.streets[leg.steps[0][0]]["tags"])[0] / 2
+            edge = _half_width(network, leg)
             spans = [_band_span(line, band, 0.0, 0.0)]
             for sign in (1, -1):
                 met = kerbs.band_reach(leg, band, sign)
@@ -915,7 +780,41 @@ def _mouths(layers: dict, network: _Network, kerbs: _Kerbs, stops: _Stops,
     return out
 
 
-def _leg_forward(leg: _Leg) -> dict[int, bool]:
+class _World:
+    """A world as this module reads it, once: its layers, frame and street graph, its kerbs, and
+    as they are asked for its stop lines, crosswalk bands, and from them where each junction ends
+    along its legs (_mouths) and each leg's no-standing datums (_datums). What these find that OSM
+    is missing goes in `report`."""
+
+    def __init__(self, area: str, layers: dict, frame: LocalFrame, network: StreetGraph,
+                 report: Counter[str] | None = None):
+        self.layers, self.frame, self.network = layers, frame, network
+        self.report: Counter[str] = Counter() if report is None else report
+        self.kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
+
+    @classmethod
+    def of(cls, area: str, change: OsmChange | None = None, report: Counter[str] | None = None) -> _World:
+        layers, frame = osm_layers(area, change), LocalFrame(SNAPSHOT_AREAS[area])
+        return cls(area, layers, frame, StreetGraph(layers["roads"], frame), report)
+
+    @functools.cached_property
+    def stops(self) -> _Stops:
+        return _stops(self.layers, self.frame, self.network, self.report)
+
+    @functools.cached_property
+    def bands(self) -> dict[int, tuple[float, Polygon]]:
+        return _bands(self.layers, self.network, self.frame)
+
+    @functools.cached_property
+    def mouths(self) -> list[tuple[Leg, float]]:
+        return _mouths(self.network, self.kerbs, self.stops, self.bands)
+
+    @functools.cached_property
+    def datums(self) -> list[tuple[Leg, dict[str, float], int | None]]:
+        return _datums(self.network, self.kerbs, self.stops, self.bands, self.report)
+
+
+def _leg_forward(leg: Leg) -> dict[int, bool]:
     """Each way of `leg`, and whether it runs outward from the junction (its own direction)."""
     return {way: j > i for (way, i), (other, j) in itertools.pairwise(leg.steps) if way == other}
 
@@ -924,7 +823,7 @@ def _other(side: str) -> str:
     return "right" if side == "left" else "left"
 
 
-def _extension_sides(leg: _Leg, node: int | None, node_tags: dict[int, dict]) -> set[str]:
+def _extension_sides(leg: Leg, node: int | None, node_tags: dict[int, dict]) -> set[str]:
     """Which kerbs of `leg` - left and right looking out from its junction - its crosswalk's node
     gives a curb extension: `crossing:kerb_extension` (wiki), whose left and right are the
     direction of the way the node is on."""
@@ -938,20 +837,15 @@ def _extension_sides(leg: _Leg, node: int | None, node_tags: dict[int, dict]) ->
     return {value} if _leg_forward(leg).get(way, True) else {_other(value)}
 
 
-def existing_markings(area: str, kerb_extensions: bool = False,
-                      narrowing: frozenset[tuple[int, str]] = frozenset()) -> tuple[OsmChange, Counter[str]]:
+def existing_markings(area: str, kerb_extensions: bool = False) -> tuple[OsmChange, Counter[str]]:
     """Every street way split where its centre line is not painted, the stretch tagged
     `lane_markings=no`, and each piece's `width` measured between its kerbs - and what each was
     read from, and what OSM is missing. With `kerb_extensions` (the daylighting proposal's base),
     every crosswalk a junction claims is given a curb extension on each kerb, and the no-standing
-    zones follow from that tag as from one OSM already has - but on the kerbs in `narrowing`,
-    (crosswalk node, leg side) whose shorter zone would let cars stand in a corner's turn
-    (write_changes), the zone stays NO_STANDING_FT."""
-    layers = osm_layers(area)
-    frame = LocalFrame(SNAPSHOT_AREAS[area])
-    network = _Network(layers, frame)
-    kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
+    zones follow from that tag as from one OSM already has."""
     report: Counter[str] = Counter()
+    world = _World.of(area, report=report)
+    layers, frame, network, kerbs, stops = world.layers, world.frame, world.network, world.kerbs, world.stops
     ids = _ids_below(None)
     nodes: list[NewNode] = []
     ways: list[WayChange] = []
@@ -960,34 +854,30 @@ def existing_markings(area: str, kerb_extensions: bool = False,
     crossing_of: dict[int, dict] = {}
     for crossing in layers["crossings"]:
         if _marked(crossing["tags"]):
-            crossing_of |= {n: crossing for n in crossing["node_ids"] if n in network.on_node}
-    half_of = {n: (width_m(c["tags"].get("width")) or DEFAULT_WIDTHS_M["crossing"]) / 2
-               for n, c in crossing_of.items()}
-    stops = _stops(layers, frame, network, report)
+            crossing_of |= {n: crossing for n in crossing["node_ids"] if network.on_street(n)}
+    half_of = {n: _half(c) for n, c in crossing_of.items()}
 
     intervals: dict[int, list[tuple[float, float]]] = defaultdict(list)
     for node, half in half_of.items():
-        for way_id, i in network.on_node[node]:
+        for way_id, i in network.on_street(node):
             at = network.stations[way_id][i]
             intervals[way_id].append((at - half, at + half))
-    mouths = _mouths(layers, network, kerbs, stops, frame)
+    mouths = world.mouths
     for leg, mouth in mouths:
         marks = [(mouth, "where the junction ends")]
-        if (stop_at := network.stop_line(leg, stops)) is not None:
+        if (stop_at := _stop_line(leg, stops)) is not None:
             marks.append((stop_at, "its stop line"))
         reach, why = max(marks)
         report[f"junction legs: lane markings end at {why}"] += 1
         for way_id, a, b in leg.dark(min(reach, leg.length), network.stations):
             intervals[way_id].append((a, b))
 
-    datums = _datums(layers, network, kerbs, stops, frame, report)
-    node_tags = {n["id"]: n["tags"] for n in layers["traffic_control"] if "lon" in n}
+    datums = world.datums
     if kerb_extensions:
         # The daylighting proposal's curb extensions: `crossing:kerb_extension` on the node of
         # every crosswalk a junction claims (wiki Key:crossing:kerb_extension, which needs
         # `highway=crossing` on that node - given it where OSM has it only on the way), on both kerbs.
-        raw = fetch_borough_osm(bbox=SNAPSHOT_AREAS[area])
-        raw_nodes = raw["nodes"] if isinstance(raw["nodes"], dict) else {n["id"]: n for n in raw["nodes"]}
+        raw_nodes = fetch_borough_osm(SNAPSHOT_AREAS[area])["nodes"]
         crossing_of = {n: c for c in layers["crossings"] for n in c["node_ids"]}
         for node in {node for _leg, _datum, node in datums if node is not None}:
             tags = dict(raw_nodes[node].get("tags") or {})
@@ -995,24 +885,18 @@ def existing_markings(area: str, kerb_extensions: bool = False,
             if "crossing" not in tags and crossing_of[node]["tags"].get("crossing"):
                 tags["crossing"] = crossing_of[node]["tags"]["crossing"]
             tags["crossing:kerb_extension"] = "both"
-            node_tags[node] = tags
             nodes.append(NewNode(node, raw_nodes[node]["lon"], raw_nodes[node]["lat"], tags))
             report["curb extensions given (kerbs)"] += 2
 
     # Where the law forbids standing (R.S. 39:4-138(e)): out along each leg from its datum, on each
-    # kerb NO_STANDING_FT - or NO_STANDING_WITH_EXTENSION_FT where its crosswalk's node says a curb
-    # extension is built on that kerb (_extension_sides), unless cars standing that close would be
-    # in a corner's turn (`narrowing`).
+    # kerb NO_STANDING_FT.
     no_standing: dict[tuple[int, str], list[tuple[float, float, float]]] = defaultdict(list)
-    for leg, datum, node in datums:
-        extended, forward = _extension_sides(leg, node, node_tags), _leg_forward(leg)
+    for leg, datum, _node in datums:
+        forward = _leg_forward(leg)
         for side in ("left", "right"):
-            shorter = side in extended and (node, side) not in narrowing
-            report["no-standing zones kept at the full length: a shorter one would narrow a corner "
-                   "(kerbs)"] += side in extended and not shorter
-            feet = NO_STANDING_WITH_EXTENSION_FT if shorter else NO_STANDING_FT
+            feet = NO_STANDING_FT
             reach = datum[side] + feet * FT_TO_M
-            stop_at = network.stop_line(leg, stops)
+            stop_at = _stop_line(leg, stops)
             if stop_at is not None and stop_at > reach:
                 report["stop lines further out than the no-standing zone (leg kerbs)"] += 1
             for way_id, a, b in leg.dark(min(reach, leg.length), network.stations):
@@ -1022,13 +906,12 @@ def existing_markings(area: str, kerb_extensions: bool = False,
     # Each street's kerb to kerb, at every cross-section that meets its own kerb on both sides.
     sides: dict[int, tuple[Stations, np.ndarray, np.ndarray]] = {}   # way -> (stations, left, right)
     across: dict[int, tuple[np.ndarray, np.ndarray]] = {}    # way -> (stations, width or NaN)
-    ends = street_ends(list(network.streets.values()))
     for way_id, way in network.streets.items():
         # Each end's cross-section spans the join, as the reader's does: two ways of one street
         # share it, so their areas meet with no wedge between them where the street bends.
-        stations = Stations(network.lines[way_id], *beyond(way, ends, frame))
-        left = kerbs.hits(_street_key(way), stations, 1)
-        right = kerbs.hits(_street_key(way), stations, -1)
+        stations = Stations(network.lines[way_id], *network.beyond(way_id))
+        left = kerbs.hits(street_key(way), stations, 1)
+        right = kerbs.hits(street_key(way), stations, -1)
         sides[way_id] = (stations, left, right)
         across[way_id] = (stations.s, left + right)
 
@@ -1062,7 +945,7 @@ def existing_markings(area: str, kerb_extensions: bool = False,
     for way_id, way in network.streets.items():
         stations, left, right = sides[way_id]
         half = np.full(len(stations.s), carriageway_width_m(way["tags"])[0] / 2)
-        if not (way["tags"].get("width") or way["tags"].get("width:carriageway")):
+        if tagged_width(way["tags"]) is None:
             for lo, hi, key in block_at[way_id]:
                 if block_width[key]:
                     half[(stations.s >= lo) & (stations.s <= hi)] = block_width[key] / 2
@@ -1100,7 +983,7 @@ def existing_markings(area: str, kerb_extensions: bool = False,
         line = network.lines[way_id]
         dark = (_merged(intervals.get(way_id, []), line.length)
                 if _has_lane_markings(way["tags"]) and way["tags"].get("lane_markings") != "no" else [])
-        tagged = bool(way["tags"].get("width") or way["tags"].get("width:carriageway"))
+        tagged = tagged_width(way["tags"]) is not None
         junctions = [network.stations[way_id][i] for i, n in enumerate(way["node_ids"])
                      if n in network.junctions and 0 < i < len(way["node_ids"]) - 1]
         widths = [] if tagged else [block_width[key] for _lo, _hi, key in block_at[way_id]]
@@ -1158,11 +1041,7 @@ def _no_standing(tags: dict, sides=("left", "right")) -> dict:
     kept - and any `parking:both:*` written out per side so nothing contradicts it. The side's
     position (`parking:<side>=lane`, ...) is left as it is: the bay is still there, and only
     standing in it is not allowed (wiki Street parking)."""
-    both = {k[len("parking:both"):]: v for k, v in tags.items() if k.startswith("parking:both")}
-    out = {k: v for k, v in tags.items() if not k.startswith("parking:both")}
-    for side in ("left", "right"):
-        for rest, value in both.items():
-            out.setdefault(f"parking:{side}{rest}", value)
+    out = _per_side(tags)
     for side in sides:
         if out.get(f"parking:{side}:restriction") != "no_stopping":
             out[f"parking:{side}:restriction"] = "no_standing"
@@ -1177,11 +1056,9 @@ def _may_park(tags: dict, side: str, resign: bool = False) -> bool:
     not restricted. With `resign` - a proposal that re-signs the kerbs, the daylighting one - a
     restriction OSM records with no `:restriction:reason` is lifted: it is the blanket sign the
     curb extension replaces, and the statute's zone (reason `junction`) is what stays."""
-    kind = tags.get(f"parking:{side}") or tags.get("parking:both")
-    restriction = (tags.get(f"parking:{side}:restriction")
-                   or tags.get("parking:both:restriction") or "none")
-    reason = (tags.get(f"parking:{side}:restriction:reason")
-              or tags.get("parking:both:restriction:reason"))
+    kind = sided(tags, "parking", side)
+    restriction = sided(tags, "parking", side, ":restriction") or "none"
+    reason = sided(tags, "parking", side, ":restriction:reason")
     if resign and restriction in PROHIBITIONS and reason is None:
         restriction = "none"
     return kind not in ("no", "separate") and restriction not in PROHIBITIONS
@@ -1196,13 +1073,19 @@ def _resigned(tags: dict, sides: list[str]) -> dict:
     """`tags` without the restriction (and its reason) on `sides`, `parking:both:*` written out per
     side so the other kerb keeps its own: what a proposal that re-signs the kerbs but does not
     re-section them (retagged) does to a way - _section_tags drops them the same way."""
-    both = {k[len("parking:both"):]: v for k, v in tags.items() if k.startswith("parking:both")}
-    out = {k: v for k, v in tags.items() if not k.startswith("parking:both")}
-    for side in ("left", "right"):
-        for rest, value in both.items():
-            out.setdefault(f"parking:{side}{rest}", value)
     gone = tuple(f"parking:{side}:restriction" for side in sides)
-    return {k: v for k, v in out.items() if not k.startswith(gone)}
+    return {k: v for k, v in _per_side(tags).items() if not k.startswith(gone)}
+
+
+def _per_side(tags: dict) -> dict:
+    """`tags` with every `parking:both:*` written out as `parking:left:*` and `parking:right:*`,
+    where the side does not say otherwise - so one side can change and the other keep its own."""
+    out = {k: v for k, v in tags.items() if not k.startswith("parking:both")}
+    for key, value in tags.items():
+        if key.startswith("parking:both"):
+            for side in ("left", "right"):
+                out.setdefault(key.replace("parking:both", f"parking:{side}", 1), value)
+    return out
 
 
 def _openings(way: dict, line: LineString, sign: int, kerbs: _Kerbs, branches: list[dict],
@@ -1213,7 +1096,7 @@ def _openings(way: dict, line: LineString, sign: int, kerbs: _Kerbs, branches: l
     lowered kerb is mapped, its `width` about that node. Where both are mapped the traced kerb is
     the opening: an untagged driveway's width is the service default, a guess at it."""
     out = []
-    for k in np.flatnonzero(kerbs.lowered & (kerbs.owner == _street_key(way))):
+    for k in np.flatnonzero(kerbs.lowered & (kerbs.owner == street_key(way))):
         ends = [_station(line, c) for c in kerbs.segments[k].coords]
         # Only a kerb beside this way: one past its ends would project onto an end node.
         if not any(0 < s < line.length for s, _ in ends):
@@ -1221,7 +1104,7 @@ def _openings(way: dict, line: LineString, sign: int, kerbs: _Kerbs, branches: l
         if all(offset * sign > 0 for _s, offset in ends):
             out.append((min(s for s, _ in ends), max(s for s, _ in ends)))
     lowered = _merged(out, line.length)
-    node_st = _vertex_stations(line)
+    node_st = vertex_stations(line)
     for branch in branches:
         for end in (0, -1):
             node = branch["node_ids"][end]
@@ -1234,10 +1117,9 @@ def _openings(way: dict, line: LineString, sign: int, kerbs: _Kerbs, branches: l
                 if any(a <= at <= b for a, b in lowered):
                     report["driveways opened at their lowered kerb"] += 1
                     break
-                width = width_m(branch["tags"].get("width"))
-                if width is None:
+                width, tagged = width_or_default(branch["tags"], "width", "service")
+                if not tagged:
                     report["driveways with no width tag, the service default"] += 1
-                    width = DEFAULT_WIDTHS_M["service"]
                 out.append((at - width / 2, at + width / 2))
             break
     return _merged(out, line.length)
@@ -1252,24 +1134,14 @@ TURN_BOX_QUEUE_BICYCLES = int(in_unit("turn_box.queue", "1"))
 TURN_BOX_LENGTH_FT = BICYCLE_LENGTH_FT * TURN_BOX_QUEUE_BICYCLES
 
 
-class _Samples:
-    """Cross-sections of a line at stations `s` - Stations' shape, for _Kerbs.hits."""
-
-    def __init__(self, line: LineString, s: np.ndarray):
-        self.s = s
-        self.xy = np.array([line.interpolate(at).coords[0] for at in s])
-        tangents = [_tangent(line, at) for at in s]
-        self.left = np.array([[-t[1], t[0]] for t in tangents])
-
-
-def _samples(line: LineString, kerbs: _Kerbs, street: str) -> _Samples:
+def _samples(line: LineString, kerbs: _Kerbs, street: str) -> Stations:
     """Where to measure a way's kerbs: every STATION_STEP_M, and at every vertex of its own kerbs
     - a kerb is straight between its vertices, so together they hold every place it comes
     closest to the way."""
     own = kerbs.ends[kerbs.end_owner == street]
     at = [line.project(Point(c)) for c in own]
     s = np.concatenate([Stations(line).s, [a for a in at if 0 < a < line.length]])
-    return _Samples(line, np.unique(np.round(s, 3)))
+    return Stations(line, s=np.unique(np.round(s, 3)))
 
 
 def _narrow(line: LineString, kerbs: _Kerbs, street: str, need_m: float) -> list[tuple[float, float, float]]:
@@ -1305,7 +1177,7 @@ def _need_ft(row) -> float:
     return 2 * LANE_FT + track + row.parking_left_ft + row.parking_right_ft
 
 
-def _blocks(network: _Network, kerbs: _Kerbs, applied: pd.DataFrame) -> dict[int, tuple[float, float]]:
+def _blocks(network: StreetGraph, kerbs: _Kerbs, applied: pd.DataFrame) -> dict[int, tuple[float, float]]:
     """Each applied way's block's (need, least): what the block's section needs kerb to kerb, in
     feet - the most any of its ways' does, so a corner's unparked piece is sized like the parked
     block it is part of - and, in metres, the least kerb to kerb over every stretch of the block
@@ -1319,33 +1191,27 @@ def _blocks(network: _Network, kerbs: _Kerbs, applied: pd.DataFrame) -> dict[int
         ft = max(need[w] for w in block)
         least = min((there for w in block
                      for _lo, _hi, there in _narrow(network.lines[w], kerbs,
-                                                    _street_key(network.streets[w]), ft * FT_TO_M)),
+                                                    street_key(network.streets[w]), ft * FT_TO_M)),
                     default=0.0)
         out |= dict.fromkeys(block, (ft, least))
     return out
 
 
-def _route(network: _Network, proposal: Proposal) -> set[int]:
+def _route(network: StreetGraph, proposal: Proposal) -> set[int]:
     """The ways `proposal` chooses."""
     return {w["id"] for w in network.streets.values() if proposal.chooses(w["tags"])}
 
 
-def _abuts_zone(network: _Network, way: dict, end: int, side: str) -> bool:
+def _abuts_zone(network: StreetGraph, way: dict, end: int, side: str) -> bool:
     """Whether `way`'s kerb on `side` carries on, past its end (0 or -1), into a corner's
     no-standing zone: the same street's way that continues there tagged
     `parking:<side>:restriction:reason=junction` on that kerb, its sides read in its own direction."""
-    node = way["node_ids"][end]
-    for other_id, i in network.on_node[node]:
-        other = network.streets[other_id]
-        if other_id == way["id"] or _street_key(other) != _street_key(way):
-            continue
-        if i not in (0, len(other["node_ids"]) - 1):
-            continue
-        same = (i == len(other["node_ids"]) - 1) == (end == 0)   # it runs on in way's direction
-        own = side if same else _other(side)
-        if other["tags"].get(f"parking:{own}:restriction:reason") == "junction":
-            return True
-    return False
+    on = network.onward(way["id"], end)
+    if on is None:
+        return False
+    other, other_end = on
+    own = side if (other_end == -1) == (end == 0) else _other(side)   # sides swap where it turns round
+    return network.ways[other]["tags"].get(f"parking:{own}:restriction:reason") == "junction"
 
 
 def _free(spans: list[tuple[float, float]], length: float) -> list[tuple[float, float]]:
@@ -1358,7 +1224,7 @@ def _free(spans: list[tuple[float, float]], length: float) -> list[tuple[float, 
     return out + ([(at, length)] if length > at else [])
 
 
-def _stall_layout(network: _Network, applied: pd.DataFrame,
+def _stall_layout(network: StreetGraph, applied: pd.DataFrame,
                   crossed: dict[int, dict[str, list[tuple[float, float]]]],
                   ) -> dict[tuple[int, str], tuple[list[float], list[tuple[float, float]]]]:
     """Each parked kerb's stalls, laid along the kerb rather than way by way: its stretches between
@@ -1383,13 +1249,10 @@ def _stall_layout(network: _Network, applied: pd.DataFrame,
         """The parked kerb that carries on past `w`'s `end`: (way, its side, span, end entered)."""
         if not reaches(w, side, end):
             return None
-        node, street = network.streets[w]["node_ids"][end], _street_key(network.streets[w])
-        on = [(o, i) for o, i in network.on_node[node] if o != w
-              and _street_key(network.streets[o]) == street and i in (0, len(network.streets[o]["node_ids"]) - 1)]
-        if len(on) != 1:
+        on = network.onward(w, end)
+        if on is None:
             return None
-        o, i = on[0]
-        o_end = 0 if i == 0 else -1
+        o, o_end = on
         own = side if (o_end == 0) == (end == -1) else _other(side)   # turned round: sides swap
         if not reaches(o, own, o_end):
             return None
@@ -1456,7 +1319,7 @@ def _stall_layout(network: _Network, applied: pd.DataFrame,
     return out
 
 
-def _tag_pieces(way: dict, line: LineString, network: _Network, kerbs: _Kerbs, layers: dict,
+def _tag_pieces(way: dict, line: LineString, network: StreetGraph, kerbs: _Kerbs, layers: dict,
                 frame: LocalFrame, report: Counter[str], ids: Iterator[int], nodes: list[NewNode],
                 edits: dict, created: list[WayChange], tags: dict, parked: dict[str, int],
                 crossed_at: dict[str, list[tuple[float, float]]],
@@ -1477,7 +1340,7 @@ def _tag_pieces(way: dict, line: LineString, network: _Network, kerbs: _Kerbs, l
     sides = {"left": 1, "right": -1}
     starts = {side: stalls[(way["id"], side)][0] for side in parked}
     runs = {side: stalls[(way["id"], side)][1] for side in parked}
-    narrow = _narrow(line, kerbs, _street_key(way), need_ft * FT_TO_M) if need_ft else []
+    narrow = _narrow(line, kerbs, street_key(way), need_ft * FT_TO_M) if need_ft else []
     # Into and out of each narrowed stretch, on its wider side, a `placement=transition` piece
     # (wiki Key:placement) as long as the MUTCD taper for the most any marking moves - so the
     # markings have finished narrowing where the kerbs pinch them.
@@ -1557,7 +1420,7 @@ def _shift_m(a: dict, b: dict) -> float:
         return width_m(tags.get(key)) or 0.0
 
     def lanes(tags: dict) -> list[float]:
-        return sorted(width_m(v) or 0.0 for v in (tags.get("width:lanes") or "").split("|"))
+        return sorted(w or 0.0 for w in lane_widths(tags))
 
     la, lb = lanes(a), lanes(b)
     return (abs(w(a, "width") - w(b, "width")) / 2 + sum(abs(w(a, k) - w(b, k)) for k in keys)
@@ -1627,7 +1490,7 @@ def _narrowed(tags: dict, short_ft: float, least_m: float, report: Counter[str],
     return out
 
 
-def _design(network: _Network, route: set[int], kerb: str, resign: bool = False) -> pd.DataFrame:
+def _design(network: StreetGraph, route: set[int], kerb: str, resign: bool = False) -> pd.DataFrame:
     """The proposal as one table over every street way in the world: a row per way, every quantity
     a column, and every rule a vector operation over all of them at once.
 
@@ -1646,7 +1509,7 @@ def _design(network: _Network, route: set[int], kerb: str, resign: bool = False)
         "id": [w["id"] for w in ways],
         "length_m": [line.length for line in lines],
         "width_ft": [carriageway_width_m(w["tags"])[0] / FT_TO_M for w in ways],
-        "width_tagged": [carriageway_width_m(w["tags"])[1] == "from OSM" for w in ways],
+        "width_tagged": [tagged_width(w["tags"]) is not None for w in ways],
         "route": [w["id"] in route for w in ways],
         # A street whose centre line is painted - anywhere: `lane_markings=no` on a piece of it
         # (out of a junction) drops the centre line there, not the street's section.
@@ -1697,21 +1560,22 @@ def _section_tags(osm: dict, row, proposal: Proposal) -> dict:
         else:
             # An unparked kerb keeps what OSM says forbids it - the restriction and its reason.
             tags[f"parking:{side}"] = "no"
-            tags |= {key.replace("parking:both", f"parking:{side}", 1): v for key, v in osm.items()
-                     if key.startswith("parking:both:restriction")}
-            tags |= {key: v for key, v in osm.items() if key.startswith(f"parking:{side}:restriction")}
-        tags |= {f"shoulder:{side}": "yes", f"shoulder:{side}:markings": "hatched",
-                 f"shoulder:{side}:width": _ft(getattr(row, f"shoulder_{side}_ft"))}
+            tags |= {key: v for key, v in _per_side(osm).items() if key.startswith(f"parking:{side}:restriction")}
+        tags |= {f"shoulder:{side}": "yes", f"shoulder:{side}:width": _ft(getattr(row, f"shoulder_{side}_ft"))}
+        # Hatched - but with curb extensions a corner's no-standing zone is unmarked: the extension
+        # is that zone's marking (_extensions), and the turn inside its arc is the street's.
+        zone = proposal.kerb_extensions and tags.get(f"parking:{side}:restriction:reason") == "junction"
+        tags[f"shoulder:{side}:markings"] = "no" if zone else "hatched"
     return tags
 
 
 def _left(line: LineString, s: float) -> np.ndarray:
     """The unit vector square to `line` at station `s`, to its left."""
-    t = _tangent(line, s)
+    t = tangent(line, s)
     return np.array([-t[1], t[0]])
 
 
-def _junction_moves(network: _Network, blocks: list) -> dict[int, np.ndarray]:
+def _junction_moves(network: StreetGraph, blocks: list) -> dict[int, np.ndarray]:
     """How far each junction moves when the blocks into it are re-centred (`blocks`: leg, line,
     offset or None): on to every street through it at once - the move along each street's left
     there is that street's own offset at the junction, the mean of its re-centred blocks', or 0
@@ -1755,12 +1619,9 @@ def _recentred(area: str, base: OsmChange, report: Counter[str],
     tapers from there to its own offset. A block with no kerb pair mapped stays where OSM has it,
     but for the taper off a junction that moved. Without a `proposal` (existing.osc) only the
     blocks move: there is no section to fit, so no stretch is narrow."""
-    layers = apply_change(osm_layers(area), base)
-    frame = LocalFrame(SNAPSHOT_AREAS[area])
-    network = _Network(layers, frame)
-    kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
-    raw = fetch_borough_osm(bbox=SNAPSHOT_AREAS[area])
-    raw_nodes = raw["nodes"] if isinstance(raw["nodes"], dict) else {n["id"]: n for n in raw["nodes"]}
+    world = _World.of(area, base)
+    frame, network, kerbs = world.frame, world.network, world.kerbs
+    raw_nodes = fetch_borough_osm(SNAPSHOT_AREAS[area])["nodes"]
     need: dict[int, float] = {}
     if proposal is not None:
         design = _design(network, _route(network, proposal), proposal.kerb, proposal.kerb_extensions)
@@ -1771,7 +1632,7 @@ def _recentred(area: str, base: OsmChange, report: Counter[str],
     added: dict[int, list[tuple[int, float, int]]] = defaultdict(list)   # way -> (after index, d, node)
     new_nodes: list[NewNode] = []
     done: set[frozenset] = set()
-    blocks: list[tuple[_Leg, LineString, float | None, list]] = []   # (leg, its line, offset, stretches)
+    blocks: list[tuple[Leg, LineString, float | None, list]] = []   # (leg, its line, offset, stretches)
     for junction in network.junctions:
         for leg in network.legs(junction):
             key = frozenset(leg.nodes)
@@ -1784,15 +1645,15 @@ def _recentred(area: str, base: OsmChange, report: Counter[str],
             offsets, bumps = [], []                      # bumps: (from, to, correction, taper) in d
             for way_id in {way_id for way_id, _i in leg.steps}:
                 way, wline = network.streets[way_id], network.lines[way_id]
-                sampled = _samples(wline, kerbs, _street_key(way))
-                left = kerbs.hits(_street_key(way), sampled, 1)
-                right = kerbs.hits(_street_key(way), sampled, -1)
+                sampled = _samples(wline, kerbs, street_key(way))
+                left = kerbs.hits(street_key(way), sampled, 1)
+                right = kerbs.hits(street_key(way), sampled, -1)
                 both = np.isfinite(left) & np.isfinite(right)
                 middle = sampled.xy + sampled.left * ((left - right) / 2)[:, None]
                 offsets += [_station(line, point)[1] for point in middle[both]]
                 if way_id not in need:
                     continue
-                for lo, hi, _least in _narrow(wline, kerbs, _street_key(way), need[way_id]):
+                for lo, hi, _least in _narrow(wline, kerbs, street_key(way), need[way_id]):
                     there = both & (sampled.s >= lo) & (sampled.s <= hi)
                     if not there.any():
                         continue
@@ -1837,7 +1698,7 @@ def _recentred(area: str, base: OsmChange, report: Counter[str],
         # And how far each junction moved along the block, into it positive: the block's nodes
         # slide with it, so none is left behind it - over at least pi times that, where the
         # slide's ease cannot carry one node past the next.
-        alongs = [float(shared[node] @ _tangent(line, s)) * (1 if s == 0.0 else -1) if node in shared else 0.0
+        alongs = [float(shared[node] @ tangent(line, s)) * (1 if s == 0.0 else -1) if node in shared else 0.0
                   for node, s in ((leg.junction, 0.0), (leg.end, line.length))]
         if shift is None and not any(ends) and not any(alongs):
             continue
@@ -1922,17 +1783,17 @@ def _recentred(area: str, base: OsmChange, report: Counter[str],
     return OsmChange((*kept, *moved, *new_nodes), tuple(ways.values()))
 
 
-def _past_mouth(leg: _Leg, mouth: float, network: _Network) -> Iterator[int]:
+def _past_mouth(leg: Leg, mouth: float, network: StreetGraph) -> Iterator[int]:
     """Each piece of the leg past the junction's mouth, from it outward: the step it begins at. Past
     the pieces its tags say are the junction's own (INSIDE_JUNCTION) too: existing_markings split
-    them off at the mouth as it found it, and re-centring the street (_recentred) or splitting its
-    crosswalks (_crossing_pieces) moves the mouth found after."""
+    them off at the mouth as it found it, and re-centring the street (_recentred) moves the mouth
+    found after."""
     return (k for k in range(len(leg.steps) - 1)
             if leg.d[k + 1] > mouth + NODE_MATCH_M and leg.steps[k + 1][0] == leg.steps[k][0]
             and not INSIDE_JUNCTION.items() <= network.streets[leg.steps[k][0]]["tags"].items())
 
 
-def _track_ends(mouths: list[tuple[_Leg, float]], network: _Network, applied: pd.DataFrame,
+def _track_ends(mouths: list[tuple[Leg, float]], network: StreetGraph, applied: pd.DataFrame,
                 frame: LocalFrame, ids: Iterator[int], nodes: list[NewNode],
                 created: list[WayChange], report: Counter[str], proposal: Proposal) -> None:
     """Where the track meets each junction: it ends at the mouth (_mouths) of every leg of the
@@ -1945,7 +1806,7 @@ def _track_ends(mouths: list[tuple[_Leg, float]], network: _Network, applied: pd
     track stops: a two-stage turn box over the TURN_BOX_LENGTH_FT past its crosswalk (MUTCD
     9E.11) - `area:highway=cycleway` + `cycleway=two_stage_box` + the track's `surface:colour`,
     the value the 2020 draft Proposal:Two-stage bicycle turn's; OSM has no approved tag for the box."""
-    by_junction: dict[int, list[tuple[_Leg, float, int, float, float, bool | None, str | None]]] = defaultdict(list)
+    by_junction: dict[int, list[tuple[Leg, float, int, float, float, bool | None, str | None]]] = defaultdict(list)
     for leg, mouth in mouths:
         k = next(_past_mouth(leg, mouth, network), None)
         if k is None or leg.steps[k][0] not in applied.index:
@@ -1993,160 +1854,122 @@ def _track_ends(mouths: list[tuple[_Leg, float]], network: _Network, applied: pd
         report["two-stage turn boxes where the track ends"] += 1
 
 
-def _kerbside_at(leg: _Leg, at: float, side: str, applied: pd.DataFrame,
-                 forward: dict[int, bool]) -> tuple[float, float, float] | None:
-    """(half the carriageway, less any cycle lane between the kerb and its parking, the kerb's
-    spare, and that cycle lane) in metres, in the section of the way `at` along `leg` on its
-    `side` (looking out from the junction); None where no section is laid out there."""
-    k = next((k for k in range(len(leg.steps) - 1) if leg.d[k] <= at <= leg.d[k + 1]
-              and leg.steps[k][0] == leg.steps[k + 1][0]), None)
-    if k is None or leg.steps[k][0] not in applied.index:
-        return None
-    row = applied.loc[leg.steps[k][0]]
-    own = side if forward.get(leg.steps[k][0], True) else _other(side)
-    return ((row["width_ft"] / 2 - row[f"inside_{own}_ft"]) * FT_TO_M,
-            (row[f"shoulder_{own}_ft"] + row[f"parking_{own}_ft"]) * FT_TO_M, row[f"inside_{own}_ft"] * FT_TO_M)
+def _zone_end(leg: Leg, side: str, network: StreetGraph) -> float:
+    """How far out along `leg` its kerb on `side` (looking out from the junction) is a corner's
+    no-standing zone: its ways from the junction out tagged `parking:<side>:restriction:reason=junction`
+    on that kerb, each read in its own direction; 0 where the first is not."""
+    forward, end = _leg_forward(leg), 0.0
+    for ((way, _i), (other, _j)), d in zip(itertools.pairwise(leg.steps), leg.d[1:], strict=True):
+        if way != other:
+            continue
+        own = side if forward.get(way, True) else _other(side)
+        if network.ways[way]["tags"].get(f"parking:{own}:restriction:reason") != "junction":
+            break
+        end = float(d)
+    return end
 
 
-def _extensions(layers: dict, network: _Network, kerbs: _Kerbs, applied: pd.DataFrame,
-                crossings: dict[int, dict], frame: LocalFrame, ids: Iterator[int], nodes: list[NewNode],
-                created: list[WayChange], report: Counter[str]) -> None:
-    """Each painted curb extension, as OSM maps one. On each kerb a leg's crosswalk node gives an
-    extension (`crossing:kerb_extension`, _extension_sides): a painted area, a closed way
-    `road_marking=restriction` + `pattern=solid` + `colour=tan` (wiki Key:road_marking, its
-    no-parking marking, filled in the tan NYC paints a curb extension), from the kerb - the
-    mapped one where there is one (_Kerbs.hits), less any cycle lane at it - in across all the
-    kerb's spare to the section's travel lane, as parking is, and along it from the crosswalk's
-    near side to its far one (_band_span): as long as the crosswalk is wide, so it shortens the
-    crosswalk and stops short of the stop line, and none where the crosswalk does not cross it.
-    Its section is the kerb's on the block, the statute's NO_STANDING_WITH_EXTENSION_FT past where
-    the crosswalk meets that kerb (_datums). Where a mapped hatched area lies on it, only what that
-    area leaves is painted. In each area flexible posts, `barrier=bollard` + `bollard=flexible` nodes (wiki
-    Tag:barrier=bollard), down its middle (_posts). Where an extension would be under MIN_HATCH_FT
-    wide there is none. The crosswalk then crosses only the street between its extensions: its
-    ways - their tags as the proposal leaves them, in `crossings` - are split at each one's edges
-    (_crossing_pieces), and the piece over one is `highway=footway` + `footway=sidewalk`, or `footway=traffic_island`
-    where a cycle lane lies between it and the kerb (wiki Tag:footway=traffic_island)."""
+def _beside(edge: Edge, end: float, depth: float) -> Polygon:
+    """The street on a tangent edge's corner side (src/turning.py): `depth` in from it, and along it
+    from as far behind the junction out to `end`."""
+    p, o, n = edge.point, edge.out, edge.inward
+    return Polygon([p - depth * o, p + end * o, p + end * o + depth * n, p - depth * o + depth * n])
+
+
+def _paintable(piece) -> bool:
+    """Whether a piece of an extension is a polygon at least MIN_HATCH_FT wide."""
+    return isinstance(piece, Polygon) and not piece.buffer(-MIN_HATCH_FT * FT_TO_M / 2).is_empty
+
+
+def _extensions(area: str, change: OsmChange, ids: Iterator[int],
+                report: Counter[str]) -> tuple[list[NewNode], list[WayChange]]:
+    """Each painted curb extension in `change`'s world as drawn (src/osm_world.py:read), as OSM
+    maps one: a painted area, a closed way `road_marking=restriction` + `pattern=solid` +
+    `colour=tan` (wiki Key:road_marking, its no-parking marking, filled in the tan NYC paints a
+    curb extension). One shape per corner - between a leg's left kerb and the next leg
+    anticlockwise's right - where its crosswalk's node gives either kerb one
+    (`crossing:kerb_extension`, _extension_sides): the drawn street outside both legs' drawn travel
+    lanes - each leg's tangent edge, as a turn is measured (_tangent_edge), the corner between them
+    rounded to the EFFECTIVE_RADIUS_M arc tangent to both (src/turning.py), the turn inside it left
+    to traffic - and off every bikeway and its buffer, out along each leg to the end of its
+    no-standing zone (_zone_end): the zone's hatching, painted as the extension; each piece against
+    a travel lane, car or bike. A piece under MIN_HATCH_FT wide is not painted; each is
+    snapped to OSM_GRID_M, so it is whole as written. Flexible posts, `barrier=bollard` +
+    `bollard=flexible` nodes (wiki Tag:barrier=bollard), run down it, half its narrower end's width
+    in from the travel lanes (_posts). The crosswalk is left as OSM maps it: the reader paints the
+    extension over it (src/osm_world.py:_Reader.crossing). The nodes and ways it adds."""
+    layers, reader = read(area, change)
+    world = _World(area, layers, reader.frame, reader.graph)
+    frame, network, mouths = reader.frame, reader.graph, dict(world.mouths)
     node_tags = {n["id"]: n["tags"] for n in layers["traffic_control"] if "lon" in n}
-    stops = _stops(layers, frame, network, Counter())
-    reach = NO_STANDING_WITH_EXTENSION_FT * FT_TO_M
-    bands = _bands(layers, network, frame)
-    mapped_areas = [Polygon(ring.coords).buffer(0) for m in layers["road_markings"]
-                    if (ring := frame.line(m["coords_wgs84"])) is not None and len(ring.coords) >= 4]
-    posted: set[int] = set()
-    over: list[tuple[Polygon, str]] = []                                # (extension, footway on it)
-    for leg, datum, node in _datums(layers, network, kerbs, stops, frame, Counter()):
-        forward, line = _leg_forward(leg), leg.line()
-        for side in sorted(_extension_sides(leg, node, node_tags)):    # sorted: the .osc repeats
-            sign = 1 if side == "left" else -1
-            # Sized by the parking lane it replaces: the kerb's section on the block, where its
-            # no-standing zone ends.
-            if (block := _kerbside_at(leg, datum[side] + reach, side, applied, forward)) is None:
-                report["curb extensions not painted: no section laid out there (kerbs)"] += 1
+    node_of = {leg: node for leg, _datum, node in world.datums}
+    bikeway = shapely.union_all(reader.bikeway)
+    free = reader.carriageway().difference(bikeway)                     # the street off every bikeway
+    nodes: list[NewNode] = []
+    ways: list[WayChange] = []
+    for junction in sorted(network.junctions):
+        for a, b in network.corners(junction):
+            pair = ((a, "left", 1), (b, "right", -1))
+            if not any(side in _extension_sides(leg, node_of.get(leg), node_tags) for leg, side, _sign in pair):
                 continue
-            half, width, inside = block                       # across all the kerb's spare
-            if width < MIN_HATCH_FT * FT_TO_M:
-                report["curb extensions not painted: no parking lane or shoulder to paint it in (kerbs)"] += 1
+            edges = [_tangent_edge(reader, network, leg, sign, mouths.get(leg, 0.0)) for leg, _side, sign in pair]
+            reach = [_zone_end(leg, side, network) for leg, side, _sign in pair]
+            # Past both kerbs: each leg's zone starts past the other's kerb line (_datums).
+            depth = sum(reach) + OVERSHOOT_M
+            shape = free.intersection(_beside(edges[0], reach[0], depth)).intersection(_beside(edges[1], reach[1], depth))
+            ends = [e.point + e.out * out_to for e, out_to in zip(edges, reach, strict=True)]
+            meet = centre(*edges, 0.0)                         # where the two edges meet; None where they run on
+            corner = [] if meet is None else [meet]
+            # The corner rounded to the effective radius on the lane edges (NJDOT 6.4.3, src/turning.py):
+            # the turn inside the arc stays the street's.
+            if (turn := arc(*edges, EFFECTIVE_RADIUS_M)) is not None:
+                shape = shape.difference(Polygon([meet, *turn.coords]))
+                corner = list(turn.coords)
+            shape = shapely.set_precision(shape, OSM_GRID_M)
+            lanes = LineString([ends[0], *corner, ends[1]])    # the travel lanes' edge, round the corner
+            # Each piece carries the kerb out to a travel lane, car or bike: against one.
+            pieces = [piece for piece in shapely.get_parts(shape) if _paintable(piece)
+                      and min(piece.distance(lanes), piece.distance(bikeway)) < SEAM_M]
+            if not pieces:
+                report["curb extensions not painted: nothing outside the travel lanes there (corners)"] += 1
                 continue
-            span = _band_span(line, bands[node][1], sign * (half - width), sign * half)
-            if span is None or span[0] >= span[1]:
-                report["curb extensions not painted: the crosswalk does not cross where it would be (kerbs)"] += 1
-                continue
-            start, end = span
-            stations = Stations(shapely.ops.substring(line, start, end))
-            kerb = kerbs.hits(leg.street, stations, sign)
-            outer = stations.at(sign * (np.where(np.isfinite(kerb), kerb, half + inside) - inside))
-            inner = stations.at(np.full(len(stations.s), sign * (half - width)))
-            footprint = Polygon([*outer, *inner[::-1], outer[0]]).buffer(0)
-            # A mapped hatched area on this footprint is that much of the extension: posted, not painted twice.
-            on = [k for k, area in enumerate(mapped_areas) if footprint.intersection(area).area > 0]
-            for k in [k for k in on if k not in posted]:     # posted once, though two extensions meet it
-                posted.add(k)
-                _posts(line, mapped_areas[k], frame, ids, nodes)
-            rest = footprint.difference(shapely.union_all([mapped_areas[k] for k in on])) if on else footprint
-            for piece in shapely.get_parts(rest):
-                if isinstance(piece, Polygon) and not piece.buffer(-MIN_HATCH_FT * FT_TO_M / 2).is_empty:
-                    created.append(_closed_way(list(piece.exterior.coords),
-                                               {"road_marking": "restriction", "pattern": "solid",
-                                                "colour": "tan", "note": EXTENSION_NOTE}, ids, frame, nodes))
-                    _posts(line, piece, frame, ids, nodes)
-            report["curb extensions on a mapped hatched area, painted where it is not (kerbs)" if on
-                   else "curb extensions painted, with flexible posts (kerbs)"] += 1
-            over.append((footprint, "traffic_island" if inside > 0 else "sidewalk"))
-    for crossing in layers["crossings"]:
-        if crossing.get("node_ids"):
-            created.extend(_crossing_pieces(crossing, crossings[crossing["id"]], over, frame, ids, nodes, report))
+            wide = min((w for e, end in zip(edges, ends, strict=True) if (w := _width(free, end, e.inward, depth)) > 0),
+                       default=0.0)
+            middle = lanes.offset_curve(-wide / 2)
+            for piece in pieces:
+                ways.append(_closed_way(list(piece.exterior.coords),
+                                        {"road_marking": "restriction", "pattern": "solid",
+                                         "colour": "tan", "note": EXTENSION_NOTE}, ids, frame, nodes))
+                _posts(middle, piece, frame, ids, nodes)
+            report["corners with a curb extension, with flexible posts"] += 1
+    return nodes, ways
 
 
-def _crossing_pieces(crossing: dict, tags: dict, extensions: list[tuple[Polygon, str]], frame: LocalFrame,
-                     ids: Iterator[int], nodes: list[NewNode], report: Counter[str]) -> list[WayChange]:
-    """`crossing`, with `tags`, split where its band - the crossing its `width` wide (_bands) -
-    meets each curb extension it passes over, so no marked piece's band is on one, and each piece
-    over one a footway of that extension's kind: the longest marked piece keeps its id. None where
-    it passes over none."""
-    if (line := frame.line(crossing["coords_wgs84"])) is None:
-        return []
-    xy = np.asarray(line.coords)
-    node_st = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))])
-    band = line.buffer((width_m(tags.get("width")) or DEFAULT_WIDTHS_M["crossing"]) / 2, cap_style="flat")
-    spans = []
-    for footprint, kind in extensions:
-        if (on := band.intersection(footprint)).area > 0:
-            at = [line.project(Point(c)) for part in shapely.get_parts(on) for c in part.exterior.coords]
-            spans.append((min(at), max(at), kind))
-    cuts = [x for a, b, _kind in spans for x in (a, b) if NODE_MATCH_M < x < line.length - NODE_MATCH_M]
-    if not spans:
-        return []
-    node_ids, node_st, at = _split(line, crossing["node_ids"], node_st, cuts, ids, frame, nodes)
-    pieces = [(i, j, next((kind for a, b, kind in spans if a <= (node_st[i] + node_st[j]) / 2 <= b), None))
-              for i, j in _pieces(len(node_ids), at)]
-    keeps = max((p for p in pieces if p[2] is None), key=lambda p: node_st[p[1]] - node_st[p[0]], default=None)
-    out = []
-    for i, j, kind in pieces:
-        way_id = crossing["id"] if (i, j, kind) == keeps else next(ids)
-        out.append(WayChange(way_id, "modify" if way_id > 0 else "create", tuple(node_ids[i:j + 1]),
-                             {"highway": "footway", "footway": kind, "note": EXTENSION_NOTE} if kind
-                             else _with_note(tags, EXTENSION_NOTE)))
-        if kind:
-            report[f"crosswalk on a curb extension, now footway={kind} (ft)"] += round(
-                (node_st[j] - node_st[i]) / FT_TO_M)
-    report["crosswalks split at their curb extensions"] += 1
-    return out
+def _width(area: BaseGeometry, point: np.ndarray, inward: np.ndarray, depth: float) -> float:
+    """How far `area` runs in from `point` along `inward`, up to `depth`; 0 where it does not start there."""
+    ray = LineString([point, point + inward * depth]).intersection(area)
+    return next((LineString(part).length for part in line_parts(ray) if Point(part[0]).distance(Point(point)) < SEAM_M), 0.0)
 
 
-def _posts(line: LineString, area: Polygon, frame: LocalFrame, ids: Iterator[int], nodes: list[NewNode]) -> None:
-    """Flexible posts down the middle of `area` beside `line` - midway between its least and
-    greatest offsets, where that is in it - at most BOLLARD_SPACING_M apart, half that in from
-    each end."""
-    stations, offsets = zip(*(_station(line, xy) for xy in area.exterior.coords), strict=True)
-    along = np.unique(np.concatenate([np.arange(min(stations), max(stations), STATION_STEP_M), [max(stations)]]))
-    across = LineString([_at(line, x, (min(offsets) + max(offsets)) / 2) for x in along])
-    # Only where the line is in the area: a tapered area's tip is off its middle.
-    if not (inside := [LineString(p) for p in _lines(across.intersection(area))]):
-        return
-    middle = max(inside, key=lambda g: g.length)
-    count = max(1, math.ceil(middle.length / BOLLARD_SPACING_M))
-    for d in (np.arange(count) + 0.5) * middle.length / count:
-        nodes.append(NewNode(next(ids), *frame.wgs84(*middle.interpolate(d).coords[0]),
-                             {"barrier": "bollard", "bollard": "flexible"}))
+def _posts(path: LineString, area: Polygon, frame: LocalFrame, ids: Iterator[int], nodes: list[NewNode]) -> None:
+    """Flexible posts along `path` where it is in `area`, at most BOLLARD_SPACING_M apart, half
+    that in from each end."""
+    for piece in line_parts(path.intersection(area)):
+        middle = LineString(piece)
+        count = max(1, math.ceil(middle.length / BOLLARD_SPACING_M))
+        for d in (np.arange(count) + 0.5) * middle.length / count:
+            nodes.append(NewNode(next(ids), *frame.wgs84(*middle.interpolate(d).coords[0]),
+                                 {"barrier": "bollard", "bollard": "flexible"}))
 
 
-def turns(area: str, change: OsmChange) -> list[tuple[tuple, str, float, list[tuple[int, str]]]]:
+def turns(area: str, change: OsmChange) -> list[tuple[tuple, str, float]]:
     """Every corner's effective turning radius (src/turning.py) in `change`'s world as drawn
     (src/osm_world.py:read): the corner - its junction and its two legs, by street and the junction
-    each reaches - its name, the radius, and the curb extensions on it - (crosswalk node, leg side)
-    as _extension_sides reads them. A corner is between a leg and the next anticlockwise, the right
+    each reaches - its name and the radius. A corner is between a leg and the next anticlockwise, the right
     turn from the first into the second; none where a oneway's traffic cannot make it. The arc may
     not leave the drawn carriageway or touch a post, or cross into a strip a car may stand in."""
     layers, reader = read(area, change)
-    frame = LocalFrame(SNAPSHOT_AREAS[area])
-    network = _Network(layers, frame)
-    kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
-    stops = _stops(layers, frame, network, Counter())
-    mouth = dict(_mouths(layers, network, kerbs, stops, frame))
-    node_tags = {n["id"]: n["tags"] for n in layers["traffic_control"] if "lon" in n}
-    extensions = {leg: [(node, side) for side in _extension_sides(leg, node, node_tags)]
-                  for leg, _datum, node in _datums(layers, network, kerbs, stops, frame, Counter())}
+    network, mouth = reader.graph, dict(_World(area, layers, reader.frame, reader.graph).mouths)
     drivable = reader.carriageway().buffer(SEAM_M)
     # A parked strip shrunk by a seam: its edge is the lane's, which the arc may run along.
     blocked = shapely.union_all([Point(p["position_m"][:2]) for p in reader.out["props"] if p["type"] == "bollard"]
@@ -2155,24 +1978,18 @@ def turns(area: str, change: OsmChange) -> list[tuple[tuple, str, float, list[tu
     shapely.prepare(blocked)
     found = []
     for junction in sorted(network.junctions):
-        legs = [leg for leg in network.legs(junction) if leg.direction() is not None]
-        legs.sort(key=lambda leg: math.atan2(leg.direction()[1], leg.direction()[0]))
-        for a, b in zip(legs, legs[1:] + legs[:1], strict=True):
-            out_in, out_exit = a.direction(), b.direction()
-            if a is b or a.outbound or b.inbound or out_in[0] * out_exit[1] - out_in[1] * out_exit[0] <= 0:
+        for a, b in network.corners(junction):
+            if a.outbound or b.inbound or not is_corner(a, b):
                 continue
             radius = effective_radius(*(_tangent_edge(reader, network, leg, side, mouth[leg]) for leg, side in ((a, 1), (b, -1))),
                                       drivable, blocked)
             if radius is None:
                 continue
-            corner = [e for e in extensions.get(a, []) if e[1] == "left"] + [
-                e for e in extensions.get(b, []) if e[1] == "right"]
-            found.append(((junction, a.street, a.end, b.street, b.end), f"{a.street} to {b.street}",
-                          radius, corner))
+            found.append(((junction, a.street, a.end, b.street, b.end), f"{a.street} to {b.street}", radius))
     return found
 
 
-def _tangent_edge(reader, network: _Network, leg: _Leg, side: int, mouth: float) -> Edge:
+def _tangent_edge(reader, network: StreetGraph, leg: Leg, side: int, mouth: float) -> Edge:
     """The leg's tangent edge on `side` (+1 its left; src/turning.py): its travel lane's edge as
     the reader drew it where its first piece past the junction's mouth begins, straight along the
     leg's direction there and from the junction out."""
@@ -2185,7 +2002,7 @@ def _tangent_edge(reader, network: _Network, leg: _Leg, side: int, mouth: float)
         forward, at = j > i, 0 if j > i else -1
         on_left = (side > 0) == forward              # the way's own left, where the leg's side is
         edge = float(np.atleast_1d(left if on_left else -right)[at])
-    out = _tangent(line, s)
+    out = tangent(line, s)
     return Edge(_at(line, s, side * edge) - out * s, out, side)    # carried straight back to the junction
 
 
@@ -2199,10 +2016,8 @@ def two_way_bikeway(area: str, base: OsmChange, proposal: Proposal) -> tuple[Osm
     report: Counter[str] = Counter()
     kerb_extensions = proposal.kerb_extensions
     base = _recentred(area, base, report, proposal)
-    layers = apply_change(osm_layers(area), base)
-    frame = LocalFrame(SNAPSHOT_AREAS[area])
-    network = _Network(layers, frame)
-    kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
+    world = _World.of(area, base)
+    layers, frame, network, kerbs = world.layers, world.frame, world.network, world.kerbs
     ids = _ids_below(base)
     edits: dict[int, tuple[tuple[int, ...] | None, dict]] = {}   # way -> (new node list, tags)
     nodes: list[NewNode] = []
@@ -2212,7 +2027,7 @@ def two_way_bikeway(area: str, base: OsmChange, proposal: Proposal) -> tuple[Osm
     design = _design(network, route, proposal.kerb, resign=kerb_extensions)
     applied = design[design["applies"]]
     # Each junction leg's mouth - its crosswalk - and the stretch of each way inside it.
-    mouths = _mouths(layers, network, kerbs, _stops(layers, frame, network, Counter()), frame)
+    mouths = world.mouths
     inside = _junction_interiors(mouths, network)
     if kerb_extensions:
         kept = _design(network, route, proposal.kerb)
@@ -2268,14 +2083,15 @@ def two_way_bikeway(area: str, base: OsmChange, proposal: Proposal) -> tuple[Osm
     # lane only (MUTCD 3B.16), from the new centre line to that lane's edge - never on across the
     # kerbside hatching or parking. Joined to a restriped way at a node, else that of its nearest
     # street (a stop line need not be joined: wiki Key:road_marking).
-    restriped = [w for w in centre_of if w in network.lines]
+    restriped = [w for w in centre_of if w in network.streets]
     nearest_of = STRtree([network.lines[w] for w in restriped]) if restriped else None
     for stop_way in layers["stop_lines"]:
         stop = frame.line(stop_way["coords_wgs84"])
         if stop is None or nearest_of is None:
             continue
-        joined = [w for w in restriped if set(stop_way["node_ids"]) & set(network.streets[w]["node_ids"])]
-        if not joined and not set(stop_way["node_ids"]) & set(network.on_node):
+        on = {w for n in stop_way["node_ids"] for w, _i in network.on_street(n)}
+        joined = [w for w in restriped if w in on]
+        if not joined and not on:
             joined = [restriped[int(nearest_of.query_nearest(stop.interpolate(0.5, normalized=True))[0])]]
         if not joined:
             continue
@@ -2294,10 +2110,10 @@ def two_way_bikeway(area: str, base: OsmChange, proposal: Proposal) -> tuple[Osm
     on_street = STRtree(lines_of)
     deleted = []
     for marking in layers["road_markings"]:
-        area = frame.line(marking["coords_wgs84"])
-        if marking["id"] < 0 or area is None or len(area.coords) < 4:
+        ring = frame.line(marking["coords_wgs84"])
+        if marking["id"] < 0 or ring is None or len(ring.coords) < 4:
             continue
-        middle = Polygon(area.coords).representative_point()
+        middle = Polygon(ring.coords).representative_point()
         if any(lines_of[k].distance(middle) <= halves[k] for k in on_street.query(middle.buffer(max(halves)))):
             deleted.append(WayChange(marking["id"], "delete", (), {}))
             report["painted areas on restriped streets, deleted"] += 1
@@ -2307,10 +2123,9 @@ def two_way_bikeway(area: str, base: OsmChange, proposal: Proposal) -> tuple[Osm
     crossing_of = {n: c for c in layers["crossings"] for n in c["node_ids"]}
     zebra = {c["id"] for c in layers["crossings"] if _marked(c["tags"])}
     zebra |= {crossing_of[n]["id"] for w in route for n in network.streets[w]["node_ids"] if n in crossing_of}
-    stops = _stops(layers, frame, network, Counter())
     for junction in network.junctions:
         for leg in network.legs(junction):
-            if (n := network.claimed(leg, crossing_of, stops)) is not None:
+            if (n := _claimed(leg, crossing_of, world.stops)) is not None:
                 zebra.add(crossing_of[n]["id"])
     report["crosswalks made continental"] = len(zebra)
     for crossing in layers["crossings"]:
@@ -2328,58 +2143,37 @@ def two_way_bikeway(area: str, base: OsmChange, proposal: Proposal) -> tuple[Osm
             by_id[way_id] = WayChange(way_id, "modify",
                                       node_ids or tuple(in_layers[way_id]["node_ids"]), tags)
     if kerb_extensions:
-        # Only a mapped area the restriping keeps can be an extension already; a crosswalk is
-        # split with its continental markings.
-        gone = {way.id for way in deleted}
-        extended: list[WayChange] = []
-        _extensions(layers | {"road_markings": [m for m in layers["road_markings"] if m["id"] not in gone]},
-                    network, kerbs, applied,
-                    {c["id"]: by_id[c["id"]].tags if c["id"] in by_id else c["tags"] for c in layers["crossings"]},
-                    frame, ids, nodes, extended, report)
+        added, extended = _extensions(area, OsmChange((*base.nodes, *nodes), (*by_id.values(), *created, *deleted)),
+                                      ids, report)
+        nodes += added
         by_id |= {way.id: way for way in extended}
     return OsmChange((*base.nodes, *nodes), (*by_id.values(), *created, *deleted)), report
 
 
 # --- writing an area's changes ------------------------------------------------------------------
 
-# Each proposal's change, built on the change it starts from. An area has a proposal where its
-# .osc already exists (proposals/<area>/): the file is what says the proposal is made there.
-def write_changes(area: str, proposals: bool = True) -> dict[str, Counter[str]]:
+def write_changes(area: str, proposals: bool = True, into: Path = PROPOSALS_DIR) -> dict[str, Counter[str]]:
     """Write `area`'s existing.osc - every area has one - and, with `proposals`, the .osc of each
-    proposal file it has (proposals/<area>/<name>.toml, Proposal), all from the pull now cached;
-    what each found, by file."""
-    from src.sources.osm_change import PROPOSALS_DIR, proposal_path, write_change
-
+    proposal file it has (proposals/<area>/<name>.toml, Proposal), all from the pull now cached,
+    to `into`/<area>/; what each found, by file."""
     existing, found = existing_markings(area)
     existing = _recentred(area, existing, found)
-    write_change(existing, proposal_path(area, "existing"))
+    write_change(existing, into / area / "existing.osc")
     reports = {"existing": found}
-    today = {key: radius for key, _name, radius, _ext in turns(area, existing)} if proposals else {}
+    today = {key: radius for key, _name, radius in turns(area, existing)} if proposals else {}
     for path in sorted((PROPOSALS_DIR / area).glob("*.toml")) if proposals else []:
         proposal = Proposal.load(path)
         change, report = _proposed(area, proposal)
-        if proposal.kerb_extensions:
-            # Every corner gets its curb extensions; their shorter no-standing zone is kept only
-            # where it leaves the corner's effective radius at least EFFECTIVE_RADIUS_M, or as wide
-            # as the corner is without them where that is less (NJDOT 6.4.3, src/turning.py):
-            # measured on the proposal without its extensions and with them all, and on a corner
-            # it would narrow every extended kerb keeps NO_STANDING_FT.
-            without = {key: radius for key, _name, radius, _ext in
-                       turns(area, _proposed(area, dataclasses.replace(proposal, kerb_extensions=False))[0])}
-            narrowing = frozenset(e for key, _name, radius, ext in turns(area, change)
-                                  if radius < min(EFFECTIVE_RADIUS_M, without.get(key, 0.0)) for e in ext)
-            if narrowing:
-                change, report = _proposed(area, proposal, narrowing)
         # Corners the proposal leaves narrower than today's and under EFFECTIVE_RADIUS_M, by name;
         # today's own are only counted - where OSM maps no kerb the corner is drawn square, so a
         # radius there measures what OSM is missing.
-        for key, name, radius, _ext in turns(area, change):
+        for key, name, radius in turns(area, change):
             if radius < min(EFFECTIVE_RADIUS_M, today.get(key, 0.0)):
                 report[f"corners narrowed under {EFFECTIVE_RADIUS_M / FT_TO_M:g} ft (NJDOT 6.4.3): "
                        f"{name}, {today[key] / FT_TO_M:.0f} to {radius / FT_TO_M:.0f} ft"] += 1
             report[f"corners under {EFFECTIVE_RADIUS_M / FT_TO_M:g} ft effective radius"] += radius < EFFECTIVE_RADIUS_M
         reports[proposal.name] = report
-        write_change(change, proposal_path(area, proposal.name))
+        write_change(change, into / area / f"{proposal.name}.osc")
     return reports
 
 
@@ -2396,14 +2190,12 @@ def retagged(area: str, base: OsmChange, proposal: Proposal) -> tuple[OsmChange,
     lane at the kerb (_extensions). Where a rule lays a track (`cycleway:<side>=track`) at the
     kerb, it is carried across each junction, or ends in a turn box (_track_ends)."""
     report: Counter[str] = Counter()
-    frame = LocalFrame(SNAPSHOT_AREAS[area])
-    layers = apply_change(osm_layers(area), base)
+    world = _World.of(area, base)
+    layers, frame, network = world.layers, world.frame, world.network
     edits = {way.id: way for way in base.ways}
-    streets = [(way, line) for way in layers["roads"] if is_street(way["tags"])
-               and (line := frame.line(way.get("coords_wgs84") or [])) is not None]
+    streets = [(way, network.lines[way_id]) for way_id, way in network.streets.items()]
     lengths = {way["id"]: line.length for way, line in streets}
     shifts: dict[tuple[int, int], float] = {}                     # (way, side sign) -> metres
-    moved: dict[int, list] = {}                                   # painted area -> its coordinates as moved
     retagged_ids: set[int] = set()
     for way in [way for way, _line in streets] + [c for c in layers["crossings"] if c.get("node_ids")]:
         rules = [tags for ways, tags in proposal.retag if proposal.chooses(way["tags"], ways)]
@@ -2454,42 +2246,33 @@ def retagged(area: str, base: OsmChange, proposal: Proposal) -> tuple[OsmChange,
         if own.keys() != set(own.values()):
             edits[marking["id"]] = WayChange(marking["id"], "modify", tuple(own[n] for n in marking["node_ids"]),
                                              _with_note(marking["tags"], proposal.note))
-        moved[marking["id"]] = [[nodes[own[n]].lon, nodes[own[n]].lat] for n in marking["node_ids"]]
         report["painted areas moved out with the parking"] += 1
-    # Each kerb's section as built after the retag, read from its tags as the reader lays it
-    # (kerb_section): the cycle lane inside its parking, the parking lane's depth, a shoulder - for
-    # _extensions, which paints each curb extension across the parking lane and the shoulder - and
-    # on the ways the proposal retags, a track at the kerb, for _track_ends, which carries it across
-    # each junction.
-    network = _Network(layers, frame)
+    # Each kerb's shoulder as built after the retag, read from its tags as the reader lays it
+    # (kerb_section), and on the ways the proposal retags a track at the kerb: for _track_ends,
+    # which carries the track across each junction.
     rows = {}
     for way_id, way in network.streets.items():
         tags = edits[way_id].tags if way_id in edits else way["tags"]
         row = {"width_ft": carriageway_width_m(tags)[0] / FT_TO_M, "track_ft": 0.0}
         for side in ("left", "right"):
             kerb = kerb_section(tags, side)
-            row |= {f"inside_{side}_ft": _inside_m(tags, side) / FT_TO_M,
-                    f"parking_{side}_ft": kerb.parking_m / FT_TO_M,
-                    f"shoulder_{side}_ft": kerb.shoulder_m / FT_TO_M}
+            row[f"shoulder_{side}_ft"] = kerb.shoulder_m / FT_TO_M
             if way_id in retagged_ids and tags.get(f"cycleway:{side}") == "track" and kerb.cycleway_at_kerb:
-                row |= {"track_ft": (width_m(tags.get(f"cycleway:{side}:width")) or DEFAULT_WIDTHS_M["cycleway"]) / FT_TO_M,
+                row |= {"track_ft": width_or_default(tags, f"cycleway:{side}:width", "cycleway")[0] / FT_TO_M,
                         "track_left": side == "left",
                         "track_along": None if tags.get(f"cycleway:{side}:oneway") == "no" else rides_along(tags, side),
                         "track_colour": tags.get(f"cycleway:{side}:surface:colour")}
         rows[way_id] = row
     applied = pd.DataFrame.from_dict(rows, orient="index")
-    kerbs = _Kerbs(layers, frame, network, SNAPSHOT_AREAS[area])
     extended: list[NewNode] = []
     created: list[WayChange] = []
-    if proposal.kerb_extensions:
-        # A mapped area is an extension where it lies: as drawn, moved out with the parking.
-        drawn = [m | {"coords_wgs84": moved[m["id"]]} if m["id"] in moved else m for m in layers["road_markings"]]
-        _extensions(layers | {"road_markings": drawn}, network, kerbs, applied,
-                    {c["id"]: edits[c["id"]].tags if c["id"] in edits else c["tags"] for c in layers["crossings"]},
-                    frame, ids, extended, created, report)
     if applied["track_ft"].any():
-        mouths = _mouths(layers, network, kerbs, _stops(layers, frame, network, Counter()), frame)
-        _track_ends(mouths, network, applied, frame, ids, extended, created, report, proposal)
+        _track_ends(world.mouths, network, applied, frame, ids, extended, created, report, proposal)
+    if proposal.kerb_extensions:
+        added, ways = _extensions(area, OsmChange(tuple((nodes | {n.id: n for n in extended}).values()),
+                                                  tuple((edits | {w.id: w for w in created}).values())), ids, report)
+        extended += added
+        created += ways
     nodes |= {node.id: node for node in extended}
     edits |= {way.id: way for way in created}
     return OsmChange(tuple(nodes.values()), tuple(edits.values())), report
@@ -2501,7 +2284,7 @@ def _shoulders(tags: dict) -> dict:
     lanes (lane_count) and the cycle lane, parking and shoulder its tags lay leave of its `width`,
     to the inch, added to any shoulder it has. None where nothing is left, or where its tags say a
     kerb has no shoulder (`shoulder:<side>=no`), as a piece inside a junction's do (_inside_junction)."""
-    if "no" in ((tags.get(f"shoulder:{side}") or tags.get("shoulder:both")) for side in ("left", "right")):
+    if "no" in (sided(tags, "shoulder", side) for side in ("left", "right")):
         return {}
     kerbs = {side: kerb_section(tags, side) for side in ("left", "right")}
     left_m = carriageway_width_m(tags)[0] - lane_count(tags) * LANE_FT * FT_TO_M - sum(
@@ -2520,11 +2303,9 @@ def _inside_m(tags: dict, side: str) -> float:
     return kerb.cycleway_m if kerb.cycleway_at_kerb else 0.0
 
 
-def _proposed(area: str, proposal: Proposal,
-              narrowing: frozenset[tuple[int, str]] = frozenset()) -> tuple[OsmChange, Counter[str]]:
-    """`proposal` laid on `area`'s existing conditions, with the curb extensions it asks for but
-    those in `narrowing` (existing_markings)."""
-    base = existing_markings(area, kerb_extensions=proposal.kerb_extensions, narrowing=narrowing)[0]
+def _proposed(area: str, proposal: Proposal) -> tuple[OsmChange, Counter[str]]:
+    """`proposal` laid on `area`'s existing conditions, with the curb extensions it asks for."""
+    base = existing_markings(area, kerb_extensions=proposal.kerb_extensions)[0]
     if proposal.retag:
         return retagged(area, _recentred(area, base, Counter()), proposal)
     return two_way_bikeway(area, base, proposal)

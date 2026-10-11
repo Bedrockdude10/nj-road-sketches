@@ -1,48 +1,14 @@
-"""Static checks for the errors that only surface on a path nobody ran.
-
-This exists because of a specific miss. Collapsing a multi-line import in
-scripts/build_all.py dropped `fetch_buildings`, which is referenced only under
-`--render-3d`. Every test passed, a full 2D build passed, and the break surfaced minutes
-later in a worker process - as a NameError wrapped in a ProcessPoolExecutor traceback,
-which is about the least legible way an error can arrive.
-
-Nothing dynamic was needed to catch it: a static pass reports an undefined name in under a
-second, without importing anything or running Blender. That is the right shape of guard for
-a repo with slow, rarely-exercised branches (3D rendering, the network paths, one scenario
-per site that only one site defines).
-
-Two checkers run here, both configured at the repo root and both treated the same way - if the
-tool cannot run, that is a failure, not a pass:
-
-  * RUFF (ruff.toml), over every .py file, for what one file gets wrong on its own.
-  * IMPORT-LINTER (.importlinter), over the import graph, for what no single file can show you -
-    a blender script reaching into the venv, a config read dragging in shapely, geometry
-    importing the thing that draws it.
-
-Two things changed when ruff replaced a `python -m pyflakes` subprocess:
-
-  * FINDINGS ARE RULE CODES, NOT SUBSTRINGS. The old version decided what was fatal by
-    matching "undefined name" against stdout, so a reworded message would have silently
-    retired the guard.
-  * A MISSING CHECKER IS A FAILURE, NOT A PASS. This is the bug that mattered. pyflakes was
-    never in requirements.txt - it happened to be in the working venv. On any other machine
-    `python -m pyflakes` exited 1 with its complaint on STDERR; the old code read exit 1 as
-    "ran fine, had findings", found an empty stdout, and reported success. The guard against
-    silent breakage was itself silently broken. So: the checker is pinned in requirements.txt
-    - the same one every other dependency is in, deliberately not a separate dev file - and if
-    it cannot be run this file FAILS and says how to install it.
-"""
+"""Static checks for the errors that only surface on a path nobody ran - a Blender script, a
+proposal only one area has: ruff (ruff.toml) over every .py file, import-linter (.importlinter)
+over the import graph, and mypy (mypy.ini) over its typed modules. A checker that cannot run is a
+failure, not a pass: every one is pinned in requirements.txt, and this says how to install it."""
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# `sites` was missing until 2026-08-17, and it is the directory where a rule is most
-# likely to be quietly re-invented - the consolidation that removed six duplicated
-# constants and four duplicated functions from it left nine unused imports behind,
-# and nothing said so. A linter that does not read a directory is not linting it.
-TARGETS = ["src", "scripts", "sites", "tests", "conftest.py"]
+TARGETS = ["src", "scripts", "tests"]
 RUFF = Path(sys.executable).parent / "ruff"
 LINT_IMPORTS = Path(sys.executable).parent / "lint-imports"
 MYPY = Path(sys.executable).parent / "mypy"

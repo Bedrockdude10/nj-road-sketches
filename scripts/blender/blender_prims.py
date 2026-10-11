@@ -1,21 +1,6 @@
-"""Primitive meshes WITHOUT `bpy.ops.mesh.primitive_*_add`. Imported by blender_props.py - runs under
-Blender's bundled Python.
-
-WHY THIS EXISTS. Every `bpy.ops.mesh.primitive_*_add` call does work proportional to the number of
-objects ALREADY in the scene - it deselects all of them and re-syncs the view layer. Measured on
-this Blender (4.3), adding a unit cube: 3.7 ms each at 500 objects, 15.6 ms at 1,000, 32 ms at
-1,500, 51 ms at 2,000 - and 0.08-0.11 ms flat for the same cube built from bmesh and linked
-directly, at every size up to 4,000. A prop is three to eight primitives, so building a borough's
-streetlights, signals, hydrants and tactile pads through the operator layer is quadratic: four
-junctions' worth of props (100 props, 2,400 objects) took 41 s, which is 98% of that scene's
-build, and a whole borough extrapolates to hours. One junction never saw it (blender_geometry.py
-already learned the same lesson for markings and slabs).
-
-These take the operator's own keyword names so a call site changes by one line, and build the same
-mesh: the bmesh operators are what the `bpy.ops` primitives call underneath. Each returns the new
-object, linked into the current collection, with no selection or active-object side effect - the
-operators' only OTHER effect, which nothing here relied on.
-"""
+"""Primitive meshes from bmesh, not `bpy.ops.mesh.primitive_*_add`, whose cost grows with every
+object already in the scene (3.7 ms a cube at 500 objects, 51 ms at 2,000, against 0.1 ms flat
+this way). They take the operators' own keyword names. Imported by blender_props.py."""
 import bpy
 
 
@@ -62,11 +47,3 @@ def add_cube(size: float = 2.0, location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.
     bmesh, bm = _new_bmesh()
     bmesh.ops.create_cube(bm, size=size)
     return _object_from(bm, "Cube", location, rotation)
-
-
-def add_uv_sphere(radius: float = 1.0, segments: int = 32, ring_count: int = 16,
-                  location=(0.0, 0.0, 0.0), rotation=(0.0, 0.0, 0.0)):
-    """`primitive_uv_sphere_add`."""
-    bmesh, bm = _new_bmesh()
-    bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=ring_count, radius=radius)
-    return _object_from(bm, "Sphere", location, rotation)

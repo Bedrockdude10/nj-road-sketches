@@ -3,22 +3,21 @@
 proposals/<area>/<scenario>.osc is a real osmChange file (OSM API 0.6) - JOSM reads it - so a
 proposal is stated in OSM's own terms and nothing else: tags on a way, a way split where its
 tags change (wiki Street parking: "The roadway needs to be split up where any of the properties
-changes"), a new way such as a road_marking=restriction area. `apply_change` applies one to the
-layers `osm_layers` returns, routing every created or modified way through the same predicates
-`osm_layers` sorts OSM by, so a proposed scenario is drawn by exactly the code that draws the
-street as OSM records it. Nothing downstream knows an element came from a proposal.
+changes"), a new way such as a road_marking=restriction area. `apply_change` applies one to OSM
+itself, before src/sources/osm_context.py:osm_layers sorts it into layers, so a proposed scenario
+is drawn by exactly the code that draws the street as OSM records it. Nothing downstream knows an element came from a proposal.
 
 Supported: <create> node (a vertex, or with tags a feature of its own) and way, <modify> node
 (moved, or retagged) and way, <delete> way. Every created or modified way
 carries a `note` (OSM's Key:note) saying where it came from - a proposal with no provenance is
-refused, as an observation with no `source` is.
+refused.
 """
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 PROPOSALS_DIR = Path(__file__).resolve().parents[2] / "proposals"
 
@@ -47,10 +46,6 @@ class WayChange:
 class OsmChange:
     nodes: tuple[NewNode, ...]
     ways: tuple[WayChange, ...]
-
-
-def proposal_path(area: str, scenario: str) -> Path:
-    return PROPOSALS_DIR / area / f"{scenario}.osc"
 
 
 _ACTIONS = ("create", "modify", "delete")
@@ -152,81 +147,26 @@ def write_change(change: OsmChange, path: Path) -> None:
     tree.write(path, encoding="utf-8", xml_declaration=True)
 
 
-def apply_change(layers: dict[str, list[dict]], change: OsmChange) -> dict[str, list[dict]]:
-    """`layers` (osm_layers' shape) with `change` applied. Pure: the input is never mutated."""
-    from src.sources.osm_context import WAY_LAYERS, height_from_tags
-
-    out = {name: list(items) for name, items in layers.items()}
-    # A way clipped at the snapshot's edge has fewer coords than node ids, so it places nothing.
-    coords = {node_id: list(coord) for items in out.values() for way in items
-              if isinstance(way, dict) and way.get("node_ids")
-              and len(way["node_ids"]) == len(way.get("coords_wgs84") or ())
-              for node_id, coord in zip(way["node_ids"], way["coords_wgs84"], strict=True)}
-    coords |= {node.id: [node.lon, node.lat] for node in change.nodes}
-    # A moved node moves everything that uses it - every way through it the change does not itself
-    # rewrite, and the node itself where a layer holds it (a kerb, a signal) - so nothing joined to
-    # a re-centred street is left behind at the old spot.
-    from src.sources.osm_context import NODE_LAYERS
-
-    def route_node(node: NewNode) -> None:
-        """A node feature into each node layer its tags belong in, as osm_layers sorts OSM's."""
-        entry = {"lon": node.lon, "lat": node.lat, "tags": dict(node.tags), "id": node.id}
-        for name, predicate in NODE_LAYERS:
-            if predicate(node.tags):
-                mixed = any(isinstance(i, dict) and "coords_wgs84" in i for i in out.get(name, []))
-                out.setdefault(name, []).append({"coords_wgs84": None, **entry} if mixed else entry)
-
-    moved = {node.id: node for node in change.nodes if node.id > 0}
-    if moved:
-
-        def placed(item: Any) -> Any:
-            if not isinstance(item, dict):
-                return item
-            ids = item.get("node_ids") or []
-            if ids and len(ids) == len(item.get("coords_wgs84") or ()) and moved.keys() & set(ids):
-                return {**item, "coords_wgs84": [coords[node_id] for node_id in ids]}
-            return item
-
-        def a_node(item: Any) -> bool:
-            return isinstance(item, dict) and "lon" in item and not item.get("coords_wgs84")
-
-        # A modified node is its whole new self, as a modified way is: dropped from every node
-        # layer, then routed by its new tags - a crossing node given `crossing:kerb_extension`, or
-        # a node that only now becomes `highway=crossing`, lands where OSM's own would.
-        out = {name: [placed(item) for item in items if not (a_node(item) and item["id"] in moved)]
-               for name, items in out.items()}
-        for node in moved.values():
-            route_node(node)
-    # A created node with tags is a feature in its own right - a bollard, say - not only a vertex.
-    for node in change.nodes:
-        if node.id < 0 and node.tags:
-            route_node(node)
-
-    for change_way in _canonical(change).ways:
-        if change_way.action != "create":
-            # A modify is the way's whole new self, as in osmChange: drop the old one everywhere
-            # and route the new one, since its new tags may sort it into other layers.
-            held = sum(isinstance(way, dict) and way.get("id") == change_way.id
-                       for items in out.values() for way in items)
-            if not held:
-                raise ValueError(f"{change_way.action} way/{change_way.id}: not in this area")
-            out = {name: [way for way in items
-                          if not isinstance(way, dict) or way.get("id") != change_way.id]
-                   for name, items in out.items()}
-        if change_way.action == "delete":
-            continue
-        missing = [node_id for node_id in change_way.node_ids if node_id not in coords]
+def apply_change(snapshot: dict, change: OsmChange) -> dict:
+    """`snapshot` (src/sources/osm_context.py:fetch_borough_osm's shape) with `change` applied, as
+    the OSM API would: a created or moved node is its whole new self, a modified way too, and a
+    deleted way is gone - so everything joined to a moved node moves with it. Changed ways come
+    after the rest, in canonical order. Pure: the input is never mutated."""
+    nodes = {k: v for k, v in snapshot["nodes"].items()
+             if k not in {node.id for node in change.nodes if node.id > 0}}
+    for node in [n for n in change.nodes if n.id > 0] + [n for n in change.nodes if n.id < 0]:
+        nodes[node.id] = {"type": "node", "id": node.id, "lon": node.lon, "lat": node.lat,
+                          "tags": dict(node.tags)}
+    ways = {way["id"]: way for way in snapshot["ways"]}
+    changed = _canonical(change).ways
+    for way in changed:
+        if way.action != "create" and way.id not in ways:
+            raise ValueError(f"{way.action} way/{way.id}: not in this area")
+        missing = [node_id for node_id in way.node_ids if node_id not in nodes]
         if missing:
-            raise ValueError(f"{change_way.action} way/{change_way.id}: nodes {missing} are not "
-                             f"in this area or the change")
-        way = {"coords_wgs84": [coords[node_id] for node_id in change_way.node_ids],
-               "tags": dict(change_way.tags), "id": change_way.id,
-               "node_ids": list(change_way.node_ids)}
-        for name, predicate, min_coords in WAY_LAYERS:
-            if predicate(change_way.tags) and len(change_way.node_ids) >= min_coords:
-                entry = dict(way)
-                if name == "buildings":
-                    recorded = height_from_tags(change_way.tags)
-                    entry["height_m"], entry["height_source"] = recorded if recorded else (None, None)
-                out.setdefault(name, []).append(entry)
-    return out
+            raise ValueError(f"{way.action} way/{way.id}: nodes {missing} are not in this area or the change")
+    gone = {way.id for way in changed}
+    return {**snapshot, "nodes": nodes,
+            "ways": [way for way in snapshot["ways"] if way["id"] not in gone]
+            + [{"type": "way", "id": way.id, "nodes": list(way.node_ids), "tags": dict(way.tags)}
+               for way in changed if way.action != "delete"]}

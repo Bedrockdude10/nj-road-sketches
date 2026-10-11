@@ -1,22 +1,16 @@
-"""Fetch + disk-cache CC0 assets from Poly Haven's public API (api.polyhaven.com)
-for Phase 4 render fidelity. Poly Haven's ToS asks for a unique User-Agent per
-application - reuses the same one as Overpass/Nominatim (src/sources/overpass.py).
-
-Every fetch function returns None on failure rather than raising - a missing
-texture/model must never hard-fail scripts/phase4_render_3d.py when there's no
-network access. Callers (blender_scene.py) fall back to flat colors / procedural
-geometry - see README.md "Phase 4 fidelity" section for what's real vs. procedural."""
-import json
+"""Fetch and disk-cache CC0 textures from Poly Haven's public API (api.polyhaven.com), under this
+project's User-Agent (Poly Haven's ToS asks for a unique one). Returns None on failure rather than
+raising: a missing texture never fails a render, which falls back to a flat colour."""
 from pathlib import Path
 
 import requests
 
-from src.sources.overpass import NOMINATIM_USER_AGENT
+from src.sources.overpass import USER_AGENT
 
 POLYHAVEN_API = "https://api.polyhaven.com"
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # src/render/assets.py -> repo root
 CACHE_DIR = REPO_ROOT / "output" / ".textures"
-HEADERS = {"User-Agent": NOMINATIM_USER_AGENT}
+HEADERS = {"User-Agent": USER_AGENT}
 TIMEOUT = 30
 
 
@@ -87,33 +81,3 @@ def fetch_polyhaven_texture(slug: str, resolution: str = "2k",
             return None
         out[map_name] = dest
     return out
-
-
-def fetch_polyhaven_model(slug: str, resolution: str = "1k") -> Path | None:
-    """Download (or reuse cached) a Poly Haven model as a glTF bundle (the .gltf
-    JSON + its .bin + referenced textures, preserving the relative folder layout
-    the glTF expects). Returns the local path to the .gltf file, or None."""
-    model_dir = CACHE_DIR / "models" / f"{slug}_{resolution}"
-    gltf_path = model_dir / f"{slug}_{resolution}.gltf"
-    manifest_path = model_dir / "_manifest.json"  # marks a fully-downloaded bundle
-
-    # Checked before the manifest fetch, so a complete bundle costs no network at all.
-    if manifest_path.exists():
-        return gltf_path
-
-    manifest = _manifest(slug)
-    if manifest is None:
-        return None
-    try:
-        gltf_entry = manifest["gltf"][resolution]["gltf"]
-    except KeyError:
-        return None
-
-    if not _download(gltf_entry["url"], gltf_path):
-        return None
-    for rel_path, file_info in gltf_entry.get("include", {}).items():
-        if not _download(file_info["url"], model_dir / rel_path):
-            return None
-
-    manifest_path.write_text(json.dumps({"slug": slug, "resolution": resolution}))
-    return gltf_path

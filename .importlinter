@@ -1,18 +1,10 @@
-# Architectural rules that were documentation only, made executable.
-#
-# Enforced by tests/test_lint.py, the same way ruff.toml is. Each contract below is a rule the
-# README already states in prose; none of them was checked, and all three have the same failure
-# signature - an import added in the wrong place works fine for whoever added it and breaks on a
-# path they were not running.
-#
-#   lint-imports          # to run it directly
+# Architectural rules, made executable; enforced by tests/test_lint.py.  Run: lint-imports
 
 [importlinter]
 root_packages =
     src
     scripts
-# Required for the blender contract, which forbids the project's own third-party dependencies
-# and not just first-party modules.
+# Required for the blender contract, which forbids the project's own third-party dependencies.
 include_external_packages = True
 
 
@@ -27,19 +19,11 @@ forbidden_modules =
     geopandas
     shapely
     numpy
-    matplotlib
-    trimesh
-    pydantic
     pyproj
     yaml
-# scripts/blender/*.py run inside BLENDER'S OWN interpreter (blender --background --python),
-# which has bpy and mathutils and none of this. There is no import error to discover here at
-# edit time, at test time, or during a 2D build: the first thing that fails is a 3D render,
-# minutes in, and the traceback comes back through a subprocess. That is the same shape as the
-# `fetch_buildings` miss that tests/test_lint.py exists for.
-#
-# The sibling blender_*.py modules are imported by bare name after a sys.path insert, so they
-# read as external here and are deliberately not listed.
+# scripts/blender/*.py run inside Blender's own interpreter, which has bpy and mathutils and none
+# of this: the first thing to fail would be a render, minutes in, inside a subprocess. The sibling
+# blender_*.py modules are imported by bare name, so they read as external and are not listed.
 
 
 [importlinter:contract:sources-do-not-know-how-they-are-drawn]
@@ -49,8 +33,6 @@ source_modules =
     src.sources
 forbidden_modules =
     src.render
-# src/render/assets.py imports the Overpass user agent from src.sources, never the reverse: what
-# OSM says is read once, and every drawing is a reader of it.
 
 
 [importlinter:contract:standards-is-stdlib-only]
@@ -62,7 +44,6 @@ forbidden_modules =
     src.osm_world
     src.osm_osc
     src.sources
-    src.geometry
     src.render
     requests
     geopandas

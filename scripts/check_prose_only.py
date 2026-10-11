@@ -20,19 +20,14 @@ HEAD, so plain uncommitted-vs-HEAD is unchanged.
 EXIT 0 means prose-only: no behaviour can have changed, and a full test run is not required
 to establish that. EXIT 1 names the files whose code moved, and those DO need the suite.
 
-THE ONE EXCEPTION IT REPORTS SEPARATELY. Five scripts pass their module docstring to argparse
-or print it as help (build_all, corridor_render, corridor_report, export_all_scenarios,
-diff_exports), so for those the docstring IS user-facing output rather than commentary.
-corridor_report.py reads `__doc__.splitlines()[0]` and so depends on its FIRST LINE. Edits
-there are flagged as needing a `--help` eyeball, because no AST check can see that.
+THE ONE EXCEPTION IT REPORTS SEPARATELY. Three scripts print their module docstring as help
+(DOC_AS_HELP), so for those the docstring IS user-facing output rather than commentary. Edits there
+are flagged as needing a `--help` eyeball, because no AST check can see that.
 """
 from __future__ import annotations
 import argparse, ast, subprocess, sys, pathlib
 
-DOC_AS_HELP = {
-    "scripts/build_all.py", "scripts/corridor_render.py", "scripts/corridor_report.py",
-    "scripts/export_all_scenarios.py", "scripts/diff_exports.py",
-}
+DOC_AS_HELP = {"scripts/render_osm.py", "scripts/write_osc.py", "scripts/verify.py"}
 
 class StripDocstrings(ast.NodeTransformer):
     """Remove docstring statements; leave every other statement in place."""

@@ -1,12 +1,8 @@
-"""Street-furniture prop builders: streetlight (real glTF asset, procedural
-fallback), signage incl. traffic signals (procedural - no CC0
-traffic-sign/signal-head source found, see README.md "Phase 4 fidelity"), and
-trees (geometry-nodes instancing of one procedural low-poly mesh). Placement
-(position/heading/which corner gets what) is decided upstream in
-src/render/props.py - this module only ever draws a prop at a given position.
-Imported by blender_scene.py - runs under Blender's bundled Python."""
+"""The props a world carries (src/osm_world.py emits them): traffic signal poles with their
+vehicle heads, pedestrian signal heads and push buttons, flex posts, and trees instanced from one
+low-poly mesh. Procedural, at real colours and sizes - no CC0 model of any was found. Imported by
+blender_scene.py, under Blender's own Python."""
 import math
-from pathlib import Path
 
 import bpy
 
@@ -14,215 +10,32 @@ import blender_materials
 import blender_prims as prims
 from blender_materials import make_retroreflective_material
 
-# MUTCD-ish colors for procedurally-built signage (no CC0 traffic-sign model
-# was found - see README.md "Phase 4 fidelity"). Real geometric shape/color,
-# just not a downloaded asset.
-STOP_SIGN_RED = (0.55, 0.03, 0.03)
-SCHOOL_ZONE_YELLOW_GREEN = (0.75, 0.85, 0.05)
+# Colours and sizes: real ones where a standard or a product gives them, matched by eye otherwise.
 SIGN_POST_GRAY = (0.35, 0.35, 0.37)
-NO_TURN_ON_RED_WHITE = (0.92, 0.92, 0.9)
-# MUTCD warning yellow, for the W-series plates a bikeway terminus needs (W9-5, W16-21P).
-# Distinct from SCHOOL_ZONE_YELLOW_GREEN, which is the fluorescent yellow-GREEN reserved for
-# school and pedestrian/bicycle crossing warnings - a W9-5 is ordinary yellow and reading the
-# two as one colour would draw the wrong sign.
-WARNING_SIGN_YELLOW = (0.85, 0.72, 0.02)
 SIGNAL_HOUSING_DARK = (0.08, 0.08, 0.08)
 PED_SIGNAL_HOUSING_DARK = (0.1, 0.1, 0.1)
-VEHICLE_SIGNAL_LENS_COLORS = [
-    (0.85, 0.05, 0.05),  # red (top)
-    (0.85, 0.65, 0.05),  # yellow (middle)
-    (0.05, 0.55, 0.15),  # green (bottom)
-]
-# ---- The sizes the PLAN VIEW draws these at too ------------------------------------------
-# Every figure in this block is mirrored in feet in src/render/props.py, which cannot import this
-# module (it runs in Blender's own interpreter - see .importlinter) and so keeps a copy.
-# tests/test_props.py:test_prop_dimensions_match_the_3d_builders reads these by AST and fails on a
-# change made to one side only: a prop built at one size here and drawn at another in plan is two
-# claims about one object with nothing to say which view is wrong, which is the same trap the
-# stripe widths are already pinned against.
-#
-# They were bare literals inside the builders, which is why the plan view drew all fourteen of
-# these as fixed-size dots for as long as it did - there was no figure to draw them at.
-SIGN_POST_RADIUS_M = 0.04
-SIGN_PLATE_THICKNESS_M = 0.03
-STOP_SIGN_PLATE_RADIUS_M = 0.3
-YIELD_SIGN_PLATE_RADIUS_M = 0.38
-BIKE_WARNING_PLATE_RADIUS_M = 0.38
-SCHOOL_ZONE_PLATE_RADIUS_M = 0.35
-# The rectangular white plates: NO TURN ON RED (R10-11) and the R9-23 turn-box sign, which is the
-# same builder. Thin along the facing axis, so the WIDTH is what a plan sees.
-RECTANGULAR_PLATE_THICKNESS_M = 0.02
-RECTANGULAR_PLATE_WIDTH_M = 0.3
-RECTANGULAR_PLATE_HEIGHT_M = 0.2
-PED_SIGNAL_HEAD_WIDTH_M = 0.28
-PED_SIGNAL_HEAD_HEIGHT_M = 0.32
-PED_SIGNAL_POST_RADIUS_M = 0.05
-TRAFFIC_SIGNAL_POLE_RADIUS_M = 0.1
-MAST_ARM_RADIUS_M = 0.05
-VEHICLE_SIGNAL_HEAD_WIDTH_M = 0.32
-VEHICLE_SIGNAL_HEAD_HEIGHT_M = 0.85
-HYDRANT_RADIUS_M = 0.09
-
-TRAFFIC_SIGNAL_POLE_HEIGHT_M = 5.5  # taller than the streetlight pole (4.5 m) - matches a real signal pole
-# Real arm length is a full-width mast arm (see sites/README.md / config.yaml signals.pole_type), computed
-# per-corner from real adjacent leg widths in src/render/props.py and passed in as each prop's arm_length_m. This
-# constant is only a fallback for a prop dict missing that field (e.g. a site with no signals.pole_type data).
-TRAFFIC_SIGNAL_ARM_LENGTH_M = 2.2
-PED_SIGNAL_MOUNT_HEIGHT_M = 2.3  # typical pedestrian signal head mounting height
-
-# RRFB (Rectangular Rapid Flashing Beacon): a MUTCD W11-2 pedestrian-crossing
-# diamond sign (same fluorescent yellow-green as the school zone sign) with two
-# rectangular amber beacon bars mounted just below it. No CC0 RRFB/traffic-sign
-# model exists on Poly Haven - checked api.polyhaven.com/assets?type=models for
-# "sign"/"traffic"/"beacon"/"light"/"post" keywords and found nothing closer
-# than a concrete road barrier - so this is procedural, like the other signage.
-RRFB_SIGN_YELLOW_GREEN = SCHOOL_ZONE_YELLOW_GREEN
-RRFB_BEACON_AMBER = (0.95, 0.55, 0.05)
-RRFB_MOUNT_HEIGHT_M = 2.3
-RRFB_POST_RADIUS_M = 0.05          # mirrored in plan - see the block above
-RRFB_PLATE_THICKNESS_M = 0.03
-RRFB_PLATE_WIDTH_M = 0.4
-
-# Plastic flex-post delineator/bollard: white (Danny, 2026-10-07), banded with white
-# retroreflective tape. No CC0 bollard model was found, so this is the same "procedural, but with
-# real colours and dimensions" approach as the rest of this file.
-BOLLARD_POST_WHITE = (0.92, 0.92, 0.90)
-BOLLARD_REFLECTIVE_WHITE = (0.96, 0.96, 0.94)
-# 42 in. SPECIFIED, not derived - the height asked for. Flex posts are sold in 28, 36 and
-# 48 in as well; 42 in is a common daylighting/bike-lane height and is tall enough to sit in
-# a driver's sight line rather than under the hood line. Was 0.9 m (35 in).
-BOLLARD_HEIGHT_M = 42 * 0.0254
-BOLLARD_RADIUS_M = 0.05
-# The banding follows the pattern MUTCD gives for tubular markers: at least two bands of
-# retroreflective sheeting, the top one close to the top, and gaps no wider than a band.
-# Three of them here - the post has to read at the distance these renders are shot from, and
-# a single band 0.6 m up did not. Sizes are in inches because that is how tape is sold.
-BOLLARD_BAND_HEIGHT_M = 3 * 0.0254
-BOLLARD_BAND_GAP_M = 4 * 0.0254
-BOLLARD_TOP_TO_FIRST_BAND_M = 2 * 0.0254
-BOLLARD_BAND_COUNT = 3
-# Bands stand proud of the post, the way a wrapped sleeve does. Also what makes them read as
-# separate rings rather than a smear: flush at 1.02x they were sub-pixel against the post.
-BOLLARD_BAND_RADIUS_SCALE = 1.18
-
-
-def import_gltf_template(gltf_path: str | None, name: str):
-    """Import a glTF once and return it as a hidden template object for
-    add_streetlight() to make cheap linked duplicates of (shared mesh data,
-    not full copies - the actual performance-relevant instancing here).
-    Returns None if there's no path or the import fails."""
-    if not gltf_path or not Path(gltf_path).exists():
-        return None
-    try:
-        before = set(bpy.data.objects)
-        bpy.ops.import_scene.gltf(filepath=gltf_path)
-        imported = [o for o in bpy.data.objects if o not in before]
-        if not imported:
-            return None
-        if len(imported) > 1:
-            bpy.ops.object.select_all(action="DESELECT")
-            for obj in imported:
-                obj.select_set(True)
-            bpy.context.view_layer.objects.active = imported[0]
-            bpy.ops.object.join()
-        template = bpy.context.view_layer.objects.active
-        template.name = name
-        template.hide_render = True
-        template.hide_set(True)
-        return template
-    except Exception as e:
-        print(f"  WARNING: glTF import failed for {gltf_path!r} ({e}) - using a procedural fallback instead")
-        return None
-
-
-def add_streetlight(name: str, position: tuple, heading_deg: float, template, pole_mat, head_mat):
-    if template is not None:
-        obj = template.copy()
-        bpy.context.collection.objects.link(obj)
-        obj.name = name
-        obj.location = (position[0], position[1], 0.0)
-        obj.rotation_euler = (0, 0, math.radians(heading_deg))
-        obj.hide_render = False
-        obj.hide_set(False)
-        return obj
-
-    # Procedural fallback: a plain pole + small head, used if the Poly Haven
-    # model couldn't be fetched (no network) - not what ships when online.
-    x, y = position
-    pole = prims.add_cylinder(radius=0.08, depth=4.5, location=(x, y, 2.25))
-    pole.name = f"{name}_pole"
-    pole.data.materials.append(pole_mat)
-    head = prims.add_cube(size=0.35, location=(x, y, 4.6))
-    head.name = f"{name}_head"
-    head.scale = (1, 1, 0.5)
-    head.data.materials.append(head_mat)
-    return pole
-
-
-def _add_post_sign(name: str, position: tuple, heading_deg: float, n_sides: int, plate_radius: float,
-                    plate_color: tuple, post_mat):
-    """Shared shape for procedurally-built signage: a thin post + a flat
-    regular-polygon plate facing `heading_deg`. Used for stop signs (n_sides=8,
-    red) and the school zone sign (n_sides=5, yellow-green) - real MUTCD shapes
-    and colors, just not a downloaded model (no CC0 traffic-sign source found)."""
-    x, y = position
-    post = prims.add_cylinder(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
-    post.name = f"{name}_post"
-    post.data.materials.append(post_mat)
-
-    plate = prims.add_cylinder(radius=plate_radius, depth=SIGN_PLATE_THICKNESS_M,
-                                vertices=n_sides, location=(x, y, 2.15))
-    plate.name = f"{name}_plate"
-    plate.rotation_euler = (math.radians(90), 0, math.radians(heading_deg))
-    plate_mat = blender_materials.shared_material(f"{name}_plate_mat", plate_color, roughness=0.35)
-    plate.data.materials.append(plate_mat)
-    return post
-
-
-def add_stop_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    return _add_post_sign(name, position, heading_deg, n_sides=8,
-                           plate_radius=STOP_SIGN_PLATE_RADIUS_M,
-                           plate_color=STOP_SIGN_RED, post_mat=post_mat)
-
-
-def add_school_zone_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    return _add_post_sign(name, position, heading_deg, n_sides=5,
-                           plate_radius=SCHOOL_ZONE_PLATE_RADIUS_M,
-                           plate_color=SCHOOL_ZONE_YELLOW_GREEN, post_mat=post_mat)
-
-
-def add_bike_warning_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    """A yellow DIAMOND warning plate on a post - the MUTCD W-series shape, used here for
-    W9-5 (BIKE LANE ENDS) and the W16-21P two-way-bicycle-cross-traffic plaque.
-
-    n_sides=4 on a cylinder puts vertices on the local axes, so once _add_post_sign stands the
-    plate up one vertex is straight up: a diamond, not a square. Legend text is not modelled at
-    this scale on any sign here - shape and colour are what the render can honestly carry."""
-    return _add_post_sign(name, position, heading_deg, n_sides=4,
-                           plate_radius=BIKE_WARNING_PLATE_RADIUS_M,
-                           plate_color=WARNING_SIGN_YELLOW, post_mat=post_mat)
-
-
-def add_yield_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    """A downward-pointing white/red TRIANGLE - MUTCD R1-2, which OSM's highway=give_way nodes
-    produce. It had a plan-view marker and no builder here, so a yielding approach appeared in
-    2D and vanished in 3D; the two views draw the same street or neither is trustworthy.
-
-    n_sides=3 gives an UPWARD point, so the plate is rolled 180 degrees about its own facing
-    axis - that roll is what makes it a yield sign rather than a nameless triangle."""
-    post = _add_post_sign(name, position, heading_deg, n_sides=3,
-                           plate_radius=YIELD_SIGN_PLATE_RADIUS_M,
-                           plate_color=STOP_SIGN_RED, post_mat=post_mat)
-    plate = bpy.data.objects[f"{name}_plate"]
-    plate.rotation_euler = (math.radians(90), math.radians(180), math.radians(heading_deg))
-    return post
+VEHICLE_SIGNAL_LENS_COLORS = [(0.85, 0.05, 0.05), (0.85, 0.65, 0.05), (0.05, 0.55, 0.15)]  # top down
+TRAFFIC_SIGNAL_POLE_HEIGHT_M, TRAFFIC_SIGNAL_POLE_RADIUS_M, MAST_ARM_RADIUS_M = 5.5, 0.1, 0.05
+VEHICLE_SIGNAL_HEAD_WIDTH_M, VEHICLE_SIGNAL_HEAD_HEIGHT_M = 0.32, 0.85
+PED_SIGNAL_MOUNT_HEIGHT_M, PED_SIGNAL_POST_RADIUS_M = 2.3, 0.05
+PED_SIGNAL_HEAD_WIDTH_M, PED_SIGNAL_HEAD_HEIGHT_M = 0.28, 0.32
+# A flex post: white (Danny, 2026-10-07), 42 in tall (a common daylighting height), banded with
+# retroreflective tape as MUTCD bands a tubular marker - the top band near the top, gaps no wider
+# than a band - and the bands proud of the post, as a wrapped sleeve is, so they read as rings.
+BOLLARD_POST_WHITE, BOLLARD_REFLECTIVE_WHITE = (0.92, 0.92, 0.90), (0.96, 0.96, 0.94)
+BOLLARD_HEIGHT_M, BOLLARD_RADIUS_M = 42 * 0.0254, 0.05
+BOLLARD_BAND_HEIGHT_M, BOLLARD_BAND_GAP_M, BOLLARD_TOP_TO_FIRST_BAND_M = 3 * 0.0254, 4 * 0.0254, 2 * 0.0254
+BOLLARD_BAND_COUNT, BOLLARD_BAND_RADIUS_SCALE = 3, 1.18
+# An accessible push button, at its 42-48 in mounting height (MUTCD/PROWAG).
+PUSHBUTTON_POST_HEIGHT_M, PUSHBUTTON_POST_RADIUS_M = 1.2, 0.04
+PUSHBUTTON_HOUSING_YELLOW = (0.85, 0.72, 0.08)
+PUSHBUTTON_HOUSING_DEPTH_M, PUSHBUTTON_HOUSING_WIDTH_M, PUSHBUTTON_HOUSING_HEIGHT_M = 0.06, 0.13, 0.2
 
 
 def add_vehicle_signal_head(name: str, position: tuple, heading_deg: float, housing_mat):
     """Procedural 3-section vehicle signal head: a dark housing box with 3
     stacked red/yellow/green lenses on the face pointed at `heading_deg` -
-    real MUTCD color/layout, not a downloaded model (no CC0 traffic-signal
-    source found - same approach already used for the stop sign)."""
+    real MUTCD color/layout."""
     x, y, z = position
     face = math.radians(heading_deg)
     fx, fy = math.cos(face), math.sin(face)
@@ -244,21 +57,10 @@ def add_vehicle_signal_head(name: str, position: tuple, heading_deg: float, hous
 
 
 def add_traffic_signal_pole(name: str, position: tuple, head_facing_deg: float, pole_mat, housing_mat,
-                             arm_heading_deg: float | None = None, arm_length_m: float = TRAFFIC_SIGNAL_ARM_LENGTH_M):
-    """Full-width mast-arm signal - the confirmed pole type for this
-    intersection (NOT a short pole-mounted rigid/davit arm, NOT span-wire; see
-    sites/README.md `signals` block / config.yaml). A tall post + a
-    horizontal arm + a procedural 3-section vehicle head at the arm's end.
-
-    arm_heading_deg and head_facing_deg are DIFFERENT directions (not a fixed
-    180 degrees apart): the arm extends at a right angle to the one leg it's
-    built for (see src/render/props.py:_traffic_signal_props for which leg and why),
-    while the head faces back down that same leg toward oncoming traffic -
-    those are perpendicular axes, not opposite ends of one axis. Falls back
-    to the old "arm opposite the head" behavior if arm_heading_deg isn't
-    given (e.g. a prop dict from a site/version that doesn't set it).
-    arm_length_m is computed upstream (src/render/props.py) from the real leg width
-    this arm actually spans, not hardcoded."""
+                            arm_heading_deg: float, arm_length_m: float):
+    """A signal pole (src/osm_world.py:_Reader.signals): with `arm_length_m` a mast arm out along
+    `arm_heading_deg` - square to the leg it serves, so not opposite the head - and the vehicle
+    head at its end facing `head_facing_deg`; with none (`support=pole`) the head on the pole."""
     x, y = position
     pole = prims.add_cylinder(
 radius=TRAFFIC_SIGNAL_POLE_RADIUS_M, depth=TRAFFIC_SIGNAL_POLE_HEIGHT_M,
@@ -275,7 +77,7 @@ location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
         add_vehicle_signal_head(f"{name}_head", (x + math.cos(face) * offset, y + math.sin(face) * offset,
                                                  arm_z - 0.2), head_facing_deg, housing_mat)
         return pole
-    arm_dir = math.radians(arm_heading_deg if arm_heading_deg is not None else head_facing_deg + 180)
+    arm_dir = math.radians(arm_heading_deg)
     dx, dy = math.cos(arm_dir), math.sin(arm_dir)
     arm_center = (x + dx * arm_length_m / 2, y + dy * arm_length_m / 2, arm_z)
     arm = prims.add_cylinder(radius=MAST_ARM_RADIUS_M, depth=arm_length_m,
@@ -291,11 +93,8 @@ location=(x, y, TRAFFIC_SIGNAL_POLE_HEIGHT_M / 2)
 
 def add_pedestrian_signal_head(name: str, position: tuple, heading_deg: float, own_post: bool,
                                 housing_mat, post_mat):
-    """Small pedestrian signal head. If `own_post`, mounted on its own short
-    post (this corner is confirmed to have the ped head on a SEPARATE pole
-    from the vehicle signal); otherwise just the head at typical mounting
-    height, implicitly co-located with the vehicle signal pole already drawn
-    at this same position (same pole - see sites/README.md `signals` block)."""
+    """A pedestrian signal head at its mounting height - on a short post of its own where
+    `own_post`."""
     x, y = position
     if own_post:
         post = prims.add_cylinder(
@@ -311,73 +110,6 @@ def add_pedestrian_signal_head(name: str, position: tuple, heading_deg: float, o
     head.rotation_euler = (0, 0, math.radians(heading_deg))
     head.data.materials.append(housing_mat)
     return head
-
-
-def add_no_turn_on_red_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    """Small rectangular NO TURN ON RED restriction sign (MUTCD R10-11 series -
-    white plate; real shape/color, not a downloaded model). Shares
-    _add_post_sign's post-height convention but with a rectangular plate
-    instead of a regular polygon - stop/school-zone signs are octagon/pentagon,
-    NTOR signs are rectangular."""
-    x, y = position
-    post = prims.add_cylinder(radius=SIGN_POST_RADIUS_M, depth=2.1, location=(x, y, 1.05))
-    post.name = f"{name}_post"
-    post.data.materials.append(post_mat)
-
-    plate = prims.add_cube(size=1.0, location=(x, y, 2.2))
-    plate.name = f"{name}_plate"
-    # thin along local X (the facing/normal axis, before the Z rotation below)
-    plate.scale = (RECTANGULAR_PLATE_THICKNESS_M, RECTANGULAR_PLATE_WIDTH_M,
-                   RECTANGULAR_PLATE_HEIGHT_M)
-    plate.rotation_euler = (0, 0, math.radians(heading_deg))
-    plate_mat = blender_materials.shared_material(f"{name}_plate_mat", NO_TURN_ON_RED_WHITE, roughness=0.35)
-    plate.data.materials.append(plate_mat)
-    return post
-
-
-def add_bike_regulatory_sign(name: str, position: tuple, heading_deg: float, post_mat):
-    """A white rectangular R-series regulatory plate - here the R9-23 series that tells a rider
-    where the two-stage turn box is and how to use it (MUTCD 9B.18). Same plate geometry as the
-    NO TURN ON RED sign, which is the other rectangular white regulatory sign modelled; kept as
-    its own builder because the two are placed for different reasons and a shared one would
-    make a bikeway sign silently inherit a change meant for the NTOR plate."""
-    return add_no_turn_on_red_sign(name, position, heading_deg, post_mat)
-
-
-def add_rrfb(name: str, position: tuple, heading_deg: float, post_mat):
-    """Procedural Rectangular Rapid Flashing Beacon: a diamond pedestrian-
-    crossing warning sign (MUTCD W11-2) with two amber beacon bars mounted
-    below it. Real installations typically pair a matching unit on the
-    opposite curb - only one assembly is modeled per exported prop entry (see
-    src/geometry/treatments/extras.py:ExtraProp)."""
-    x, y = position
-    post = prims.add_cylinder(radius=RRFB_POST_RADIUS_M, depth=RRFB_MOUNT_HEIGHT_M,
-                               location=(x, y, RRFB_MOUNT_HEIGHT_M / 2))
-    post.name = f"{name}_post"
-    post.data.materials.append(post_mat)
-
-    # Diamond sign: a square plate, tilted 45 deg about its own facing/normal
-    # axis (local X, rotated first) before the whole assembly is turned to face
-    # heading_deg (local Z, rotated last) - same two-step convention as the
-    # octagon/pentagon sign plates in _add_post_sign, generalized to a square.
-    sign = prims.add_cube(size=1.0, location=(x, y, RRFB_MOUNT_HEIGHT_M + 0.15))
-    sign.name = f"{name}_sign"
-    sign.scale = (RRFB_PLATE_THICKNESS_M, RRFB_PLATE_WIDTH_M, RRFB_PLATE_WIDTH_M)
-    sign.rotation_euler = (math.radians(45), 0, math.radians(heading_deg))
-    sign_mat = blender_materials.shared_material(f"{name}_sign_mat", RRFB_SIGN_YELLOW_GREEN, roughness=0.35)
-    sign.data.materials.append(sign_mat)
-
-    face = math.radians(heading_deg)
-    fx, fy = math.cos(face), math.sin(face)
-    for i in range(2):
-        beacon_z = RRFB_MOUNT_HEIGHT_M - 0.15 - i * 0.15
-        beacon = prims.add_cube(size=1.0, location=(x + fx * 0.05, y + fy * 0.05, beacon_z))
-        beacon.name = f"{name}_beacon_{i}"
-        beacon.scale = (0.03, 0.35, 0.08)
-        beacon.rotation_euler = (0, 0, face)
-        beacon_mat = blender_materials.shared_material(f"{name}_beacon_{i}_mat", RRFB_BEACON_AMBER, roughness=0.3)
-        beacon.data.materials.append(beacon_mat)
-    return post
 
 
 def bollard_band_centres_m() -> list[float]:
@@ -398,14 +130,8 @@ def bollard_band_centres_m() -> list[float]:
 
 
 def add_bollard(name: str, position: tuple):
-    """A single plastic flex-post delineator: a white post banded with white retroreflective
-    tape.
-
-    Placement (which leg, spacing, where along the daylight zone) is decided upstream in
-    src/render/props.py - heading is irrelevant for a rotationally-symmetric post, so unlike
-    the other props this one takes no heading_deg.
-
-    The bands are emissive (make_retroreflective_material) because they are retroreflectors:
+    """A plastic flex post: a white post banded with white retroreflective tape. The bands are
+    emissive (make_retroreflective_material) because they are retroreflectors:
     a diffuse white ring in this scene's single-soft-sun lighting renders mid-grey and
     vanishes into the post, which is the opposite of what the object is for.
     """
@@ -424,40 +150,9 @@ def add_bollard(name: str, position: tuple):
     return post
 
 
-
-PUSHBUTTON_POST_HEIGHT_M = 1.2      # APS pushbutton mounting height, ~42-48 in per MUTCD/PROWAG
-PUSHBUTTON_HOUSING_YELLOW = (0.85, 0.72, 0.08)
-PUSHBUTTON_POST_RADIUS_M = 0.04     # width/depth mirrored in plan - see the block at the top
-PUSHBUTTON_HOUSING_DEPTH_M = 0.06   # along the facing axis
-PUSHBUTTON_HOUSING_WIDTH_M = 0.13   # across it, which is what a plan sees
-PUSHBUTTON_HOUSING_HEIGHT_M = 0.2
-TACTILE_PAD_FALLBACK_M = (0.610, 0.914)  # 2 ft deep x 3 ft wide - fallback only; the real
-                                          # dimensions arrive per-prop as pad_depth_m/pad_width_m
-                                          # from src/render/props.py. Kept in step with those so a
-                                          # prop missing them degrades to the same size, not a stale one.
-TACTILE_PAD_HEIGHT_M = 0.015
-# The pad straddles the kerb, where the pavement slab (0.05) meets the lower sidewalk
-# slab (0.03), so it has to sit on top of the HIGHER of the two or it is simply buried -
-# which is exactly what happened first time round. Sharing the crosswalk markings' own
-# base height puts it on the established surface-treatment layer instead of inventing a
-# second one that could drift from it.
-from blender_crosswalks import EXISTING_MARKING_Z_BASE as TACTILE_PAD_Z_BASE
-# Safety yellow. Detectable warning surfaces come in several standard colours; this was
-# brick red for a while, on the argument that red is the common one in this region, but at
-# this camera height and distance the pads disappeared into the sidewalk. Yellow is the
-# other standard colour, it is in use in the borough, and it is the one you can actually
-# find in the render - which is the point of drawing them at all.
-TACTILE_PAD_YELLOW = (0.82, 0.60, 0.06)
-HYDRANT_HEIGHT_M = 0.75
-HYDRANT_RED = (0.62, 0.05, 0.05)
-
-
 def add_pedestrian_pushbutton(name: str, position: tuple, heading_deg: float, post_mat):
-    """Accessible pedestrian pushbutton: a short post with a yellow housing facing the
-    waiting pedestrian. Placement comes from the surveyed end of an OSM crossing way
-    tagged button_operated=yes (src/render/props.py:_crossing_endpoint_props), so WHICH
-    crossings are actuated and where the poles stand is real; the housing's size and
-    mounting height are generic."""
+    """An accessible push button (`button_operated=yes`): a short post with a yellow housing
+    facing the waiting pedestrian."""
     x, y = position
     post = prims.add_cylinder(radius=PUSHBUTTON_POST_RADIUS_M, depth=PUSHBUTTON_POST_HEIGHT_M,
                                location=(x, y, PUSHBUTTON_POST_HEIGHT_M / 2))
@@ -476,109 +171,24 @@ def add_pedestrian_pushbutton(name: str, position: tuple, heading_deg: float, po
     return post
 
 
-def add_tactile_paving_pad(name: str, position: tuple, heading_deg: float,
-                            depth_m: float = TACTILE_PAD_FALLBACK_M[0],
-                            width_m: float = TACTILE_PAD_FALLBACK_M[1]):
-    """Detectable warning surface (truncated domes) at a curb ramp - the pad a cane or a
-    foot registers at the kerb edge. Modeled as a flat plate rather than
-    individual domes: at this render's scale the dome pattern is sub-pixel, and a plate
-    reads correctly while costing four vertices instead of hundreds.
-
-    Position comes from src/render/props.py, already stepped back off the roadway so the
-    curb line is the pad's inner edge - a pad centred on the curb line would lie half in
-    the road. Dimensions arrive with the prop for the same reason: that offset is half the
-    depth, so placement and geometry have to agree on what the depth is."""
-    x, y = position
-    pad = prims.add_cube(size=1.0,
-                          location=(x, y, TACTILE_PAD_Z_BASE + TACTILE_PAD_HEIGHT_M / 2))
-    pad.name = f"{name}_pad"
-    # heading_deg runs ALONG the crossing, so local X is the pad's depth (into the
-    # footway) and local Y its width (along the curb) - transposing these made the
-    # pad long in the wrong direction and pushed it further into the road.
-    pad.scale = (depth_m, width_m, TACTILE_PAD_HEIGHT_M)
-    pad.rotation_euler = (0, 0, math.radians(heading_deg))
-    pad.data.materials.append(blender_materials.shared_material(f"{name}_pad_mat", TACTILE_PAD_YELLOW, roughness=0.6))
-    return pad
-
-
-def add_fire_hydrant(name: str, position: tuple):
-    """Fire hydrant: barrel, domed bonnet and two side outlets. Real OSM-surveyed
-    position. Background detail, but it is also one of the things that genuinely
-    constrains where a curb extension or a parking stall can go."""
-    x, y = position
-    barrel = prims.add_cylinder(radius=HYDRANT_RADIUS_M, depth=HYDRANT_HEIGHT_M,
-                                 location=(x, y, HYDRANT_HEIGHT_M / 2))
-    barrel.name = f"{name}_barrel"
-    hydrant_mat = blender_materials.shared_material(f"{name}_mat", HYDRANT_RED, roughness=0.45)
-    barrel.data.materials.append(hydrant_mat)
-
-    bonnet = prims.add_uv_sphere(radius=0.1, location=(x, y, HYDRANT_HEIGHT_M))
-    bonnet.name = f"{name}_bonnet"
-    bonnet.scale = (1.0, 1.0, 0.55)
-    bonnet.data.materials.append(hydrant_mat)
-
-    for i, sign in enumerate((1, -1)):
-        outlet = prims.add_cylinder(radius=0.045, depth=0.16,
-                                     location=(x + sign * 0.1, y, HYDRANT_HEIGHT_M * 0.62),
-                                     rotation=(0, math.radians(90), 0))
-        outlet.name = f"{name}_outlet_{i}"
-        outlet.data.materials.append(hydrant_mat)
-    return barrel
-
-
-def add_prop(name: str, prop: dict, streetlight_template, pole_mat, signal_housing_mat, ped_signal_housing_mat):
-    """Build the Blender geometry for one exported prop dict (placement
-    decided upstream by src/render/props.py), dispatching on its "type" field to the
-    matching builder above. Kept next to the builders so adding a new prop
-    type never requires touching blender_scene.py."""
+def add_prop(name: str, prop: dict, pole_mat, signal_housing_mat, ped_signal_housing_mat):
+    """One prop dict of the world, by its `type`."""
     pos, heading, ptype = prop["position_m"], prop["heading_deg"], prop["type"]
-    if ptype == "streetlight":
-        add_streetlight(name, pos, heading, streetlight_template, pole_mat, pole_mat)
-    elif ptype == "stop_sign":
-        add_stop_sign(name, pos, heading, pole_mat)
-    elif ptype == "school_zone_sign":
-        add_school_zone_sign(name, pos, heading, pole_mat)
-    elif ptype == "yield_sign":
-        add_yield_sign(name, pos, heading, pole_mat)
-    elif ptype == "bike_warning_sign":
-        add_bike_warning_sign(name, pos, heading, pole_mat)
-    elif ptype == "bike_regulatory_sign":
-        add_bike_regulatory_sign(name, pos, heading, pole_mat)
-    elif ptype == "traffic_signal_pole":
+    if ptype == "traffic_signal_pole":
         add_traffic_signal_pole(name, pos, heading, pole_mat, signal_housing_mat,
-                                 arm_heading_deg=prop.get("arm_heading_deg"),
-                                 arm_length_m=prop.get("arm_length_m", TRAFFIC_SIGNAL_ARM_LENGTH_M))
+                                arm_heading_deg=prop["arm_heading_deg"], arm_length_m=prop["arm_length_m"])
     elif ptype == "pedestrian_signal_head":
         add_pedestrian_signal_head(name, pos, heading, prop.get("own_post", False), ped_signal_housing_mat, pole_mat)
-    elif ptype == "no_turn_on_red_sign":
-        add_no_turn_on_red_sign(name, pos, heading, pole_mat)
-    elif ptype == "rrfb":
-        add_rrfb(name, pos, heading, pole_mat)
     elif ptype == "bollard":
         add_bollard(name, pos)
     elif ptype == "pedestrian_pushbutton":
         add_pedestrian_pushbutton(name, pos, heading, pole_mat)
-    elif ptype == "tactile_paving_pad":
-        add_tactile_paving_pad(name, pos, heading,
-                                depth_m=prop.get("pad_depth_m", TACTILE_PAD_FALLBACK_M[0]),
-                                width_m=prop.get("pad_width_m", TACTILE_PAD_FALLBACK_M[1]))
-    elif ptype == "fire_hydrant":
-        add_fire_hydrant(name, pos)
     else:
-        # Nothing src/render/props.py can emit should reach here - a prop drawn in one view
-        # and not the other is a disagreement between the two views this project keeps having
-        # to chase down, so tests/test_props.py:test_every_prop_type_is_drawn_in_both_views
-        # scans this dispatch and the plan view's marker table against the emitters and fails
-        # on a type missing from either. This branch is the runtime half of that guard.
         print(f"WARNING: no Blender builder for prop type {ptype!r} ({name}) - not drawn.")
 
 
 def build_tree_proxy(trunk_mat, foliage_mat):
-    """A single low-poly procedural tree (cone + cylinder). No CC0 source of
-    genuinely low-poly stylized trees was found - Poly Haven's tree models are
-    realistic photoscanned assets (multi-material, alpha-masked foliage cards)
-    disproportionately heavy for background dressing instanced many times over
-    at this render's scale/distance. See README.md "Phase 4 fidelity"."""
+    """One low-poly tree (a cone on a cylinder), the template every `natural=tree` instances."""
     trunk = prims.add_cylinder(radius=0.15, depth=2.0, vertices=6, location=(0, 0, 1.0))
     trunk.name = "tree_trunk"
     trunk.data.materials.append(trunk_mat)

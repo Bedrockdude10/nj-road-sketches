@@ -1,33 +1,7 @@
-"""Shared low-level Blender mesh building: vertices and faces computed in Python, then handed to
-Blender ONCE. Imported by blender_scene.py - runs under Blender's bundled Python.
-
-WHY THIS MODULE LOOKS LIKE ARITHMETIC AND NOT LIKE BLENDER. Every helper here used to build its
-mesh through the operator layer - `bpy.ops.object.mode_set(mode="EDIT")`, `bpy.ops.mesh.select_all`,
-`bpy.ops.mesh.extrude_region_move`, back to OBJECT - and then `apply_planar_uv` did a SECOND
-identical round trip for `bpy.ops.uv.cube_project`. Two edit-mode entries per polygon, and each one
-bracketed by `bpy.ops.object.select_all(action="DESELECT")`.
-
-That is three separate costs, and they compound:
-
-  * `select_all(DESELECT)` walks EVERY object in the scene. Called about twice per object created,
-    against a scene that is still growing, so building N objects costs O(N^2) - about 800,000 object
-    visits for the ~900 pieces a wide render carries.
-  * every `bpy.ops` call pushes a global undo snapshot and forces a depsgraph re-evaluation. ~4,000
-    operator invocations for one render, each costing milliseconds regardless of how small the mesh
-    is. A 4-vertex marking paid the same overhead as a building.
-  * a mode switch tears down and rebuilds the object's BMesh.
-
-None of it buys anything. A prism off a ring is closed-form: the ring at z_base, the same ring at
-z_base + height, quad walls between them, a cap at each end. A planar UV is `x / tile, y / tile`.
-Both are a few lines of arithmetic, and Blender only needs to hear about the result.
-
-THE SAME LESSON THIS REPO ALREADY LEARNED IN 2D. src/render/plan_view.py:_draw groups same-styled
-geometry into ONE matplotlib collection because per-collection cost grows with how many are already
-on the axes: measured at 2.44 s against 0.016 s for the same geometry, 156x. `MeshBatch` below is
-that argument applied to Blender - one mesh per material instead of one per piece, which takes a
-wide render's object count from ~900 to about a dozen.
-"""
-import contextlib
+"""Meshes built as arithmetic and handed to Blender once: a prism off a ring is closed-form, and a
+planar UV is x / tile, y / tile. Every `bpy.ops` call pushes an undo snapshot and costs time in
+proportion to the scene, so nothing here uses one; and a scene's cost scales with its OBJECT count,
+so `MeshBatch` builds one mesh per material. Imported by blender_scene.py, under Blender's Python."""
 import math
 
 import bpy
@@ -40,7 +14,7 @@ def prism(coords_2d, height: float, z_base: float = 0.0, first_index: int = 0):
     caller accumulating many prisms into one mesh passes the running vertex count and concatenates.
 
     A zero `height` gives the flat cap alone, which is what almost every marking is - paint has no
-    thickness worth modelling, and the pieces that do (kerbs, refuge islands) pass a real height.
+    thickness worth modelling, and the pieces that do (kerbs, buildings) pass a real height.
 
     Winding is preserved from the ring, and the top cap is reversed so both caps face outward. That
     matters under flat shading with backface culling off: a cap wound the wrong way reads as a hole.
@@ -87,12 +61,6 @@ class MeshBatch:
         self.verts += verts
         self.faces += faces
 
-    def add_mesh_data(self, vertices, faces) -> None:
-        """Pre-computed vertices and faces - a building prism from src/render/mesh_utils.py."""
-        offset = len(self.verts)
-        self.verts += [tuple(v) for v in vertices]
-        self.faces += [tuple(index + offset for index in face) for face in faces]
-
     def build(self, uv_tile_m: float | None = None):
         """One object for everything added, or None if nothing was. UVs only where asked for."""
         if not self.faces:
@@ -134,132 +102,6 @@ def planar_uvs(mesh, tile_size_m: float = 2.0) -> None:
     uv_layer.data.foreach_set("uv", coords)
 
 
-def extrude_polygon(name: str, coords_2d: list, height: float, material, uv_tile_m: float = 2.0,
-                     z_base: float = 0.0):
-    """One ring as its own object. Kept for the pieces that really are one-of-a-kind.
-
-    z_base lifts the solid to sit on top of something already at that height (a marking on the
-    pavement slab) instead of starting at z=0 and overlapping it. IMPORTANT: do NOT set z_base to
-    exactly the height of the surface it sits on - two coplanar faces at the same height z-fight
-    (confirmed by an isolated test: even a flat, zero-height marking placed at z=pavement_height
-    rendered as a visibly tessellated, flickering mess). Leave a small clearance gap instead - see
-    blender_scene.py:MARKING_CLEARANCE_M.
-
-    Prefer MeshBatch wherever there is more than one piece of a material. This exists for the
-    handful that are genuinely singular - the ground plane, the pavement slab - where an object of
-    its own costs nothing and a name is useful.
-    """
-    batch = MeshBatch(name, material)
-    batch.add_prism(coords_2d, height, z_base)
-    return batch.build(uv_tile_m=uv_tile_m)
-
-
-def build_mesh_from_data(name: str, vertices: list, faces: list, material):
-    """An object from precomputed vertices and faces - a building from src/render/mesh_utils.py.
-
-    STILL USES ONE OPERATOR, deliberately, and it is the only one left in this module. trimesh
-    triangulates everything it touches, so a plain box arrives as ~12 triangles, and
-    `dissolve_limited` merges the coplanar ones back into flat faces. The recorded reason is that
-    without it a simple building "reads as a faceted/crystalline shape under Blender's default flat
-    shading".
-
-    Removing it means changing what the EXPORTER emits - a prism with quad walls and n-gon caps,
-    which needs nothing merged - and that is a separate change with its own visual risk, so it is
-    not made here. Worth knowing that mesh_utils.py's own measurements say decimation never fires at
-    these junctions (all 80 buildings total 1,692 triangles against a 400-face threshold), so the
-    triangulate-then-merge round trip currently buys nothing but the appearance it protects.
-
-    79 buildings is one round trip each, against the ~900 x 2 this module just removed, so it is no
-    longer the thing worth fixing.
-    """
-    mesh = bpy.data.meshes.new(name)
-    mesh.from_pydata(vertices, [], faces)
-    mesh.update()
-    if not mesh.polygons:
-        return None
-    obj = bpy.data.objects.new(name, mesh)
-    bpy.context.collection.objects.link(obj)
-    obj.data.materials.append(material)
-
-    # Only the object being edited is selected, and it is deselected again after. NOT
-    # `select_all(action="DESELECT")`, which walks every object in the scene and was the quadratic
-    # term in the old builder.
-    for other in bpy.context.selected_objects:
-        other.select_set(False)
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.mesh.dissolve_limited()
-    bpy.ops.object.mode_set(mode="OBJECT")
-    obj.select_set(False)
-    return obj
-
-
-# `bpy.ops.mesh.dissolve_limited`'s own default, which build_mesh_from_data has always run at.
-DISSOLVE_ANGLE_RAD = math.radians(5.0)
-
-
-def build_merged_meshes(name: str, parts, material):
-    """ONE object holding every (vertices, faces) in `parts`, coplanar faces merged - the batched
-    build_mesh_from_data, for a scene with thousands of buildings.
-
-    WHY NOT CALL build_mesh_from_data PER BUILDING. It is one `bpy.ops` round trip each - an edit-mode
-    entry and `dissolve_limited` - and an operator's cost grows with the number of objects already in
-    the scene (see blender_prims.py). Measured on a synthetic 36-site world (2,844 buildings): 185 s
-    of a 200 s build. A site's 79 buildings never showed it.
-
-    The same merge, through the same underlying bmesh operator, on one bmesh holding every building:
-    the angle limit and the NORMAL delimit are the operator's own defaults, so what dissolves is what
-    dissolved. Buildings share no vertices or edges, so nothing can merge ACROSS two of them. A face
-    bmesh refuses as a duplicate is dropped rather than raised - trimesh does not emit any, and a
-    missing sliver is a better failure than no world.
-    """
-    import bmesh  # here and not at module level - see blender_prims._new_bmesh
-
-    bm = bmesh.new()
-    for vertices, faces in parts:
-        bverts = [bm.verts.new(v) for v in vertices]
-        for face in faces:
-            with contextlib.suppress(ValueError):
-                bm.faces.new([bverts[i] for i in face])
-    if not bm.faces:
-        bm.free()
-        return None
-    bm.normal_update()  # a face built by hand has no normal yet, and the angle test reads them
-    bmesh.ops.dissolve_limit(bm, angle_limit=DISSOLVE_ANGLE_RAD, verts=bm.verts, edges=bm.edges,
-                             use_dissolve_boundaries=False, delimit={"NORMAL"})
-    mesh = bpy.data.meshes.new(name)
-    bm.to_mesh(mesh)
-    bm.free()
-    obj = bpy.data.objects.new(name, mesh)
-    obj.data.materials.append(material)
-    bpy.context.collection.objects.link(obj)
-    return obj
-
-
-def add_stripe_rect(name, center, u, n, length: float, width: float, height: float, material,
-                     z_base: float = 0.0):
-    """A rectangle from a centre, an along-axis and an across-axis. Used by the crosswalk bars."""
-    corners = [
-        center + u * (length / 2) + n * (width / 2),
-        center + u * (length / 2) - n * (width / 2),
-        center - u * (length / 2) - n * (width / 2),
-        center - u * (length / 2) + n * (width / 2),
-    ]
-    return extrude_polygon(name, [(p.x, p.y) for p in corners], height, material, z_base=z_base)
-
-
-def stripe_rect_ring(center, u, n, length: float, width: float):
-    """The four corners of add_stripe_rect's rectangle, for a caller batching many of them."""
-    return [(p.x, p.y) for p in (
-        center + u * (length / 2) + n * (width / 2),
-        center + u * (length / 2) - n * (width / 2),
-        center - u * (length / 2) - n * (width / 2),
-        center - u * (length / 2) + n * (width / 2),
-    )]
-
-
 def line_ring(p1, p2, width_m: float):
     """The four corners of a stripe of `width_m` between two points, or None if they coincide."""
     (x1, y1), (x2, y2) = p1[:2], p2[:2]
@@ -273,20 +115,8 @@ def line_ring(p1, p2, width_m: float):
 
 
 def polyline_rings(points, width_m: float):
-    """One stripe ring per SEGMENT of a sampled polyline.
-
-    A polyline here follows the traced kerb on a 2 ft station grid (model.STRIP_SAMPLE_FT), so a
-    130 ft lane edge arrives as ~65 points. Drawn the old way - add_paint_polyline calling
-    add_paint_line per segment, each building its own object - that one marking became 64 Blender
-    objects, and the channel it belongs to became 1,209. Counted across a wide render the scene held
-    3,753 objects where the JSON has 842 items.
-
-    Segments rather than a single mitred ribbon on purpose: a mitred join needs the outer corner
-    extended along the bisector, and on a kerb that turns sharply that overshoots into a spike. Butt
-    joints overlap slightly at each vertex instead, which is invisible in flat white paint at this
-    scale and cannot spike. Batched into one mesh by the caller, so the segment count no longer costs
-    anything.
-    """
+    """One stripe ring per SEGMENT of a polyline: a mitred ribbon spikes where a line turns
+    sharply, and butt joints overlap invisibly in flat paint."""
     rings = []
     for i in range(len(points) - 1):
         ring = line_ring(points[i], points[i + 1], width_m)

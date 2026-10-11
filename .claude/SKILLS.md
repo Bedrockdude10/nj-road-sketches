@@ -1,347 +1,64 @@
 # Working in this repo without reinventing it
 
-Read this before changing geometry, adding a marking, or "fixing" a number. It is not a summary
-of README.md — it is the list of things an agent in this repo gets wrong, written from the ones
-that actually happened, with the place each answer already lives.
+Read this before changing what is drawn. It is not a summary of README.md: it is what agents here
+get wrong, and where each answer already lives.
 
-README.md explains how the pipeline works. standards.toml declares every figure and OSM key,
-and whether each has been checked. **This file is about the failure modes**, because knowing the
-architecture did not stop any of the mistakes below.
+## 0. Two derivations of one fact
 
----
+Every serious bug in this repo's history has one shape: the same fact computed in two places, each
+right on its own terms, disagreeing with each other. Two, found and fixed by folding them into one:
 
-## 0. The one rule that would have prevented most of this
-
-**Measure the drawn output, not the arithmetic that was supposed to produce it.**
-
-Every serious bug in this repo's history has the same shape: two derivations of one fact, in
-agreement with each other and not with the picture. In one session:
-
-| what I checked | what was true |
+| the two copies | what it cost |
 |---|---|
-| "every travel lane is exactly 11.00 ft" — computed from the section | the drawn centreline was 2.84 ft away, so a lane was 8.16 ft |
-| flex posts sit in the buffer — computed from the declared cross-section | 30 posts were drawn inside the bike lane |
-| "34.40 ft between kerbs at its narrowest" — the least `near + far` over the leg | the section is a constant off the least `near`, so the travel way got 32.01 ft and one lane 7.93 ft — see `governing_half_widths_ft` |
-| the label says 9.6 ft so the geometry is wrong | the geometry was right; the *label* used the wrong datum |
+| the carriageway's default width summed each side's section with `width or default`, so `shoulder:*:width=0'` read as absent and a 1 m default; the drawing read it as 0 | every side street with no `width` in the proposals had its lanes laid 1 m off centre, its curb extensions on phantom asphalt, and 16 corners reported narrowed that were not |
+| a field observation added `support=mast_arm` to the snapshot, and the `.osc` - which re-centring wrote that node into - carried OSM's own tags | the mast arm was gone from every render, with nothing to say so |
 
-So: after any change to geometry, **build the thing and measure the drawn coordinates** —
-`station_offset_many(leg.centerline, np.asarray(drawn.coords))` — and open the PNG. A check that
-reads the same function the renderer reads is not a check.
+So: **one home per fact, one method per question.** Before writing a lookup, find the one that
+exists (`scripts/whatis.py <name>`); when two call sites make the same lookup, fold them into one
+in the same change. And when something looks wrong, look for the second copy first.
 
-### 0a. Diagnose from the quantitative layer, not from the picture
+## 1. Where each fact already lives
 
-The PNG is where you NOTICE a problem. It is never where you diagnose one. Everything this project
-draws exists first as numbers — the resolved `DesignState`, the `PaintPiece` list, the traced kerb,
-`output/*/geometry_*.json` — and that is the layer the whole design is kept in so a defect can be
-*measured* instead of guessed at.
-
-Cropping and squinting at renders cost most of one session and produced **three wrong diagnoses in
-a row** on a single complaint ("the bike lane doesn't reach the kerb on W Broad"):
-
-| guessed from the picture | what the numbers said |
-|---|---|
-| the hatch spills over the kerb | it reaches the kerb exactly; the kerb wanders 3 ft |
-| the wrong channel removed the hatching | both channels hatch; only the colour changed |
-| the unbuffered rung skips the kerbside zone | the zone is built and added, on the *other* leg |
-| — | the two lanes' green is **80.3 ft apart** and the extension between them has **0.0 sq ft** of surface: dotted lines only |
-
-Only the last line is the defect, and it took one query to find once the question was asked of the
-data. The reader also cannot tell you which leg they mean from a render, and neither can you: two of
-those wrong answers were about `w_broad_st_northeast` when the complaint was about
-`w_broad_st_southwest`.
-
-**So: before proposing a cause, print the numbers.** All of them are one command:
-
-```bash
-.venv/bin/python scripts/measure_drawn.py <site> --scenario <build_*> --leg <leg> --all
-```
-
-| what it prints | the question it answers | reads |
+| you need | it is | in |
 |---|---|---|
-| the paint table | what is drawn on this leg-side, stationed in its own frame | `station_offset_many` |
-| `--section` | what the treatment THINKS it placed, against the room the kerb gives | `section(state).offsets_from_centerline_ft()`, `narrowest_half_width_ft` |
-| `--limiters` | all four things deciding where kerbside paint starts | see the table below |
-| `--gaps` | kerb offset minus outermost drawn offset, station by station | `surface_reach_at`, `curb_offsets_at_stations` |
-| `--lanes` | how wide the DRAWN travel lane is, and whether paint or the kerb holds it in | `centerline_paint_ft`, `curb_offsets_at_stations` |
-| `--continuity` | whether a facility is one piece, and how wide the holes are | `unary_union` |
+| a sided key: `<key>:<side>`, else `<key>:both` | `sided(tags, key, side, rest)` | `src/osm_world.py` |
+| a side's cycleway, with the bare key | `cycleway`, `has_cycleway` | `src/osm_world.py` |
+| a oneway, either direction | `is_oneway` | `src/osm_world.py` |
+| a tagged width; a width or its default | `tagged_width`, `width_or_default` | `src/osm_world.py` |
+| what a side's section lays, in metres | `kerb_section` | `src/osm_world.py` |
+| how a crossing is painted | `crossing_markings` | `src/osm_world.py` |
+| per-lane values (`turn:lanes`, `change:lanes`) | `per_lane`, `lane_widths` | `src/osm_world.py` |
+| a line's direction at a station | `tangent` | `src/osm_world.py` |
+| junctions, legs, corners, what carries a way on | `StreetGraph` - the ONE street graph (OSMnx) | `src/osm_world.py` |
+| every road at a node, service roads too | `StreetGraph.spokes` | `src/osm_world.py` |
+| every paint channel and surface, and how each is drawn | `PAINT`, `SURFACES` (the world JSON carries them to Blender) | `src/osm_world.py` |
+| a world's kerbs, stop lines, crosswalks, junction mouths, no-standing datums | `_World` - read once | `src/osm_osc.py` |
+| an area's bbox and its render cameras | `areas.yaml` | repo root |
+| a figure | `si("...")` | `standards.toml` |
 
-Reach for the flag before the render. Each one exists because a session guessed that answer from
-a picture and got it wrong, and each is cheap enough that there is no reason to guess.
+Nothing names a street or a junction: a proposal's `.toml` chooses ways by their tags.
 
-**AND NEVER REBUILD A SECTION'S ARITHMETIC FROM THE CONSTANTS YOU THINK IT USED.** The third query
-above exists because that reconstruction is always wrong here. A two-way section is measured from a
-centreline that has been SHIFTED toward the far kerb, so the near-side travel edge is 3.8–6.5 ft on
-Broad St and not `TARGET_LANE_WIDTH_FT`; assuming the 11 ft produced a confident "a protected lane
-needs 22.0 ft and the kerb gives 20.32, so it does not fit", and a four-option design decision put
-to Danny on the strength of it. Nothing about it was true.
+## 2. Everything is tags
 
-**AND A SECTION IS A RIGID PIECE, SO ONE PROFILE HAS TO PLACE ALL OF IT.** `corridor_paint`
-computed the buffer's inner edge from the traced kerb station by station, while `far_kerb_lane_edge`
-— which hangs the travel-lane divider off that same edge — read one scalar per run out of the run's
-governing cross-section. Two derivations of one line, in agreement with each other nowhere: on the
-1,050 ft run through station 1400 they ended **7.3 ft apart**, the drawn near travel lane measured
-**11.00 to 22.31 ft** against a design of 11.00, and the far kerb's parking was counted against a
-stripe that was not where the stripe was. Neither number was wrong on its own terms. The fix was one
-placement line (`place = taper_limited(stations, offs)`) that every offset comes off, and the divider
-derived from the drawn edge rather than from the scalar — after which both travel lanes are
-`divided_lane_width_ft` at every station by construction, the surplus lands on the far kerb, and the
-far kerb goes from 40 markable stalls to 72. **The tell was that all three of `_build_run`'s edge
-lines varied by 11.31 ft while the thing derived from them varied by 0.00.** A number that cannot
-move, downstream of one that does, is the shape of this bug.
+The reader (`src/osm_world.py`) draws tags and decides nothing; there is no reader rule, special
+case or threshold that is not a tag's meaning. A treatment is tags or features written into an
+`.osc` (`src/osm_osc.py`); look the tagging up on the OSM wiki, and where OSM has none, say it is a
+project convention in standards.toml's `[tag]` table. A fact about the street that OSM is missing
+goes into OSM (README lists the ones known), or - where it is measured from OSM, like a width -
+into `existing.osc`. Never a second overlay beside OSM: that is how the mast arm was lost (§0).
+Prefer deleting a rule to adding one, and never special-case one place.
 
-`--section` prints that comparison and flags it when it holds, which is the only useful thing to
-do with a check that cannot fail. The tell is worth learning as a shape: printing demand against
-room gave
-**identity on all six corridor legs** — 14.71/14.71, 20.32/20.32, 26.29/26.29. Two figures that
-agree to the last decimal in every case are not a confirmation, **they are one figure**: the
-section is sized to fill the room at the leg's narrowest point, so it fits there by construction and
-the comparison can never fail. When a check cannot fail, the thing it was going to prove is not a
-finding — go and find which span, which datum, or which frame differs instead. (That identity is
-also what wrecked the since-deleted `section_holds_to_ft`, a guard that walked out from station 0
-looking for the first station where the kerb came inside the section and ended the facility there.
-The first such station IS the narrowest point the section was sized on, so it cut a lane to a 6 ft
-stub. A search whose answer is fixed by construction is the same mistake as a check that cannot
-fail.)
+## 3. Measure, then render
 
-A gap profile — kerb offset minus outermost drawn offset, station by station — turns "it looks
-janky" into "bare from station 0 to 63.7, then 1.4 ft widening to 2.6 ft by station 118", which
-names the mechanism on its own. That is `--gaps`; extend it rather than writing another throwaway
-script, and NEVER answer a geometry question by cropping a PNG. Note it is **binned**, so that a
-transverse marking no cut lands on is still seen, and that an empty bin has to read as *no
-measurement*. Written the obvious way with `np.max(..., initial=np.nan)` the initial value folds
-into the reduction, every bin comes out NaN, every comparison against a threshold comes out
-false, and the profile reports "flush the whole way" having measured nothing. **A quantitative
-check that cannot see anything must say so, not pass.**
+`scripts/verify.py save before` → change → `save after` → `compare before after`. It says which
+`.osc` moved, which report line, and which world channel by how many pieces. A change meant to
+move nothing must show every `.osc` identical; anything that moved is explained before it is
+committed - by putting the old rule back and watching the difference go, not by a picture.
 
-**AND MEASURE THE PAINT'S SURFACE, NOT ITS NEAREST VERTEX — THIS TOOL GOT THAT WRONG FOR ITS
-WHOLE LIFE.** The line this paragraph used to carry ("the outermost vertex in each bin is what
-'how far out does the paint reach here' can mean") is false, and it is false in a way that made
-`--gaps` answer the one complaint it exists for with a defect that was not there. A fill is
-offset from the traced kerb, so its outer edge carries the kerb's vertices AND NOTHING BETWEEN
-THEM — 9 over the 85 ft of `greenwood_ave_south` left, against 44 on its inner edge, which is a
-plain offset from the alignment. Every 10 ft bin past station 54.5 therefore held inner vertices
-and no outer one, `max` returned the inner edge at a fixed 11.82 ft, and the profile reported
-kerb-minus-11.82: **4.06 ft of separation at station 120 on paint flush to 0.00**, and up to
-**17.54 ft on `broad_st_west`**. A perpendicular cut through the drawn polygon cannot read the
-wrong edge, because it does not choose between edges — `surface_reach_at`, kept as the max with
-the vertex reduction because each is a lower bound on the reach and the largest is the best
-estimate, which can only close a reported gap and never open one. Asked why the kerb was
-separating from the hatching on Greenwood, the honest answer was **it is not, to 0.04 ft** —
-everything the tool had been reporting along that leg was its own arithmetic. **A check that
-cries wolf is retired as fast as one that cannot fail, and it costs more on the way out.**
+## 4. OSM is partial, in specific ways
 
-**AND WHEN A MARKING DOES NOT REACH, PRINT EVERY LIMITER, NOT THE FIRST ONE.** Four separate
-things decide where a kerbside marking starts, they disagree, and the answer is whichever sits
-furthest out — so measuring one, finding it innocent, and moving on proves nothing. `--limiters`
-prints all four side by side with the binding one named, and a `paint@` column to check it
-against — but narrow it with `--kind` first, because these hold KERBSIDE paint back and
-unfiltered the column reports whichever marking merely happens to start earliest:
-
-| limiter | where it lives |
-|---|---|
-| the corner return | `leg_clearance_ft` |
-| this junction's mouth | `junction_mouths_ft`, with `corner_tangent_station_ft` as its fallback |
-| the crossing band | `crosswalk_reach_on_leg_side_ft` — the **BAND**, never `crosswalk_offsets[leg].offset_ft`, which is the crossing's CENTRE and reads 32.3 where the skewed band reaches 53.8 |
-| whether the kerb is traced there | `curb_station_span` — every kerb at all five sites starts 12–58 ft out, because OSM traces the block and not the corner |
-
-One session found each of those binding on a different leg of ONE junction, and reported a 21.5 ft
-defect that did not exist by measuring the third one wrong. The tell that you have the right
-limiter is arithmetic identity: `paint@` equalling `clearance_ft` to two decimals on five
-leg-sides at four sites is a mechanism, and "roughly similar" is a coincidence.
-
-Note also that a length derived from the corner fillet **diverges as a corner sharpens** —
-a tangent point sits `R/tan(θ/2)` back, so 1.0 R at a square junction and 2.5 R at a 44° Y. That
-is §0b's lesson in a second disguise: the quantity is local, but it is not the quantity you meant.
-
-### 0b. MEASURE AT THE FRAME THE READER IS LOOKING AT — legs are longer on a wide sheet
-
-`--frame-scale` does not just crop wider. It scales `leg_lengths`, so a 130 ft leg is 325 ft on a
-2.5× sheet and every function that measures "over the leg" gets a different answer. Measuring the 1×
-build while the reader is looking at a 2.5× sheet reports a defect fixed that is not:
-
-```bash
-.venv/bin/python scripts/measure_drawn.py wbroad_louellen --scenario ... --frame-scale 2.5
-```
-
-Worse than a measuring mistake, it is a *design* mistake waiting to happen. A rule sized off a
-TOTAL over the leg — total kerb swing, total anything — silently becomes a function of the render
-frame, so the drawing changes when you widen the picture. The bikeway followed its kerb at 1× and
-stood 8.4 ft clear of it at 2.5×, from one `<= 6.0 ft` threshold. **Anything compared against a
-threshold has to be a rate, a curvature, or something else local**; if it is an amount accumulated
-over a leg, the leg's length is an input and the leg's length is a rendering decision. `git grep`
-for a new constant's units before you add it.
-
-**A MINIMUM OVER A LEG MOVES WITH THE SHEET TOO, AND THAT IS ALLOWED. WHAT IS NOT ALLOWED IS
-TRIMMING THE PAINT.** `narrowest_half_width_ft` takes the least half-width over the whole drawn leg,
-so a longer leg reaches further and finds a narrower pinch: W Broad's southwest approach is 20.32 ft
-at 1× and 16.58 ft at 2.5×, off a real pinch 318 ft out. The wide sheet therefore lands that leg on
-a narrower rung. **This was fixed the wrong way first and the wrong fix is the instructive one.** The
-first answer was a frozen design span — a `design_length_ft` the treatments measured over while the
-render drew further — which bought frame-invariance and paid for it in the only currency that
-matters: a section sized over 130 ft, DRAWN over 325 ft, and then *trimmed off* at the first station
-it stopped fitting. `broad_st_east` carried green over 180 ft of a 425 ft leg under 42 flex posts and
-a centre stripe that both ran the full length. Roads are a network and these treatments apply
-universally, so **a treatment applies to all of the street in the drawing** — the rung gives, the
-extent never does.
-
-So the test is not "is this a rate". It is **"if this answer moves with the sheet, is the thing that
-moves a WIDTH or an EXTENT?"** A width that steps down on a sheet showing a tighter pinch is the
-design working. An extent, a count, or a claim of protection that moves is a bug — hence
-`BikewayReachesTheEndOfItsKerb` (`src/checks.py`), fatal, and every rung of
-`BROAD_ST_TWO_WAY_BIKEWAY` keeping the full buffer.
-
-**And know the residual: a width that moves can take a treatment with it.** `broad_st_east` measures
-43.26 ft between kerbs over 170 ft and 39.16 ft over the 425 ft actually drawn, which drops the
-far-kerb spare from 7.44 ft to 3.34 ft — under `MIN_USABLE_STALL_FT` — so that leg is *parked* on
-the narrow sheet and *hatched* on the wide one. Nothing is wrong with either drawing; the pinch is
-real. But the section is sized on the narrowest point anywhere along the leg, so one tight spot 300
-ft out sets the width for all 425 ft, and a treatment two derivations downstream flips. Print
-`state.notes` after any change to a section, not just the paint.
-
-Note also which fixture is which, because it is the opposite of what you would guess:
-`tests/conftest.py` has **`site_models` at 1×** and **`wide_site_models` at `WIDE_FRAME_SCALE =
-2.5`**. **The INVARIANTS are swept at both** — `test_every_scenario_satisfies_the_invariants` on
-`site_models` and `..._on_the_wide_sheet` on `wide_site_models`, which is the render's own frame.
-That second one exists because at 1× the sweep reported nothing on any site while 2.5× reported a
-fatal `markings_collide` that refused a shipped render's 3D export. Correctness of any measurement
-in `output/` is verified locally with `--frame-scale` on `measure_drawn.py`, never through CI.
-
----
-
-## 1. Before you write a number, look for it
-
-There is exactly one home for each of these. Adding a second copy is the most common defect here.
-
-| you need | it already exists as | in |
-|---|---|---|
-| travel lane target width | `TARGET_LANE_WIDTH_FT` | `src/geometry/treatments/` |
-| a CRS string | `WGS84`, `NJ_STATE_PLANE_FT` | `src/geometry/model/` |
-| how far the divider sits off the alignment | `divider_shift_toward_ft(state, leg, side)` | `src/geometry/treatments/` |
-| a travel lane's real width | `travel_lane_width_ft(state, leg, side, painted_ft)` | `src/geometry/treatments/` |
-| hold a lane at target, spend the surplus | `hold_travel_lane_at_target(state, leg, side)` | `src/geometry/treatments/` |
-| may this kerb hold parking? | `kerb_may_hold_parking(state, leg, side)` | `src/geometry/treatments/` |
-| which side of a leg faces north/south | `side_facing(leg, "south")` | `src/geometry/model/` |
-| room beside a lane, measured on the traced kerb | `narrowest_half_width_ft`, `kerbside_allowance_ft` | `src/geometry/model/`, `treatments.py` |
-| the centreline stripes both views draw | `centerline_paint_ft` | `src/render/crosswalks.py` |
-| a band between two lateral offsets | `offset_band_polygon` | `src/geometry/model/` |
-| a line N ft to one side | `inset_line_ft` — **never** `offset_curve` for stationed work | `src/geometry/model/` |
-| a profile rate-limited to a taper | `taper_limited` | `src/geometry/model/` |
-| which legs of a junction are on a route | `legs_on_road(model, road)` — **never** a per-site leg tuple | `src/geometry/treatments/` |
-| what is proposed along a named street | `route_decision_for(road)` — **never** `import BROAD_ST_TWO_WAY_BIKEWAY` | `src/geometry/treatments/` |
-
-**Search before writing.** `grep -rn "SOME_CONSTANT" src/` costs nothing. Writing the second copy
-costs a session: the far-kerb rule was written inline in one site's `scenarios.py`, the sibling
-site never got it, and two legs shipped with 11.68 ft and 13.21 ft lanes.
-
----
-
-## 2. The two datums, which are 25 ft apart
-
-This has caused three separate bugs. Learn it once.
-
-- **WHETHER there is room** is a measurement of the **traced kerb** —
-  `narrowest_half_width_ft(leg, side)`.
-- **WHERE the paint goes** is an offset from the **nominal half-width** (`leg.curb_to_curb_ft/2`),
-  because that is the datum `MarkedParking` and `LaneNarrowing` subtract their own widths from.
-
-On `broad_st_east` those differ by 25 ft (config says 68.0; the traced kerbs are 43.26 apart).
-Size paint off the traced number and you draw a 20 ft hatch. `apply_osm_parking` spells this out
-in a comment; read it rather than rediscovering it.
-
-**The third instance is a corridor's two-way section**, and it is the one that shows what the rule
-costs when it is broken quietly: `_build_run` measured the section from the kerb and
-`far_kerb_lane_edge` measured the divider from the alignment, 7.3 ft apart, and no check could see it
-because each side was internally consistent. See §0a. The resolution there was not to pick a datum
-but to make the section rigid — one placement line, every offset off it — which is what a
-cross-section is.
-
----
-
-## 3. Adding a marking touches six places
-
-README.md has the six-place table. Two additions to it:
-
-1. **The channel decides the colour.** `blender_scene.py` draws every edge-line channel in the
-   white `marking_mat` and only the centreline channel in yellow. A yellow marking routed through
-   an edge-line channel renders white in 3D and yellow in 2D, with nothing to catch it.
-2. **`POLYLINE_CHANNELS` in `tests/test_geometry_regression.py` is derived from
-   `markings.CHANNELS`** — maintaining consistency in the determinism test. It was a hardcoded list
-   and it drifted immediately: a marking with 30 segments, drawn in both views, was never tested.
-
-Change detection is handled by `scripts/diff_exports.py` and `scripts/verify.py`, which compare
-before/after exports precisely. After adding a marking, verify it with `scripts/measure_drawn.py`
-to confirm position and extent.
-
----
-
-## 4. Invariants: re-express, never relax
-
-When a check fires on a design you believe is correct, the check is usually right about the
-property and wrong about the frame. Fix the frame.
-
-`PaintClearOfTheTravelLane` measured the lane from the alignment, which only holds while the two
-travel lanes straddle it. The two-way lane breaks that. The fix was to read the shifted lane edge
-off the design — **not** to exempt those legs, which would have dropped the check on the design
-most likely to get the arithmetic wrong.
-
-Also: **verify a new check fails first.** `git stash` the fix, watch it report, restore. A check
-that has never fired pins nothing. Both new checks in this session were verified that way (18
-violations before, 0 after).
-
-And note which checks are **fatal** — most are, so they block the 3D export. A violation printed
-by `phase3_treatments.py` still saved a picture; that does not mean it passed.
-
----
-
-## 5. Where facts live, and what that decides
-
-| it is… | it lives… |
-|---|---|
-| a fact about the street as it exists | on `IntersectionModel`, resolved once at load |
-| a decision a proposal makes | a `Treatment` subclass, geometry as a *method* |
-| a way of drawing something decided | a `PaintKind`, or a prop |
-| a figure | an entry in **standards.toml**, with its source and status |
-
-**The last row is not optional and I skipped it.** Six standards constants went into code comments
-from memory in one session. If you need a number, add it to standards.toml and read it with
-`src.standards.si`; mark it `as_cited` unless you actually opened the document. `src/standards.py`
-refuses to load a cited figure with no source.
-
----
-
-## 6. Data comes from somebody else, so validate at the boundary
-
-`src/sources/schemas.py` holds a pandera schema per external layer, validated in
-`load_road_network`, `load_parcels` and `assessor.py`. Two things to know:
-
-- **A wrong CRS returns ZERO ROWS, not an error** — indistinguishable from "nothing mapped here".
-  It cost two round trips in one session. Compare CRS by **horizontal identity**, never by string:
-  `MercerCountyParcels.shp` is a compound CRS whose WKT matches no EPSG code.
-- **`strict=False` is deliberate** for the column *set* (third-party files add columns), but the
-  columns we read are a contract — not-null where the real file is never null, with a domain.
-  `nullable=True` everywhere is not a lax contract, it is the absence of one.
-
----
-
-## 7. OSM is partial, and partial in a specific way
-
-- **A restriction over PART of a kerb does not close it.** OSM splits the way. `broad_st_east` is
-  `no_parking` for its first 79.6 ft and explicitly `restriction=none` for the 90.4 ft beyond;
-  reading any prohibiting span as closing the kerb hatched 90 ft of legal parking. Use
-  `kerb_may_hold_parking`.
-- **Driveway coverage is ~29%** of parcels fronting Broad St. State the coverage fraction beside
-  any count. Parcel frontage is *not* a proxy — plenty of lots have no driveway.
-- **A branch's side must be probed ~25 ft along it.** A driveway joins at a shared node *on* the
-  centreline, so the northing there carries no side information and comes out as float noise.
-- **The cache and the test fixture are separate.** `--refresh-osm` re-pulls
-  `output/.cache/borough_*.json`; `tests/fixtures/osm_cache/` does not update itself.
-
----
-
-## 8. The verification loop, in cost order
-
-1. Write the test; **confirm it fails** against the pre-change code.
-2. `scripts/export_all_scenarios.py /tmp/before` → change → `/tmp/after` → `scripts/diff_exports.py`.
-3. `./scripts/test.sh` (includes lint, import contracts, and invariant checks).
-4. `scripts/build_all.py --render-3d`, **and open the PNGs**.
-5. Measure the drawn geometry numerically (see §0).
+- **A restriction over part of a kerb does not close it.** OSM splits the way; read each piece.
+- **A driveway's side is read along its first segment**, not at the node it shares with the street,
+  where the offset is float noise.
+- **The cache is the pull.** `output/.cache/borough_*.json` is re-pulled only by `render_osm.py` or
+  `write_osc.py` without `--cached`; a mapping fix reaches the drawing on the next pull.

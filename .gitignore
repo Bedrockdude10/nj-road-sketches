@@ -179,22 +179,12 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
-# The whole data/ directory: large third-party inputs (NJDOT's statewide roadway
-# GeoJSON, Mercer County parcels, SLD PDFs), the indexed copies built from them by
-# scripts/convert_road_network.py, and any working screenshots. README's "Data" section
-# already describes data/ as gitignored - it was previously a per-FILE list, which is
-# fragile and had already let 22.5 MB of ad-hoc screenshots into the repo. A directory
-# rule can't miss a new file the way a filename list does.
+# Licensed third-party downloads the old pipeline read (NJDOT roadway network, Mercer County
+# parcels); nothing reads them now.
 data/
-# ...except the committed clip of it. `data/` above matches a directory of that name at ANY
-# depth, so it swallowed tests/fixtures/data too - and that clip is the only reason CI can build
-# a real junction at all (scripts/make_data_fixture.py, ~5 MB, kilobytes per site plus parcel
-# polygons). Re-including the directory is enough; nothing else here matches its contents.
-!tests/fixtures/data/
 
-# Everything the scripts write: renders, .blend scenes, world and geometry JSON, cameras, and
-# the downloaded caches (.textures, Poly Haven CC0; .cache, Overpass/OSM pulls) and verify.py's
-# before/after trees. All regenerable, and all of it churns on every run.
+# Everything the scripts write: renders, .blend scenes, world JSON, cameras, the downloaded
+# caches (.textures, Poly Haven; .cache, the OSM pulls) and verify.py's trees. All regenerable.
 output/
 
 .DS_Store

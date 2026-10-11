@@ -423,7 +423,7 @@ unit = "ft"
 status = "verified"
 source = "njdot_rdm_6"
 at = "Danny, 2026-10-09: no proposal leaves a corner a single-unit truck or bus cannot turn"
-note = "6.4.3: an effective radius of 30 ft lets an occasional truck or bus turn without much encroachment; the effective radius is measured from the edge of the travel lane where a parking lane, bike lane or shoulder lies outside it, and 6.4.3 warns that a kerb protruding into the turning path endangers pedestrians standing at it. A curb extension's shorter no-standing zone is kept only where it leaves the corner at least this (src/turning.py)"
+note = "6.4.3: an effective radius of 30 ft lets an occasional truck or bus turn without much encroachment; the effective radius is measured from the edge of the travel lane where a parking lane, bike lane or shoulder lies outside it, and 6.4.3 warns that a kerb protruding into the turning path endangers pedestrians standing at it. A proposal reports each corner it leaves under this, and rounds each curb extension's corner to this arc on the travel lanes' edges (src/turning.py)"
 
 [figure.stall.width]
 value = 9.0
@@ -482,14 +482,6 @@ status = "as_cited"
 source = "rs_39_4_138"
 at = "(e)"
 note = "no standing within this of a crosswalk at an intersection, or of the intersection's kerb line"
-
-[figure.no_standing.with_extension]
-value = 10.0
-unit = "ft"
-status = "as_cited"
-source = "rs_39_4_138"
-at = "(e)"
-note = "...and within this where a curb extension is built (`crossing:kerb_extension`)"
 
 # --- speed and tapers ---------------------------------------------------------------------------
 
@@ -593,6 +585,13 @@ unit = "m"
 status = "numerical"
 note = "the gap between stacked marking layers, against z-fighting"
 
+[figure.render.camera_radius]
+value = 60
+unit = "m"
+status = "local"
+at = "Danny, 2026-10-09"
+note = "how much of the world about a camera's junction (areas.yaml) a render frames"
+
 # --- steps and tolerances -----------------------------------------------------------------------
 
 [figure.numerical.station_step]
@@ -636,6 +635,12 @@ value = 0.5
 unit = "m"
 status = "numerical"
 note = "how far past a kerb a junction face's closing line is cast, so it meets the kerb"
+
+[figure.numerical.osm_grid]
+value = 0.02
+unit = "m"
+status = "numerical"
+note = "the grid a painted area is snapped to before it is written: OSM stores a node to 1e-7 degree, about 1 cm, so a ring valid in floating point can cross itself once rounded; twice that keeps it whole"
 
 [figure.numerical.node_match]
 value = 0.001
@@ -742,7 +747,7 @@ figures = ["default_width.shoulder"]
 
 [tag."shoulder:<side>:markings"]
 convention = "project"
-means = "hatched: the shoulder hatched from its inner line out to its street's edge as built; OSM has no tag for hatching along a way"
+means = "hatched: the shoulder hatched from its inner line out to its street's edge as built; OSM has no tag for hatching along a way. no: unmarked, no edge line (a corner's no-standing zone a curb extension marks); absent: not hatched, its lane edge dotted (a driveway opening)"
 figures = ["hatch.angle", "hatch.spacing", "hatch.stroke_width", "hatch.stroke_width_wide"]
 
 [tag."area:highway"]
@@ -771,8 +776,7 @@ figures = ["default_width.crossing", "crosswalk.line_width", "crosswalk.bar_widt
 [tag."crossing:kerb_extension"]
 wiki = "Key:crossing:kerb_extension"
 convention = "wiki"
-means = "a curb extension on that kerb: the no-standing zone shortens, unless cars standing that close would narrow a corner's turn; a proposal paints it across the kerb's spare to the travel lane, as long as the crosswalk is wide, and the crosswalk stops at it"
-figures = ["no_standing.with_extension"]
+means = "a curb extension on that kerb; a proposal paints it, one per corner, the drawn street outside the drawn travel lanes, its corner rounded to the effective radius on their edges, and off every bikeway and its buffer, out to the no-standing zone's end - the zone's hatching, painted as the extension - over the crosswalk, which stays as mapped; the no-standing zone stays the full no_standing.from_crosswalk"
 
 [tag.kerb]
 wiki = "Key:kerb"

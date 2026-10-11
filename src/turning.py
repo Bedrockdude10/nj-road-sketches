@@ -40,21 +40,27 @@ class Edge:
         return self.side * np.array([-self.out[1], self.out[0]])
 
 
-def arc(approach: Edge, exit: Edge, radius: float) -> LineString | None:
-    """The arc of `radius` tangent to both edges, from the approach's to the exit's; None where
-    the edges are parallel or the arc would touch either behind the junction."""
+def centre(approach: Edge, exit: Edge, radius: float) -> np.ndarray | None:
+    """The point `radius` in from both edges - the centre of the arc of that radius tangent to
+    both, and at 0 where the edges meet; None where they are parallel."""
     normals = np.stack([approach.inward, exit.inward])
     if abs(np.linalg.det(normals)) < 1e-9:
         return None
-    centre = np.linalg.solve(normals, [radius + approach.inward @ approach.point,
-                                       radius + exit.inward @ exit.point])
-    a, b = centre - radius * approach.inward, centre - radius * exit.inward
+    return np.linalg.solve(normals, [radius + approach.inward @ approach.point, radius + exit.inward @ exit.point])
+
+
+def arc(approach: Edge, exit: Edge, radius: float) -> LineString | None:
+    """The arc of `radius` tangent to both edges, from the approach's to the exit's; None where
+    the edges are parallel or the arc would touch either behind the junction."""
+    if (centre_xy := centre(approach, exit, radius)) is None:
+        return None
+    a, b = centre_xy - radius * approach.inward, centre_xy - radius * exit.inward
     if (a - approach.point) @ approach.out < 0 or (b - exit.point) @ exit.out < 0:
         return None
-    start, end = (math.atan2(*(p - centre)[::-1]) for p in (a, b))
+    start, end = (math.atan2(*(p - centre_xy)[::-1]) for p in (a, b))
     sweep = (start - end) % (2 * math.pi)                        # a right turn: clockwise, a to b
     angles = start - np.linspace(0.0, sweep, max(2, math.ceil(sweep * radius / STEP_M) + 1))
-    return LineString(centre + radius * np.stack([np.cos(angles), np.sin(angles)], axis=1))
+    return LineString(centre_xy + radius * np.stack([np.cos(angles), np.sin(angles)], axis=1))
 
 
 def effective_radius(approach: Edge, exit: Edge, drivable: BaseGeometry, blocked: BaseGeometry) -> float | None:

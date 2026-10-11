@@ -13,8 +13,8 @@ class OfflineCacheMiss(RuntimeError):
     """ROAD_SKETCHES_OFFLINE is set and a fetch wasn't satisfied from the fixture cache."""
 
 
-NOMINATIM_USER_AGENT = "hopewell-road-sketches-research/0.1 (contact: rollo.l@northeastern.edu)"
-OVERPASS_USER_AGENT = NOMINATIM_USER_AGENT
+# This project, to every service it asks (the OSM API, Overpass, Poly Haven).
+USER_AGENT = "hopewell-road-sketches-research/0.1 (contact: rollo.l@northeastern.edu)"
 
 # The public Overpass instances are shared/rate-limited infrastructure and
 # occasionally 504 under load - try a couple of mirrors with retries before
@@ -63,7 +63,7 @@ def query_overpass(query: str, attempts_per_mirror: int = 4, timeout: int = 30) 
         for attempt in range(attempts_per_mirror):
             try:
                 resp = requests.post(
-                    mirror, data={"data": query}, headers={"User-Agent": OVERPASS_USER_AGENT},
+                    mirror, data={"data": query}, headers={"User-Agent": USER_AGENT},
                     # (connect, read). A mirror that is blackholing packets never completes
                     # the TCP handshake, and a single 30 s number spent the whole budget
                     # there: one editing session sat 10+ minutes in SYN_SENT against
